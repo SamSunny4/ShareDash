@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target/
+
+# Runtime/local app data
+/sharedash_data/
+
+# Temporary files
+/tmp/
+*.log
+
+# Android/Gradle artifacts
+/android/.gradle/
+/android/local.properties
+/android/**/build/
+/android/**/.cxx/
+/android/captures/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
