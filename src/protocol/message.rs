@@ -2,6 +2,10 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+fn default_protocol_version() -> u32 { 1 }
+fn default_max_streams() -> u32 { 4 }
+fn default_chunk_size() -> u32 { 1024 * 1024 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransportKind {
     Usb,
@@ -18,6 +22,9 @@ pub struct HelloMessage {
     pub friendly_name: String,
     pub os_name: String,
     pub app_version: String,
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
+    #[serde(default)]
     pub listen_endpoints: Vec<String>,
 }
 
@@ -31,12 +38,22 @@ pub struct HelloRespMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapabilitiesMessage {
+    #[serde(default, alias = "transports")]
     pub supported_transports: Vec<TransportKind>,
+    #[serde(default = "default_max_streams")]
     pub max_concurrent_streams: u32,
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
     pub wifi_generation: Option<String>,
+    pub usb_generation: Option<String>,
+    pub link_speed_mbps: Option<f64>,
+    #[serde(default)]
     pub frequency_bands: Vec<String>,
+    #[serde(default = "default_chunk_size")]
     pub max_chunk_size: u32,
+    #[serde(default)]
     pub available_storage_bytes: u64,
+    #[serde(default)]
     pub is_charging: bool,
     pub battery_pct: Option<u8>,
 }

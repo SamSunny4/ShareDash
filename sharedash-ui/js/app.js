@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const pairingUI = new PairingManagerUI();
 
   let currentTransferId = null;
-  let activeTargetDevice = { id: 'phone-galaxy-s24', name: 'Galaxy S24 Ultra' };
+  let activeTargetDevice = null;
   let telemetryActive = false; // True once WebSocket telemetry starts, suppresses XHR progress
 
   // DOM Views
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // DOM Elements - Header
   const myDeviceName = document.getElementById('my-device-name');
-  const btnOpenDownloads = document.getElementById('btn-open-downloads');
+  const btnOpenDownloads = document.getElementById('btn-open-received-folder') || document.getElementById('btn-open-downloads');
 
   // DOM Elements - Bridges
   const bridgeRecommendationText = document.getElementById('bridge-recommendation-text');
@@ -65,11 +65,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const lanBar = document.getElementById('lan-bar');
   const lanStats = document.getElementById('lan-stats');
 
-  const quicSpeed = document.getElementById('quic-speed');
-  const quicRtt = document.getElementById('quic-rtt');
-  const quicBar = document.getElementById('quic-bar');
-  const quicStats = document.getElementById('quic-stats');
-
   // Footer History
   const btnToggleHistory = document.getElementById('btn-toggle-history');
   const footerHistoryDrawer = document.getElementById('footer-history-drawer');
@@ -101,6 +96,13 @@ document.addEventListener('DOMContentLoaded', () => {
           usbBridgeStatusTag.textContent = '3.2 Gbps Connected';
           usbBridgeStatusTag.className = 'bcard-tag active';
           usbBridgeDesc.textContent = data.usb.device_model || 'Android USB Fast-Path';
+
+          // Instantly auto-connect and move to connected screen upon USB detection!
+          if (!isSecurelyConnected) {
+            const usbDevName = data.usb.device_model || 'Android Phone (USB 3.2 Cable)';
+            activeTargetDevice = { id: 'usb-fastpath', name: usbDevName };
+            enterConnectedScreen(usbDevName);
+          }
         } else {
           bridgeCardUsb.classList.remove('active');
           usbBridgeStatusTag.textContent = 'Plug-in Ready';
@@ -117,6 +119,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  let discoveredPeersMap = {};
+  let isSecurelyConnected = false;
+  let currentPairingPin = "000000";
+
   // 3. Fetch Discovered Nearby Devices (Radar View)
   async function loadDiscoveredPeers() {
     try {
@@ -131,10 +137,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderRadarDevices(peers) {
+    const promptTitle = document.querySelector('#stage-discovery-prompt h2');
+    const promptDesc = document.querySelector('#stage-discovery-prompt p');
+
     if (!peers || peers.length === 0) {
       orbitingDevicesContainer.innerHTML = '';
+      if (promptTitle) promptTitle.textContent = 'Looking for nearby devices...';
+      if (promptDesc) promptDesc.innerHTML = 'Make sure ShareDash is open on your Android phone or PC. <strong>Click a device above to establish a secure connection.</strong>';
       return;
     }
+
+    if (promptTitle) promptTitle.textContent = `Found ${peers.length} Nearby Device${peers.length > 1 ? 's' : ''}`;
+    if (promptDesc) promptDesc.innerHTML = 'Click your device on the radar to establish an ultra-fast encrypted transfer.';
 
     const positions = ['node-pos-1', 'node-pos-2', 'node-pos-3', 'node-pos-4'];
 
@@ -143,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     orbitingDevicesContainer.innerHTML = peers.map((p, idx) => {
       const posClass = positions[idx % positions.length];
-      const isPhone = p.os_name.toLowerCase().includes('android') || p.friendly_name.toLowerCase().includes('phone') || p.friendly_name.toLowerCase().includes('galaxy') || p.friendly_name.toLowerCase().includes('pixel');
+      const isPhone = p.os_name.toLowerCase().includes('android') || p.friendly_name.toLowerCase().includes('phone') || p.friendly_name.toLowerCase().includes('galaxy') || p.friendly_name.toLowerCase().includes('pixel') || p.friendly_name.toLowerCase().includes('a56') || p.friendly_name.toLowerCase().includes('s24');
       const iconSvg = isPhone ? `
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
@@ -185,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Secure Connection Stages
+  // Secure Connection Modals & Elements
   const stageDiscoveryPrompt = document.getElementById('stage-discovery-prompt');
   const stagePairingHandshake = document.getElementById('stage-pairing-handshake');
   const stageSecureConnected = document.getElementById('stage-secure-connected');
@@ -195,11 +209,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCancelHandshake = document.getElementById('btn-cancel-handshake');
   const btnDisconnectDevice = document.getElementById('btn-disconnect-device');
 
-  let isSecurelyConnected = false;
-  let currentPairingPin = "000000";
-  let discoveredPeersMap = {};
+  // Modal Overlays
+  const modalIncomingPair = document.getElementById('modal-incoming-pair');
+  const incomingPairDeviceName = document.getElementById('incoming-pair-device-name');
+  const btnAcceptIncomingPair = document.getElementById('btn-accept-incoming-pair');
+  const btnRejectIncomingPair = document.getElementById('btn-reject-incoming-pair');
 
-  function selectDeviceForShare(deviceId, deviceName, customPin) {
+  const modalConnecting = document.getElementById('modal-connecting');
+  const connectingDeviceName = document.getElementById('connecting-device-name');
+  const connectingSubtitleText = document.getElementById('connecting-subtitle-text');
+  const btnCancelConnect = document.getElementById('btn-cancel-connect');
+
+  let currentPendingIncoming = null;
+
+  // 1. PC Initiates Outgoing Connection to Device on Radar
+  function selectDeviceForShare(deviceId, deviceName) {
     const peer = discoveredPeersMap[deviceId];
     if (peer && peer.is_compatible === false) {
       alert(`⚠️ Incompatible App Version\n\n${deviceName} is running v${peer.app_version || 'unknown'}, which is incompatible with this ShareDash version (v0.1.0).\n\nPlease update both apps to the latest version to connect.`);
@@ -207,158 +231,214 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     activeTargetDevice = { id: deviceId, name: deviceName };
-
-    // Use passed PIN or generate 6-digit PIN
-    const pin = customPin || Math.floor(100000 + Math.random() * 900000).toString();
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
     currentPairingPin = pin;
 
+    // Fill PIN in outgoing connecting modal
     for (let i = 0; i < 6; i++) {
-      const el = document.getElementById(`pin-d${i + 1}`);
+      const el = document.getElementById(`conn-p${i + 1}`);
       if (el) el.textContent = pin[i];
     }
 
-    handshakeTargetName.textContent = `Pairing with ${deviceName}...`;
+    if (connectingDeviceName) connectingDeviceName.textContent = `Connecting to ${deviceName}...`;
+    if (connectingSubtitleText) connectingSubtitleText.textContent = `Verify matching PIN (${pin.substring(0,3)} ${pin.substring(3)}) on ${deviceName}`;
 
-    stageDiscoveryPrompt.classList.add('hidden');
-    stageSecureConnected.classList.add('hidden');
-    stagePairingHandshake.classList.remove('hidden');
+    // Show Outgoing Connecting Modal with pulsing rings
+    if (modalConnecting) modalConnecting.classList.remove('hidden');
 
-    // Notify the target device over network/USB if we initiated
-    if (!customPin) {
-      const peer = discoveredPeersMap[deviceId];
-      const targetIp = peer ? (peer.remote_addr ? peer.remote_addr.split(':')[0] : '127.0.0.1') : '127.0.0.1';
-      const targetPort = peer ? peer.server_port : 54321;
+    const hsStepSyn = document.getElementById('hs-step-syn');
+    const hsStepSynack = document.getElementById('hs-step-synack');
+    const hsStepAck = document.getElementById('hs-step-ack');
+    if (hsStepSyn) hsStepSyn.className = 'hs-step active';
+    if (hsStepSynack) hsStepSynack.className = 'hs-step';
+    if (hsStepAck) hsStepAck.className = 'hs-step';
 
-      fetch('/api/v1/pair/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target_ip: targetIp,
-          target_port: targetPort,
-          pin_code: pin,
-          device_name: deviceName,
-        }),
-      }).catch(e => console.warn('Pair connect error:', e));
-    }
+    const targetIp = peer ? (peer.remote_addr ? peer.remote_addr.split(':')[0] : '127.0.0.1') : '127.0.0.1';
+    const targetPort = peer ? peer.server_port : 54321;
+
+    fetch('/api/v1/pair/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_ip: targetIp,
+        target_port: targetPort,
+        pin_code: pin,
+        device_name: deviceName,
+      }),
+    }).then(() => {
+      // Advance stepper: SYN sent → waiting for SYN-ACK from phone
+      if (hsStepSyn) hsStepSyn.className = 'hs-step active done';
+      if (hsStepSynack) hsStepSynack.className = 'hs-step active';
+    }).catch(e => console.warn('Pair connect error:', e));
   }
 
-  // Open Folder Buttons
-  const btnOpenReceivedFolder = document.getElementById('btn-open-received-folder');
-  const btnOpenFileLocation = document.getElementById('btn-open-file-location');
-
-  function triggerOpenReceivedFolder() {
-    fetch('/api/v1/storage/open_folder', { method: 'POST' }).catch(e => console.warn(e));
+  // Cancel Outgoing Connection
+  if (btnCancelConnect) {
+    btnCancelConnect.addEventListener('click', async () => {
+      if (modalConnecting) modalConnecting.classList.add('hidden');
+      activeTargetDevice = null;
+      try {
+        await fetch('/api/v1/pair/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'REJECT' }),
+        });
+      } catch (_) {}
+    });
   }
 
-  if (btnOpenReceivedFolder) btnOpenReceivedFolder.addEventListener('click', triggerOpenReceivedFolder);
-  if (btnOpenFileLocation) btnOpenFileLocation.addEventListener('click', triggerOpenReceivedFolder);
-
-  function updatePostConnectionTunnels(bridges) {
-    const chipsContainer = document.getElementById('active-tunnels-chips');
-    const boostHint = document.getElementById('tunnel-boost-hint');
-    if (!chipsContainer || !boostHint) return;
-
-    let chips = [];
-    if (bridges && bridges.usb && bridges.usb.connected) {
-      chips.push('<span class="tunnel-chip active">⚡ USB 3.2 Fast-Path (3.2 Gbps)</span>');
-    }
-    if (bridges && bridges.lan && bridges.lan.connected) {
-      chips.push(`<span class="tunnel-chip active">📶 Wi-Fi LAN (${bridges.lan.speed_mbps || 650} Mbps)</span>`);
-    }
-
-    chipsContainer.innerHTML = chips.length > 0 ? chips.join('') : '<span class="tunnel-chip active">📶 Wi-Fi LAN Active</span>';
-
-    if (!bridges || !bridges.usb || !bridges.usb.connected) {
-      boostHint.innerHTML = '💡 <strong>Boost Speed:</strong> Plug in a USB-C cable to add a 3.2 Gbps wire-speed tunnel!';
-    } else {
-      boostHint.innerHTML = '🚀 <strong>Turbo Multipath Active:</strong> Combining USB 3.2 + Wi-Fi Direct for maximum throughput.';
-    }
-  }
-
-  btnConfirmHandshake.addEventListener('click', async () => {
+  // Transition Helpers for Dedicated Connected Screen
+  function enterConnectedScreen(deviceName) {
     isSecurelyConnected = true;
-    connectedDeviceName.textContent = activeTargetDevice.name;
-    dropzoneTargetText.textContent = `Ready to share with ${activeTargetDevice.name}`;
+    const radarContainer = document.getElementById('radar-container');
+    if (radarContainer) radarContainer.classList.add('hidden');
+    if (stageDiscoveryPrompt) stageDiscoveryPrompt.classList.add('hidden');
+    if (stagePairingHandshake) stagePairingHandshake.classList.add('hidden');
+    if (stageSecureConnected) stageSecureConnected.classList.remove('hidden');
+    if (connectedDeviceName) connectedDeviceName.textContent = deviceName;
+    if (dropzoneTargetText) dropzoneTargetText.textContent = `Ready to share with ${deviceName}`;
+    if (viewDiscovery) viewDiscovery.classList.add('connected-mode');
 
-    try {
-      await fetch('/api/v1/pair/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ACCEPT' }),
-      });
-      await fetch('/api/v1/pair/confirm', { method: 'POST' });
-    } catch (_) {}
+    // Fetch and display the actual transport mode used
+    fetch('/api/v1/transports/detect')
+      .then(r => r.json())
+      .then(data => {
+        if (!data.best_transport) return;
+        const el = document.getElementById('connected-transport-label');
+        if (el) {
+          // Choose an icon based on transport type
+          let icon = '🏠';
+          if (data.best_transport.toLowerCase().includes('usb')) icon = '🔌';
+          else if (data.best_transport.toLowerCase().includes('direct') || data.best_transport.toLowerCase().includes('hotspot')) icon = '📶';
+          else if (data.best_transport.toLowerCase().includes('quic') || data.best_transport.toLowerCase().includes('internet')) icon = '🌐';
+          el.textContent = `${icon} ${data.best_transport}`;
+          el.title = data.recommendation;
+        }
+      })
+      .catch(() => {});
+  }
 
-    stagePairingHandshake.classList.add('hidden');
-    stageDiscoveryPrompt.classList.add('hidden');
-    stageSecureConnected.classList.remove('hidden');
-  });
-
-  btnCancelHandshake.addEventListener('click', async () => {
+  function exitConnectedScreen() {
     isSecurelyConnected = false;
     activeTargetDevice = null;
+    const radarContainer = document.getElementById('radar-container');
+    if (radarContainer) radarContainer.classList.remove('hidden');
+    if (stageSecureConnected) stageSecureConnected.classList.add('hidden');
+    if (stagePairingHandshake) stagePairingHandshake.classList.add('hidden');
+    if (stageDiscoveryPrompt) stageDiscoveryPrompt.classList.remove('hidden');
+    if (viewDiscovery) viewDiscovery.classList.remove('connected-mode');
+  }
 
-    try {
-      await fetch('/api/v1/pair/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'REJECT' }),
-      });
-    } catch (_) {}
+  // 2. PC Receives Incoming Connection Consent Modal
+  if (btnAcceptIncomingPair) {
+    btnAcceptIncomingPair.addEventListener('click', async () => {
+      if (modalIncomingPair) modalIncomingPair.classList.add('hidden');
 
-    stagePairingHandshake.classList.add('hidden');
-    stageSecureConnected.classList.add('hidden');
-    stageDiscoveryPrompt.classList.remove('hidden');
-  });
+      const deviceName = currentPendingIncoming ? currentPendingIncoming.initiator_name : 'Nearby Phone';
+      activeTargetDevice = {
+        id: currentPendingIncoming ? currentPendingIncoming.initiator_device_id : 'paired-peer',
+        name: deviceName
+      };
 
-  btnDisconnectDevice.addEventListener('click', async () => {
-    isSecurelyConnected = false;
-    activeTargetDevice = null;
+      try {
+        await fetch('/api/v1/pair/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'ACCEPT' }),
+        });
+        await fetch('/api/v1/pair/confirm', { method: 'POST' });
+      } catch (_) {}
 
-    try {
-      await fetch('/api/v1/pair/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'REJECT' }),
-      });
-    } catch (_) {}
+      enterConnectedScreen(deviceName);
+    });
+  }
 
-    stageSecureConnected.classList.add('hidden');
-    stagePairingHandshake.classList.add('hidden');
-    stageDiscoveryPrompt.classList.remove('hidden');
-  });
+  if (btnRejectIncomingPair) {
+    btnRejectIncomingPair.addEventListener('click', async () => {
+      if (modalIncomingPair) modalIncomingPair.classList.add('hidden');
+      currentPendingIncoming = null;
+      try {
+        await fetch('/api/v1/pair/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'REJECT' }),
+        });
+      } catch (_) {}
+    });
+  }
 
-  // Background check for incoming pair requests and accepted sessions
+  // Disconnect Button
+  if (btnDisconnectDevice) {
+    btnDisconnectDevice.addEventListener('click', async () => {
+      exitConnectedScreen();
+      try {
+        await fetch('/api/v1/pair/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'REJECT' }),
+        });
+      } catch (_) {}
+    });
+  }
+
+  // Polling for Pairing State (Incoming requests & Acceptance from phone)
   async function pollPairingState() {
     try {
       const resp = await fetch('/api/v1/pair/status');
-      if (resp.ok) {
-        const data = await resp.json();
+      if (!resp.ok) return;
+      const data = await resp.json();
 
-        // 1. Check if incoming connection request
-        if (data.pending_request && data.pending_request.status === 'PENDING') {
-          const req = data.pending_request;
-          if (!isSecurelyConnected && (!activeTargetDevice || activeTargetDevice.id !== req.initiator_device_id)) {
-            selectDeviceForShare(req.initiator_device_id, req.initiator_name, req.pin_code);
-          }
+      // Case A: Incoming Connection Request from Phone -> Show Consent Dialog
+      if (data.pending_request && data.pending_request.status === 'PENDING') {
+        const req = data.pending_request;
+        currentPendingIncoming = req;
+
+        if (incomingPairDeviceName) {
+          incomingPairDeviceName.textContent = `${req.initiator_name} (${req.initiator_ip})`;
         }
 
-        // 2. Check if accepted
-        if (data.is_paired && data.paired_device_name && !isSecurelyConnected) {
-          isSecurelyConnected = true;
-          activeTargetDevice = { id: 'paired-peer', name: data.paired_device_name };
-          connectedDeviceName.textContent = data.paired_device_name;
-          dropzoneTargetText.textContent = `Ready to share with ${data.paired_device_name}`;
-
-          stagePairingHandshake.classList.add('hidden');
-          stageDiscoveryPrompt.classList.add('hidden');
-          stageSecureConnected.classList.remove('hidden');
+        const pinStr = (req.pin_code || '000000').padStart(6, '0');
+        for (let i = 0; i < 6; i++) {
+          const el = document.getElementById(`inc-p${i + 1}`);
+          if (el) el.textContent = pinStr[i];
         }
+
+        // Hide any outgoing connecting modal that might be open
+        if (modalConnecting && !modalConnecting.classList.contains('hidden')) {
+          modalConnecting.classList.add('hidden');
+        }
+
+        if (modalIncomingPair && modalIncomingPair.classList.contains('hidden')) {
+          modalIncomingPair.classList.remove('hidden');
+        }
+      } else if (!data.pending_request || data.pending_request.status !== 'PENDING') {
+        if (modalIncomingPair && !modalIncomingPair.classList.contains('hidden')) {
+          modalIncomingPair.classList.add('hidden');
+        }
+      }
+
+      // Case B: Remote Phone accepted our outgoing request -> Complete handshake
+      if (data.is_paired && data.paired_device_name && !isSecurelyConnected) {
+        activeTargetDevice = { id: 'paired-peer', name: data.paired_device_name };
+
+        // Complete stepper animation: SYN-ACK received -> ACK
+        const hsStepSynack = document.getElementById('hs-step-synack');
+        const hsStepAck = document.getElementById('hs-step-ack');
+        if (hsStepSynack) hsStepSynack.className = 'hs-step active done';
+        if (hsStepAck) hsStepAck.className = 'hs-step active done';
+
+        setTimeout(() => {
+          if (modalConnecting) modalConnecting.classList.add('hidden');
+          enterConnectedScreen(data.paired_device_name);
+        }, 400);
+      } else if (!data.is_paired && isSecurelyConnected && !data.pending_request) {
+        // Peer disconnected remotely -> return to discovery screen
+        exitConnectedScreen();
       }
     } catch (_) {}
   }
 
-  setInterval(pollPairingState, 1000);
+  setInterval(pollPairingState, 500);
 
   // 4. File Picker & Transfer Initiation (Only After Secure Connection)
   btnTriggerFilePicker.addEventListener('click', () => {
@@ -542,11 +622,6 @@ document.addEventListener('DOMContentLoaded', () => {
         lanRtt.textContent = rtt;
         lanBar.style.width = `${barPct}%`;
         lanStats.textContent = `${t.completed_chunks} chunks completed`;
-      } else if (name.includes('quic') || name.includes('inet')) {
-        quicSpeed.textContent = speed;
-        quicRtt.textContent = rtt;
-        quicBar.style.width = `${barPct}%`;
-        quicStats.textContent = `${t.completed_chunks} chunks completed`;
       }
     });
 
@@ -566,6 +641,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnOpenDownloads) {
     btnOpenDownloads.addEventListener('click', triggerOpenReceivedFolder);
+  }
+
+  const btnStartPcHotspot = document.getElementById('btn-start-pc-hotspot');
+  const btnOpenPcHotspot = document.getElementById('btn-open-pc-hotspot');
+
+  async function triggerOpenPcHotspot() {
+    try {
+      await fetch('/api/v1/hotspot/open-settings', { method: 'POST' });
+    } catch (_) {}
+  }
+
+  if (btnStartPcHotspot) {
+    btnStartPcHotspot.addEventListener('click', triggerOpenPcHotspot);
+  }
+  if (btnOpenPcHotspot) {
+    btnOpenPcHotspot.addEventListener('click', triggerOpenPcHotspot);
   }
 
   btnCancelTransfer.addEventListener('click', async () => {

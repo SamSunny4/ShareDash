@@ -6,7 +6,6 @@ enum class TransportKind {
     USB,
     WIFI_DIRECT,
     LAN,
-    INTERNET_QUIC,
     BLUETOOTH
 }
 

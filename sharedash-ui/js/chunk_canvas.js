@@ -19,7 +19,6 @@ class ChunkVisualizer {
       usb: '#14b8a6',
       wifi: '#10b981',
       lan: '#0ea5e9',
-      quic: '#a855f7',
       corrupt: '#ef4444',
     };
 
@@ -55,7 +54,6 @@ class ChunkVisualizer {
       if (tid.includes('usb')) return this.colors.usb;
       if (tid.includes('wifi') || tid.includes('direct')) return this.colors.wifi;
       if (tid.includes('lan')) return this.colors.lan;
-      if (tid.includes('quic') || tid.includes('inet')) return this.colors.quic;
       return this.colors.wifi; // default completed
     }
 

@@ -58,9 +58,17 @@
         <div class="radio-status-pill" id="badge-bt-status">
           <span class="status-dot green"></span>
           <span>Bluetooth Active</span>
-        </div>
+        </div>        <!-- Quick Action Buttons -->
+        <button id="btn-start-pc-hotspot" class="header-btn" title="Create 5GHz Hotspot on this PC">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+            <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+            <line x1="12" y1="20" x2="12.01" y2="20"></line>
+          </svg>
+          <span>Start PC Hotspot</span>
+        </button>
 
-        <!-- Quick Action Buttons -->
         <button id="btn-open-received-folder" class="header-btn" title="Open Received Files Folder">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -91,17 +99,17 @@
       </div>
 
       <!-- State 1: Quick Share Device Discovery Radar Screen -->
-      <section class="discovery-radar-view" id="view-discovery">
+      <div class="view-discovery-panel" id="view-discovery">
         <div class="radar-container">
-          <!-- Concentric Ripple Radar Rings -->
-          <div class="radar-ripple ring-1"></div>
-          <div class="radar-ripple ring-2"></div>
-          <div class="radar-ripple ring-3"></div>
+          <!-- Concentric Pulsing Radar Rings -->
+          <div class="radar-pulse-ring ring-1"></div>
+          <div class="radar-pulse-ring ring-2"></div>
+          <div class="radar-pulse-ring ring-3"></div>
 
           <!-- Central Local Device Node -->
-          <div class="central-node" id="central-local-node">
+          <div class="central-node">
             <div class="central-avatar">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
                 <line x1="8" y1="21" x2="16" y2="21"></line>
                 <line x1="12" y1="17" x2="12" y2="21"></line>
@@ -118,6 +126,18 @@
         <div class="radar-instruction" id="stage-discovery-prompt">
           <h2>Looking for nearby devices...</h2>
           <p>Make sure ShareDash is open on your Android phone or PC. <strong>Click a device above to establish a secure connection.</strong></p>
+
+          <!-- Direct Wi-Fi / Hotspot Info Card -->
+          <div class="direct-wifi-info-card" id="direct-wifi-info-card">
+            <div class="dwifi-icon">📶</div>
+            <div class="dwifi-text">
+              <strong>Prioritize PC 5GHz Hotspot / USB Tethering:</strong>
+              <span>Turn on <em>PC 5GHz Hotspot</em> or plug in <em>USB Cable</em> for up to <strong>2400 Mbps</strong> line-rate speed!</span>
+            </div>
+            <button id="btn-open-pc-hotspot" class="btn btn-secondary btn-sm" style="margin-left:auto;white-space:nowrap;font-size:11px;padding:6px 12px;">
+              PC Hotspot Settings
+            </button>
+          </div>
         </div>
 
         <!-- Stage 2: Mutual PIN / Authentication Handshake (Connecting) -->
@@ -161,10 +181,17 @@
             <!-- Active Tunnels & Suggestions Post-Connection -->
             <div class="tunnels-suggestion-box" id="tunnels-suggestion-box">
               <div class="active-tunnels-chips" id="active-tunnels-chips">
-                <span class="tunnel-chip active">📶 Wi-Fi LAN Active</span>
+                <span class="tunnel-chip active" id="connected-transport-label">🏠 Detecting connection…</span>
               </div>
               <div class="tunnel-boost-hint" id="tunnel-boost-hint">
                 💡 Tip: Plug in a USB cable to unlock 3.2 Gbps wire-speed turbo mode!
+              </div>
+            </div>
+
+            <div class="transport-recommendation hidden" id="transport-recommendation">
+              <h4>Best Connection for Your Hardware</h4>
+              <div class="transport-rank-list" id="transport-rank-list">
+                <!-- Populated dynamically by JS -->
               </div>
             </div>
           </div>
@@ -288,21 +315,6 @@
               </div>
               <div class="pt-stats" id="lan-stats">0 chunks completed</div>
             </div>
-
-            <!-- Internet QUIC Card -->
-            <div class="ptransport-box" id="card-quic">
-              <div class="pt-top">
-                <span class="pt-badge quic">Internet QUIC</span>
-                <span class="pt-rtt" id="quic-rtt">34.0 ms</span>
-              </div>
-              <div class="pt-speed">
-                <span id="quic-speed">0.0</span> <span class="pt-unit">MB/s</span>
-              </div>
-              <div class="pt-bar-bg">
-                <div class="pt-bar-fill bar-quic" id="quic-bar" style="width: 0%;"></div>
-              </div>
-              <div class="pt-stats" id="quic-stats">0 chunks completed</div>
-            </div>
           </div>
 
           <!-- Live Work-Stealing Canvas Chunk Visualizer -->
@@ -322,10 +334,9 @@
               <div class="visualizer-legend">
                 <span class="legend-item"><span class="legend-dot pending"></span> Pending</span>
                 <span class="legend-item"><span class="legend-dot inflight"></span> In-Flight</span>
-                <span class="legend-item"><span class="legend-dot usb"></span> USB</span>
+                <span class="legend-item"><span class="legend-dot usb"></span> USB 3.2</span>
                 <span class="legend-item"><span class="legend-dot wifi"></span> Wi-Fi Direct</span>
-                <span class="legend-item"><span class="legend-dot lan"></span> LAN</span>
-                <span class="legend-item"><span class="legend-dot quic"></span> QUIC</span>
+                <span class="legend-item"><span class="legend-dot lan"></span> Local Wi-Fi</span>
               </div>
             </div>
 
@@ -400,6 +411,91 @@
           <button id="btn-dismiss-pairing" class="btn btn-secondary">Close</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Incoming Connection Request Consent Modal (PC Receiver) -->
+  <div id="modal-incoming-pair" class="modal-overlay hidden">
+    <div class="modal-card incoming-pair-card">
+      <div class="modal-header">
+        <div class="incoming-header-content">
+          <div class="incoming-pulse-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+          </div>
+          <div>
+            <h2>Incoming Connection Request</h2>
+            <p id="incoming-pair-device-name" class="modal-subtitle">Nearby Phone wants to connect</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body text-center">
+        <p class="modal-desc">Confirm this 6-digit security PIN matches the one displayed on your phone:</p>
+        <div class="pin-code-boxes large" id="incoming-pin-display">
+          <span id="inc-p1">-</span><span id="inc-p2">-</span><span id="inc-p3">-</span>
+          <span id="inc-p4">-</span><span id="inc-p5">-</span><span id="inc-p6">-</span>
+        </div>
+        <p class="security-badge-note">🔒 AES-256-GCM Secure Encrypted Tunnel</p>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-reject-incoming-pair" class="btn btn-secondary danger">Decline</button>
+        <button id="btn-accept-incoming-pair" class="btn btn-primary">Accept & Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-connecting" class="modal-overlay hidden">
+    <div class="connecting-card">
+      <div class="connecting-rings">
+        <div class="connecting-ring ring-1"></div>
+        <div class="connecting-ring ring-2"></div>
+        <div class="connecting-ring ring-3"></div>
+        <div class="connecting-center-icon">📶</div>
+      </div>
+      <h3 id="connecting-device-name">Connecting...</h3>
+      <p class="connecting-subtitle" id="connecting-subtitle-text">Establishing secure connection</p>
+      <div class="pin-code-boxes" id="connecting-pin-display" style="margin: 12px 0; justify-content: center;">
+        <span id="conn-p1">-</span><span id="conn-p2">-</span><span id="conn-p3">-</span>
+        <span id="conn-p4">-</span><span id="conn-p5">-</span><span id="conn-p6">-</span>
+      </div>
+      <div class="handshake-stepper">
+        <div class="hs-step active" id="hs-step-syn"><div class="hs-dot"></div><span>SYN</span></div>
+        <div class="hs-line" id="hs-line-1"></div>
+        <div class="hs-step" id="hs-step-synack"><div class="hs-dot"></div><span>SYN-ACK</span></div>
+        <div class="hs-line" id="hs-line-2"></div>
+        <div class="hs-step" id="hs-step-ack"><div class="hs-dot"></div><span>ACK</span></div>
+      </div>
+      <button id="btn-cancel-connect" class="btn btn-secondary">Cancel</button>
+    </div>
+  </div>
+
+  <div id="modal-usb-prompt" class="modal-overlay hidden">
+    <div class="usb-prompt-card">
+      <div class="usb-icon-container">
+        <div class="usb-cable-anim">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="12" x2="16" y2="12"></line>
+            <rect x="10" y="8" width="6" height="8" rx="1"></rect>
+            <line x1="10" y1="12" x2="2" y2="12"></line>
+            <path d="M5 12V8a2 2 0 0 1 2-2h1"></path>
+          </svg>
+        </div>
+      </div>
+      <h3>Plug in USB for Turbo Transfer</h3>
+      <p class="usb-speed-hint">Up to <strong>3.2 Gbps</strong> — 5× faster than WiFi</p>
+      <div class="usb-prompt-actions">
+        <button id="btn-skip-usb" class="btn-secondary">Skip — Use WiFi Only</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-usb-connected" class="toast-notification hidden">
+    <div class="toast-icon">✓</div>
+    <div class="toast-content">
+      <strong>USB Connected</strong>
+      <span id="toast-usb-speed">USB 3.2 · Up to 3.2 Gbps</span>
     </div>
   </div>
 

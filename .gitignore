@@ -3,10 +3,14 @@
 
 # Runtime/local app data
 /sharedash_data/
+dist/sharedash_data/
 
 # Temporary files
 /tmp/
 *.log
+*.bin
+__pycache__/
+*.pyc
 
 # Android/Gradle artifacts
 /android/.gradle/
@@ -20,3 +24,4 @@
 Thumbs.db
 *.swp
 *.swo
+

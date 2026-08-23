@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use std::process::Command;
+use tokio::process::Command;
 use std::time::Instant;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
@@ -39,10 +39,11 @@ impl UsbTransport {
     }
 
     /// Automatically sets up ADB port forwarding if ADB is detected on host
-    pub fn setup_adb_forward(host_port: u16, device_port: u16) -> Result<bool> {
+    pub async fn setup_adb_forward(host_port: u16, device_port: u16) -> Result<bool> {
         let output = Command::new("adb")
             .args(["forward", &format!("tcp:{}", host_port), &format!("tcp:{}", device_port)])
-            .output();
+            .output()
+            .await;
 
         match output {
             Ok(out) if out.status.success() => Ok(true),
@@ -53,7 +54,7 @@ impl UsbTransport {
     /// Connects to the local USB bridge socket endpoint
     pub async fn connect_usb(host_port: u16) -> Result<Self> {
         // Try ADB forward setup first
-        let adb_bridged = Self::setup_adb_forward(host_port, host_port).unwrap_or(false);
+        let adb_bridged = Self::setup_adb_forward(host_port, host_port).await.unwrap_or(false);
 
         let addr: SocketAddr = format!("127.0.0.1:{}", host_port).parse()?;
         let stream = TcpStream::connect(addr)
@@ -153,14 +154,27 @@ impl AsyncTransport for UsbTransport {
 
         self.send_frame(probe_frame).await?;
 
-        while let Some(frame) = self.recv_frame().await? {
-            if frame.header.frame_type == FrameType::BenchmarkResp {
+        let recv_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while let Some(frame) = self.recv_frame().await? {
+                if frame.header.frame_type == FrameType::BenchmarkResp {
+                    return Ok(Some(frame));
+                } else {
+                    tracing::warn!("Discarded non-benchmark frame during benchmark");
+                }
+            }
+            Ok::<_, anyhow::Error>(None)
+        }).await;
+
+        match recv_result {
+            Ok(Ok(Some(_))) => {
                 let duration = start.elapsed().as_secs_f64();
                 self.metrics.rtt_ms = duration * 1000.0;
                 let mbps = ((probe_size_bytes as f64) * 8.0) / (duration * 1_000_000.0);
                 self.metrics.current_mbps = mbps;
-                self.metrics.state = TransportState::Active;
-                return Ok(mbps);
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => {}
+            Err(_) => {
+                tracing::warn!("Benchmark timed out");
             }
         }
 

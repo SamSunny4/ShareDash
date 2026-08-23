@@ -40,12 +40,17 @@ class UdpDiscoveryManager(
     private var multicastLock: WifiManager.MulticastLock? = null
 
     fun startDiscovery(scope: CoroutineScope) {
-        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-        multicastLock = wifi?.createMulticastLock("ShareDashUdpLock")?.apply {
-            setReferenceCounted(true)
-            acquire()
-        }
+        if (discoveryJob?.isActive == true) return
 
+        try {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("ShareDashUdpLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
+        } catch (_: Exception) {}
+
+        discoveryJob?.cancel()
         discoveryJob = scope.launch(Dispatchers.IO) {
             // 1. UDP Broadcast & Listener
             launch { listenForBeacons() }
@@ -67,7 +72,7 @@ class UdpDiscoveryManager(
 
             while (coroutineContext.isActive) {
                 val json = JSONObject().apply {
-                    put("device_id", "android-" + android.os.Build.MODEL.replace(" ", "-"))
+                    put("device_id", com.sharedash.app.DeviceIdentity.id)
                     put("friendly_name", deviceName)
                     put("os_name", "Android " + android.os.Build.VERSION.RELEASE)
                     put("server_port", serverPort)
@@ -80,7 +85,12 @@ class UdpDiscoveryManager(
 
                 val broadcastTargets = mutableListOf(
                     InetAddress.getByName("255.255.255.255"),
-                    InetAddress.getByName("192.168.42.255"),
+                    InetAddress.getByName("192.168.137.255"), // Windows PC Mobile Hotspot Subnet
+                    InetAddress.getByName("192.168.137.1"),   // Windows PC Hotspot Gateway
+                    InetAddress.getByName("192.168.42.255"),  // USB Tethering Subnet
+                    InetAddress.getByName("192.168.42.1"),    // USB Tethering PC Gateway
+                    InetAddress.getByName("192.168.43.255"),  // Standard Android Hotspot Subnet
+                    InetAddress.getByName("192.168.49.255"),  // Standard Android Wi-Fi Direct Subnet
                     InetAddress.getByName("192.168.1.255"),
                     InetAddress.getByName("192.168.0.255"),
                     InetAddress.getByName("172.20.10.255")
@@ -118,8 +128,11 @@ class UdpDiscoveryManager(
     private suspend fun listenForBeacons() {
         var socket: DatagramSocket? = null
         try {
-            socket = DatagramSocket(DISCOVERY_PORT)
-            socket.broadcast = true
+            socket = DatagramSocket(null).apply {
+                reuseAddress = true
+                broadcast = true
+                bind(java.net.InetSocketAddress(DISCOVERY_PORT))
+            }
             val buffer = ByteArray(4096)
 
             while (coroutineContext.isActive) {
@@ -137,12 +150,11 @@ class UdpDiscoveryManager(
                     val isCompat = isVersionCompatible(appVer)
                     val ip = packet.address.hostAddress ?: "127.0.0.1"
 
-                    val myModel = android.os.Build.MODEL
-                    val myDeviceId = "android-" + myModel.replace(" ", "-")
+                    val myDeviceId = com.sharedash.app.DeviceIdentity.id
                     val myIps = getLocalIpAddresses()
 
                     // Strict self-detection filter: ignore own beacons or own IPs
-                    if (devId == myDeviceId || devId.contains(myModel, ignoreCase = true) || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
+                    if (devId == myDeviceId || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
                         continue
                     }
 
@@ -182,6 +194,9 @@ class UdpDiscoveryManager(
             // Check localhost USB bridge first (127.0.0.1:54321 / 10.0.2.2 for emulator)
             probeIpAddress("127.0.0.1", 54321, "USB Cable")
             probeIpAddress("10.0.2.2", 54321, "USB / Host")
+            probeIpAddress("192.168.137.1", 54321, "PC 5GHz Hotspot")
+            probeIpAddress("192.168.42.1", 54321, "USB Tethering Turbo")
+            probeIpAddress("192.168.43.1", 54321, "Phone Hotspot")
 
             // Probe default gateways and common Wi-Fi IP ranges
             val myIps = getLocalIpAddresses()
@@ -210,7 +225,7 @@ class UdpDiscoveryManager(
     private suspend fun staleCheckLoop() {
         while (coroutineContext.isActive) {
             val now = System.currentTimeMillis()
-            val keysToRemove = peerMap.filterValues { now - it.lastSeenTimestamp > 15000 }.keys
+            val keysToRemove = peerMap.filterValues { now - it.lastSeenTimestamp > 30000 }.keys
             if (keysToRemove.isNotEmpty()) {
                 keysToRemove.forEach { peerMap.remove(it) }
                 _discoveredPeers.value = peerMap.values.toList()
@@ -239,12 +254,11 @@ class UdpDiscoveryManager(
                 val appVer = json.optString("app_version", "0.1.0")
                 val isCompat = isVersionCompatible(appVer)
 
-                val myModel = android.os.Build.MODEL
-                val myDeviceId = "android-" + myModel.replace(" ", "-")
+                val myDeviceId = com.sharedash.app.DeviceIdentity.id
                 val myIps = getLocalIpAddresses()
 
                 // Strict self-detection filter: ignore own HTTP server on phone
-                if (devId == myDeviceId || devId.contains(myModel, ignoreCase = true) || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
+                if (devId == myDeviceId || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
                     return
                 }
 

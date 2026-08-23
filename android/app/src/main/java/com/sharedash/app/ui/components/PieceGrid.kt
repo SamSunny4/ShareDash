@@ -29,7 +29,6 @@ import com.sharedash.app.ui.theme.BgSurfaceElevated
 import com.sharedash.app.ui.theme.DangerRed
 import com.sharedash.app.ui.theme.InFlightYellow
 import com.sharedash.app.ui.theme.LanSky
-import com.sharedash.app.ui.theme.QuicPurple
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary

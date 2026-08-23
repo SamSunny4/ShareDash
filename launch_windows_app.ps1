@@ -9,7 +9,7 @@ Write-Host "===============================================================" -Fo
 $proc = Get-Process -Name "sharedash" -ErrorAction SilentlyContinue
 if (-not $proc) {
     Write-Host "Starting ShareDash background core engine..." -ForegroundColor Yellow
-    Start-Process -FilePath ".\target\release\sharedash.exe" -ArgumentList "--port 54321" -WindowStyle Hidden
+    Start-Process -FilePath ".\dist\sharedash.exe" -ArgumentList "--port 54321" -WindowStyle Hidden
     Start-Sleep -Seconds 1
 }
 

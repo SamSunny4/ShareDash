@@ -36,11 +36,26 @@ class AndroidHttpServer(
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
 
-    val deviceId = "android-" + Build.MODEL.replace(" ", "-")
+    val deviceId = com.sharedash.app.DeviceIdentity.id
     val deviceName = Build.MODEL
+
+    data class ActiveChunkTransfer(
+        val transferId: String,
+        val fileName: String,
+        val totalBytes: Long,
+        val totalChunks: Int,
+        val targetFile: File,
+        val raf: java.io.RandomAccessFile,
+        val receivedChunks: java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
+        val startTime: Long = System.currentTimeMillis()
+    )
+
+    private val activeChunkTransfers = java.util.concurrent.ConcurrentHashMap<String, ActiveChunkTransfer>()
 
     var activePairedPeerName: String? = null
     var pendingPairRequest: JSONObject? = null
+    var onWifiConnectRequest: ((ssid: String, password: String) -> Unit)? = null
+    var onStartHotspotRequest: ((callback: (ssid: String, password: String, gateway: String) -> Unit) -> Unit)? = null
 
     fun start(scope: CoroutineScope) {
         if (serverJob != null && serverJob?.isActive == true) return
@@ -205,12 +220,126 @@ class AndroidHttpServer(
                     sendJsonResponse(output, 200, resp)
                 }
 
-                // 6. Direct File Receiver: POST /api/v1/transfers/send
-                method == "POST" && path.startsWith("/api/v1/transfers/send") -> {
-                    handleIncomingFileUpload(input, headers, contentLength, output)
+                // 6. Adaptive Out-of-Order Chunk Receiver: POST /api/v1/transfers/chunk
+                method == "POST" && (path.startsWith("/api/v1/transfers/chunk") || headers.containsKey("x-chunk-id")) -> {
+                    socket.soTimeout = 0
+                    try {
+                        handleIncomingChunkUpload(input, headers, contentLength, output)
+                    } finally {
+                        socket.soTimeout = 8000
+                    }
                 }
 
-                // 7. CORS Preflight
+                // 7. Direct File Stream Receiver: POST /api/v1/transfers/send
+                method == "POST" && path.startsWith("/api/v1/transfers/send") -> {
+                    socket.soTimeout = 0
+                    try {
+                        handleIncomingFileUpload(input, headers, contentLength, output)
+                    } finally {
+                        socket.soTimeout = 8000
+                    }
+                }
+
+                // 8. Wi-Fi Hardware Capabilities: GET /api/v1/wifi_caps
+                method == "GET" && path == "/api/v1/wifi_caps" -> {
+                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                    var wifiStandard = "Wi-Fi 6 (802.11ax)"
+                    var maxFreqGhz = 6.0
+                    var maxChannelWidthMhz = 160
+                    var maxPhyRateMbps = 1200
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val wifiInfo = wifiManager?.connectionInfo
+                            if (wifiInfo != null) {
+                                when (wifiInfo.wifiStandard) {
+                                    6 -> { wifiStandard = "Wi-Fi 6 (802.11ax)"; maxPhyRateMbps = 1200; maxChannelWidthMhz = 160 }
+                                    7 -> { wifiStandard = "Wi-Fi 6E (802.11ax)"; maxFreqGhz = 6.0; maxPhyRateMbps = 2402; maxChannelWidthMhz = 160 }
+                                    8 -> { wifiStandard = "Wi-Fi 7 (802.11be)"; maxFreqGhz = 6.0; maxPhyRateMbps = 4804; maxChannelWidthMhz = 320 }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+
+                    val bands = org.json.JSONArray().apply {
+                        put("2.4 GHz")
+                        put("5 GHz")
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wifiManager?.is6GHzBandSupported == true) {
+                                put("6 GHz")
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    val resp = JSONObject().apply {
+                        put("wifi_standard", wifiStandard)
+                        put("max_frequency_ghz", maxFreqGhz)
+                        put("max_channel_width_mhz", maxChannelWidthMhz)
+                        put("max_phy_rate_mbps", maxPhyRateMbps)
+                        put("supported_bands", bands)
+                        put("hotspot_supported", true)
+                        put("hotspot_5ghz_supported", true)
+                    }
+                    sendJsonResponse(output, 200, resp)
+                }
+
+                // 9. Wi-Fi Connect over USB: POST /api/v1/wifi_connect
+                method == "POST" && path == "/api/v1/wifi_connect" -> {
+                    val bodyBytes = readExactBytes(input, contentLength)
+                    val bodyStr = String(bodyBytes, Charsets.UTF_8)
+                    val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+                    val ssid = json.optString("ssid", "")
+                    val password = json.optString("password", "")
+                    if (ssid.isNotBlank()) {
+                        onWifiConnectRequest?.invoke(ssid, password)
+                        val resp = JSONObject().apply {
+                            put("success", true)
+                            put("status", "CONNECTING")
+                            put("ssid", ssid)
+                        }
+                        sendJsonResponse(output, 200, resp)
+                    } else {
+                        val resp = JSONObject().apply {
+                            put("success", false)
+                            put("error", "MISSING_SSID")
+                        }
+                        sendJsonResponse(output, 400, resp)
+                    }
+                }
+
+                // 10. Start Hotspot over USB: POST /api/v1/hotspot/start
+                method == "POST" && path == "/api/v1/hotspot/start" -> {
+                    if (onStartHotspotRequest != null) {
+                        val latch = java.util.concurrent.CountDownLatch(1)
+                        var resultSsid = ""
+                        var resultPass = ""
+                        var resultGw = "192.168.43.1"
+                        onStartHotspotRequest?.invoke { s, p, g ->
+                            resultSsid = s
+                            resultPass = p
+                            resultGw = g
+                            latch.countDown()
+                        }
+                        latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+                        val resp = JSONObject().apply {
+                            put("success", resultSsid.isNotBlank())
+                            put("status", if (resultSsid.isNotBlank()) "hotspot_started" else "failed")
+                            put("ssid", resultSsid)
+                            put("password", resultPass)
+                            put("gateway", resultGw)
+                        }
+                        sendJsonResponse(output, 200, resp)
+                    } else {
+                        val resp = JSONObject().apply {
+                            put("success", false)
+                            put("error", "HANDLER_NOT_SET")
+                        }
+                        sendJsonResponse(output, 500, resp)
+                    }
+                }
+
+                // 11. CORS Preflight
                 method == "OPTIONS" -> {
                     sendRawResponse(output, 204, "No Content", "text/plain", ByteArray(0))
                 }
@@ -223,6 +352,128 @@ class AndroidHttpServer(
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
+    }
+
+    var onTransferProgress: (fileName: String, bytesReceived: Long, totalBytes: Long, speedMbps: Double) -> Unit = { _, _, _, _ -> }
+
+    private fun computeSha256(bytes: ByteArray): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val hash = digest.digest(bytes)
+            hash.joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun handleIncomingChunkUpload(
+        input: BufferedInputStream,
+        headers: Map<String, String>,
+        contentLength: Int,
+        output: BufferedOutputStream
+    ) {
+        val downloadDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "ShareDash"
+        )
+        if (!downloadDir.exists()) downloadDir.mkdirs()
+
+        val chunkId = headers["x-chunk-id"]?.toIntOrNull() ?: 0
+        val chunkOffset = headers["x-chunk-offset"]?.toLongOrNull() ?: 0L
+        val expectedSha256 = headers["x-chunk-sha256"]?.lowercase()?.trim() ?: ""
+        val expectedCrc32 = headers["x-chunk-crc32"]?.lowercase()?.trim() ?: ""
+        val totalChunks = headers["x-total-chunks"]?.toIntOrNull() ?: 1
+        val transferId = headers["x-transfer-id"] ?: "default"
+        val fileSize = headers["x-file-size"]?.toLongOrNull() ?: 0L
+        var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
+            ?: "received_file_${System.currentTimeMillis()}.bin"
+
+        val chunkBytes = readExactBytes(input, contentLength)
+
+        // Automatic error detection: Verify chunk hash (CRC32 or SHA-256) if present
+        if (expectedCrc32.isNotBlank()) {
+            val crc = java.util.zip.CRC32().apply { update(chunkBytes) }.value
+            val actualCrc32 = String.format("%08x", crc)
+            if (actualCrc32 != expectedCrc32) {
+                Log.w(TAG, "Chunk #$chunkId CRC32 verification failed! Expected $expectedCrc32, got $actualCrc32")
+                val resp = JSONObject().apply {
+                    put("success", false)
+                    put("error", "CORRUPT_CHUNK")
+                    put("chunk_id", chunkId)
+                    put("message", "CRC32 mismatch - requesting retransmission")
+                }
+                sendJsonResponse(output, 400, resp)
+                return
+            }
+        } else if (expectedSha256.isNotBlank()) {
+            val actualSha256 = computeSha256(chunkBytes)
+            if (actualSha256 != expectedSha256) {
+                Log.w(TAG, "Chunk #$chunkId verification failed! Expected $expectedSha256, got $actualSha256")
+                val resp = JSONObject().apply {
+                    put("success", false)
+                    put("error", "CORRUPT_CHUNK")
+                    put("chunk_id", chunkId)
+                    put("message", "SHA-256 mismatch - requesting retransmission")
+                }
+                sendJsonResponse(output, 400, resp)
+                return
+            }
+        }
+
+        val sessionKey = if (transferId.isNotBlank()) transferId else fileName
+        val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
+            val targetFile = File(downloadDir, fileName)
+            val raf = java.io.RandomAccessFile(targetFile, "rw")
+            if (fileSize > 0) {
+                try { raf.setLength(fileSize) } catch (_: Exception) {}
+            }
+            ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
+        }
+
+        // Out-of-order random access write
+        synchronized(session.raf) {
+            try {
+                session.raf.seek(chunkOffset)
+                session.raf.write(chunkBytes)
+                session.receivedChunks.add(chunkId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed writing chunk #$chunkId at offset $chunkOffset: ${e.message}")
+                val resp = JSONObject().apply {
+                    put("success", false)
+                    put("error", "WRITE_FAILED")
+                    put("chunk_id", chunkId)
+                }
+                sendJsonResponse(output, 500, resp)
+                return
+            }
+        }
+
+        val completedCount = session.receivedChunks.size
+        val total = session.totalChunks
+
+        val elapsedSec = (System.currentTimeMillis() - session.startTime).coerceAtLeast(1) / 1000.0
+        val totalBytesWritten = completedCount.toLong() * (contentLength.toLong().coerceAtLeast(1L))
+        val speedMbps = ((totalBytesWritten * 8.0) / 1_000_000.0) / elapsedSec
+        onTransferProgress(session.fileName, totalBytesWritten, session.totalBytes, speedMbps)
+
+        if (completedCount >= total) {
+            try {
+                synchronized(session.raf) {
+                    session.raf.close()
+                }
+            } catch (_: Exception) {}
+            activeChunkTransfers.remove(sessionKey)
+            Log.i(TAG, "🎉 Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")
+            onFileReceived(session.fileName, session.targetFile.length())
+        }
+
+        val resp = JSONObject().apply {
+            put("success", true)
+            put("chunk_id", chunkId)
+            put("completed_chunks", completedCount)
+            put("total_chunks", total)
+        }
+        sendJsonResponse(output, 200, resp)
     }
 
     private fun handleIncomingFileUpload(
@@ -238,26 +489,21 @@ class AndroidHttpServer(
         if (!downloadDir.exists()) downloadDir.mkdirs()
 
         val contentType = headers["content-type"] ?: ""
-        var fileName = "received_file_${System.currentTimeMillis()}.bin"
+        var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
+            ?: "received_file_${System.currentTimeMillis()}.bin"
+
+        val startTime = System.currentTimeMillis()
+        var totalWritten = 0L
 
         if (contentType.contains("multipart/form-data")) {
-            // Extract boundary from Content-Type header
             val boundaryMatch = Regex("boundary=(.+)").find(contentType)
-            val boundary = boundaryMatch?.groupValues?.get(1)?.trim() ?: ""
+            val boundary = boundaryMatch?.groupValues?.get(1)?.trim()?.removePrefix("\"")?.removeSuffix("\"") ?: ""
             val boundaryBytes = "--$boundary".toByteArray(Charsets.ISO_8859_1)
-            val endBoundaryBytes = "--$boundary--".toByteArray(Charsets.ISO_8859_1)
 
-            // Read the multipart headers (first boundary + part headers)
-            // Read lines until we hit the empty line separating headers from body
-            val partHeaders = StringBuilder()
+            var headerBytesConsumed = 0
             var headerLine = readLine(input)
-            // Skip initial boundary line
-            if (headerLine != null && headerLine.startsWith("--")) {
-                headerLine = readLine(input)
-            }
-            while (!headerLine.isNullOrEmpty()) {
-                partHeaders.append(headerLine).append("\n")
-                // Extract filename from Content-Disposition
+            if (headerLine != null) headerBytesConsumed += headerLine.toByteArray(Charsets.UTF_8).size + 2
+            while (!headerLine.isNullOrBlank()) {
                 if (headerLine.contains("filename=\"")) {
                     val fnStart = headerLine.indexOf("filename=\"") + 10
                     val fnEnd = headerLine.indexOf("\"", fnStart)
@@ -266,69 +512,98 @@ class AndroidHttpServer(
                     }
                 }
                 headerLine = readLine(input)
+                if (headerLine != null) headerBytesConsumed += headerLine.toByteArray(Charsets.UTF_8).size + 2
             }
 
-            // Now stream the file body to disk, watching for the closing boundary
             val targetFile = File(downloadDir, fileName)
-            val fos = FileOutputStream(targetFile)
-            val buffer = ByteArray(8192)
-            var totalRead = 0
-            // Calculate approximate bytes remaining for file data
-            // (contentLength - headers already read - boundary overhead)
-            val boundaryLen = endBoundaryBytes.size + 4 // \r\n--boundary--\r\n
+            val fos = BufferedOutputStream(FileOutputStream(targetFile), 512 * 1024)
 
-            // Stream data, but we need to detect the trailing boundary.
-            // Strategy: buffer last (boundaryLen + 10) bytes and check for boundary.
-            val tailBufferSize = endBoundaryBytes.size + 20
-            val ringBuffer = ByteArray(tailBufferSize)
-            var ringLen = 0
-
-            // Simple streaming: read and write, then trim trailing boundary at the end
-            try {
-                var remaining = contentLength
-                // Account for headers we already consumed via readLine
-                // We can't know exact bytes consumed by readLine, so just stream remaining
-                while (remaining > 0) {
-                    val toRead = minOf(remaining, buffer.size)
-                    val read = input.read(buffer, 0, toRead)
-                    if (read == -1) break
-                    fos.write(buffer, 0, read)
-                    totalRead += read
-                    remaining -= read
-                }
-            } finally {
-                fos.flush()
-                fos.close()
-            }
-
-            // Trim trailing boundary from the file
-            trimTrailingBoundary(targetFile, boundaryBytes)
-
-            onFileReceived(fileName, targetFile.length())
-        } else {
-            // Non-multipart: stream directly
-            val targetFile = File(downloadDir, fileName)
-            val fos = FileOutputStream(targetFile)
-            val buffer = ByteArray(8192)
-            var remaining = contentLength
+            val buf = ByteArray(512 * 1024)
+            var remaining = if (contentLength > 0) (contentLength - headerBytesConsumed).toLong().coerceAtLeast(0L) else Long.MAX_VALUE
             while (remaining > 0) {
-                val toRead = minOf(remaining, buffer.size)
-                val read = input.read(buffer, 0, toRead)
-                if (read == -1) break
-                fos.write(buffer, 0, read)
-                remaining -= read
+                val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                val bytesRead = input.read(buf, 0, toRead)
+                if (bytesRead == -1) break
+                fos.write(buf, 0, bytesRead)
+                remaining -= bytesRead
+                totalWritten += bytesRead
+
+                val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(1) / 1000.0
+                val speedMbps = ((totalWritten * 8.0) / 1_000_000.0) / elapsedSec
+                val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
+                onTransferProgress(fileName, totalWritten, totalExpected, speedMbps)
             }
             fos.flush()
             fos.close()
-            onFileReceived(fileName, targetFile.length())
+
+            if (boundaryBytes.isNotEmpty()) {
+                trimTrailingBoundary(targetFile, boundaryBytes)
+            }
+
+            checkAndMergeParts(fileName, downloadDir)
+        } else {
+            val targetFile = File(downloadDir, fileName)
+            val fos = BufferedOutputStream(FileOutputStream(targetFile), 512 * 1024)
+            val buf = ByteArray(512 * 1024)
+            var remaining = if (contentLength > 0) contentLength.toLong() else Long.MAX_VALUE
+            while (remaining > 0) {
+                val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                val bytesRead = input.read(buf, 0, toRead)
+                if (bytesRead == -1) break
+                fos.write(buf, 0, bytesRead)
+                remaining -= bytesRead
+                totalWritten += bytesRead
+
+                val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(1) / 1000.0
+                val speedMbps = ((totalWritten * 8.0) / 1_000_000.0) / elapsedSec
+                val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
+                onTransferProgress(fileName, totalWritten, totalExpected, speedMbps)
+            }
+            fos.flush()
+            fos.close()
+            checkAndMergeParts(fileName, downloadDir)
         }
 
         val resp = JSONObject().apply {
             put("success", true)
             put("file_name", fileName)
+            put("bytes_received", totalWritten)
             put("download_folder", downloadDir.absolutePath)
         }
         sendJsonResponse(output, 200, resp)
+    }
+
+    private fun checkAndMergeParts(partFileName: String, downloadDir: File) {
+        if (!partFileName.endsWith(".part1") && !partFileName.endsWith(".part2")) {
+            val file = File(downloadDir, partFileName)
+            onFileReceived(partFileName, file.length())
+            return
+        }
+
+        val baseName = partFileName.removeSuffix(".part1").removeSuffix(".part2")
+        val part1File = File(downloadDir, "$baseName.part1")
+        val part2File = File(downloadDir, "$baseName.part2")
+
+        if (part1File.exists() && part2File.exists()) {
+            val finalTarget = File(downloadDir, baseName)
+            try {
+                java.io.FileOutputStream(finalTarget).use { fos ->
+                    val outChannel = fos.channel
+                    java.io.FileInputStream(part1File).use { fis1 ->
+                        fis1.channel.transferTo(0, fis1.channel.size(), outChannel)
+                    }
+                    java.io.FileInputStream(part2File).use { fis2 ->
+                        fis2.channel.transferTo(0, fis2.channel.size(), outChannel)
+                    }
+                }
+                part1File.delete()
+                part2File.delete()
+                Log.i(TAG, "🎉 Multipath merge complete: $baseName (${finalTarget.length()} bytes)")
+                onFileReceived(baseName, finalTarget.length())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed merging multipath parts for $baseName: ${e.message}")
+            }
+        }
     }
 
     private fun findDoubleCRLF(bytes: ByteArray): Int {

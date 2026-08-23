@@ -34,6 +34,57 @@ class AndroidTransportManager {
             socket.receiveBufferSize = 4 * 1024 * 1024
             socket.connect(InetSocketAddress(host, port), 3000)
 
+            val os = socket.getOutputStream()
+            val `is` = socket.getInputStream()
+            
+            val helloJson = org.json.JSONObject().apply {
+                put("device_id", com.sharedash.app.DeviceIdentity.id)
+                put("friendly_name", android.os.Build.MODEL)
+                put("os_name", "Android")
+                put("app_version", "0.1.0")
+                put("protocol_version", 1)
+                put("listen_endpoints", org.json.JSONArray())
+            }.toString().toByteArray()
+
+            val helloFrame = Protocol.Frame(
+                Protocol.FrameHeader(Protocol.FrameType.HELLO, 0, java.util.UUID(0L, 0L), 0, helloJson.size, 0),
+                helloJson
+            )
+            os.write(Protocol.encodeFrame(helloFrame))
+            os.flush()
+            
+            socket.soTimeout = 5000
+            val helloResp = Protocol.decodeFrame(`is`)
+            if (helloResp == null || helloResp.header.frameType != Protocol.FrameType.HELLO_RESP) {
+                socket.close()
+                return@withContext false
+            }
+            
+            val capsJson = org.json.JSONObject().apply {
+                put("supported_transports", org.json.JSONArray(listOf("Lan", "WifiDirect")))
+                put("max_concurrent_streams", 4)
+                put("protocol_version", 1)
+                put("frequency_bands", org.json.JSONArray())
+                put("max_chunk_size", 1048576)
+                put("available_storage_bytes", 0)
+                put("is_charging", false)
+            }.toString().toByteArray()
+
+            val capsFrame = Protocol.Frame(
+                Protocol.FrameHeader(Protocol.FrameType.CAPABILITIES, 0, java.util.UUID(0L, 0L), 0, capsJson.size, 0),
+                capsJson
+            )
+            os.write(Protocol.encodeFrame(capsFrame))
+            os.flush()
+            
+            val capsResp = Protocol.decodeFrame(`is`)
+            if (capsResp == null || capsResp.header.frameType != Protocol.FrameType.CAPABILITIES) {
+                socket.close()
+                return@withContext false
+            }
+            
+            socket.soTimeout = 0
+
             activeSockets[name] = socket
             updateStats(name, kind, currentMbps = 0.0, rttMs = 1.5, completedChunks = 0)
             Log.i(TAG, "Connected transport $name ($host:$port)")

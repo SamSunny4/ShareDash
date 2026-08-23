@@ -25,7 +25,8 @@ class AndroidPairingCoordinator {
         targetPort: Int,
         pin: String,
         deviceName: String,
-        localIp: String = "127.0.0.1"
+        localIp: String = "127.0.0.1",
+        localPort: Int = 54321
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$targetIp:$targetPort/api/v1/pair/request")
@@ -37,9 +38,10 @@ class AndroidPairingCoordinator {
             conn.doOutput = true
 
             val json = JSONObject().apply {
-                put("initiator_device_id", "android-" + Build.MODEL.replace(" ", "-"))
+                put("initiator_device_id", com.sharedash.app.DeviceIdentity.id)
                 put("initiator_name", deviceName)
                 put("initiator_ip", localIp)
+                put("initiator_port", localPort)   // Port for PC SYN-ACK callback
                 put("pin_code", pin)
                 put("app_version", "0.1.0")
                 put("status", "PENDING")
@@ -77,7 +79,7 @@ class AndroidPairingCoordinator {
             val json = JSONObject().apply {
                 put("action", if (accept) "ACCEPT" else "REJECT")
                 put("target_name", Build.MODEL)
-                put("target_device_id", "android-" + Build.MODEL.replace(" ", "-"))
+                put("target_device_id", com.sharedash.app.DeviceIdentity.id)
                 put("step", "SYN_ACK")
             }
 

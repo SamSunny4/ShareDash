@@ -91,7 +91,7 @@ pub struct FrameHeader {
 
 impl FrameHeader {
     pub fn new(frame_type: FrameType, flags: u16, transfer_id: Uuid, chunk_id: u32, payload_len: u32) -> Self {
-        let mut h = Self {
+        let h = Self {
             magic: MAGIC_BYTES,
             version: PROTOCOL_VERSION,
             frame_type,
@@ -101,11 +101,10 @@ impl FrameHeader {
             payload_len,
             crc32: 0,
         };
-        h.crc32 = h.compute_crc32();
         h
     }
 
-    pub fn compute_crc32(&self) -> u32 {
+    pub fn compute_crc32(&self, payload: &[u8]) -> u32 {
         let mut hasher = Crc32Hasher::new();
         hasher.update(&self.magic);
         hasher.update(&[self.version]);
@@ -114,6 +113,7 @@ impl FrameHeader {
         hasher.update(self.transfer_id.as_bytes());
         hasher.update(&self.chunk_id.to_be_bytes());
         hasher.update(&self.payload_len.to_be_bytes());
+        hasher.update(payload);
         hasher.finalize()
     }
 
@@ -184,14 +184,6 @@ impl FrameHeader {
             crc32: expected_crc,
         };
 
-        let calculated_crc = header.compute_crc32();
-        if calculated_crc != expected_crc {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("CRC32 mismatch: expected {:08X}, calculated {:08X}", expected_crc, calculated_crc),
-            ));
-        }
-
         src.advance(FRAME_HEADER_LEN);
         Ok(Some(header))
     }
@@ -205,7 +197,8 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(frame_type: FrameType, transfer_id: Uuid, chunk_id: u32, flags: u16, payload: Bytes) -> Self {
-        let header = FrameHeader::new(frame_type, flags, transfer_id, chunk_id, payload.len() as u32);
+        let mut header = FrameHeader::new(frame_type, flags, transfer_id, chunk_id, payload.len() as u32);
+        header.crc32 = header.compute_crc32(&payload);
         Self { header, payload }
     }
 
@@ -255,6 +248,15 @@ impl Decoder for FrameCodec {
 
             let payload = src.split_to(required_len).freeze();
             let header = self.header.take().unwrap();
+            
+            let calculated_crc = header.compute_crc32(&payload);
+            if calculated_crc != header.crc32 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("CRC32 mismatch: expected {:08X}, calculated {:08X}", header.crc32, calculated_crc),
+                ));
+            }
+            
             Ok(Some(Frame { header, payload }))
         } else {
             Ok(None)

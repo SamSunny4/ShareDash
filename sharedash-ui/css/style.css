@@ -189,121 +189,7 @@ body {
    Smart Connection Bridges & Boosters Strip
    ========================================================================== */
 
-.bridges-banner {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 
-.bridges-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.bridges-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-primary);
-}
-
-.bridges-recommendation {
-  font-size: 12px;
-  font-weight: 600;
-  color: #38bdf8;
-  background-color: rgba(56, 189, 248, 0.1);
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  border: 1px solid rgba(56, 189, 248, 0.2);
-}
-
-.bridges-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-}
-
-.bridge-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background-color: var(--bg-surface-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  transition: all var(--transition-fast);
-}
-
-.bridge-card.active {
-  border-color: rgba(59, 130, 246, 0.4);
-  background-color: rgba(30, 43, 69, 0.5);
-}
-
-.bcard-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.bcard-icon.usb { background-color: var(--color-usb-bg); color: var(--color-usb); }
-.bcard-icon.wifi { background-color: var(--color-wifi-bg); color: var(--color-wifi); }
-.bcard-icon.lan { background-color: var(--color-lan-bg); color: var(--color-lan); }
-.bcard-icon.quic { background-color: var(--color-quic-bg); color: var(--color-quic); }
-
-.bcard-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.bcard-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.bcard-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bcard-tag {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background-color: var(--bg-surface);
-  color: var(--text-muted);
-}
-
-.bcard-tag.active {
-  background-color: rgba(16, 185, 129, 0.2);
-  color: var(--color-wifi);
-}
-
-.bcard-desc {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* ==========================================================================
    Discovery Radar View (Quick Share Pulse View)
@@ -406,10 +292,22 @@ body {
   color: var(--text-primary);
 }
 
+/* Dynamically Populated Orbiting Devices Overlay */
+.orbiting-devices {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 15;
+}
+
 /* Floating Orbiting Device Nodes */
 .device-node {
   position: absolute;
-  z-index: 15;
+  z-index: 20;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -420,6 +318,11 @@ body {
 
 .device-node:hover {
   transform: scale(1.08);
+}
+
+.device-node.incompatible {
+  opacity: 0.5;
+  filter: grayscale(1);
 }
 
 .device-avatar {
@@ -455,6 +358,10 @@ body {
   border: 2px solid var(--bg-surface);
 }
 
+.device-online-dot.warning {
+  background-color: #fbbf24;
+}
+
 .device-node-info {
   display: flex;
   flex-direction: column;
@@ -484,6 +391,7 @@ body {
 .node-pos-1 { top: 30px; right: 40px; }
 .node-pos-2 { bottom: 40px; left: 30px; }
 .node-pos-3 { top: 60px; left: 30px; }
+.node-pos-4 { bottom: 60px; right: 30px; }
 
 .radar-instruction {
   margin-top: 24px;
@@ -503,6 +411,47 @@ body {
 .radar-instruction p {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.direct-wifi-info-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin-top: 12px;
+  text-align: left;
+  max-width: 480px;
+}
+
+.dwifi-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.dwifi-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.dwifi-text strong {
+  color: var(--color-lan);
+  font-weight: 700;
+}
+
+.dwifi-text span {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.dwifi-text em {
+  color: var(--text-primary);
+  font-style: normal;
+  font-weight: 600;
 }
 
 .file-picker-actions {
@@ -958,11 +907,54 @@ body {
 .qr-code-wrapper { margin: 10px auto; padding: 14px; background-color: #ffffff; border-radius: var(--radius-md); display: inline-block; }
 .qr-code-wrapper svg { display: block; width: 180px; height: 180px; }
 .pin-display-wrapper { display: flex; flex-direction: column; gap: 8px; align-items: center; }
-.pin-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); }
-.pin-code-boxes { display: flex; gap: 8px; }
-.pin-code-boxes span { width: 40px; height: 48px; border-radius: var(--radius-sm); background-color: var(--bg-input); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 22px; font-weight: 700; }
-.direct-link-box { font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
-.direct-link-box a { color: #38bdf8; text-decoration: none; font-family: var(--font-mono); }
+.pin-code-boxes { display: flex; gap: 8px; justify-content: center; }
+.pin-code-boxes span { width: 40px; height: 48px; border-radius: var(--radius-sm); background-color: var(--bg-input); border: 1px solid var(--border-strong); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 22px; font-weight: 700; color: var(--text-primary); }
+
+.pin-code-boxes.large span {
+  width: 48px;
+  height: 58px;
+  font-size: 26px;
+  border-color: rgba(59, 130, 246, 0.5);
+  background-color: var(--bg-surface-elevated);
+  color: var(--color-accent);
+}
+
+.incoming-header-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.incoming-pulse-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  animation: radarPulse 2s infinite ease-out;
+}
+
+.security-badge-note {
+  font-size: 11px;
+  color: var(--color-wifi);
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.btn.danger {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.btn.danger:hover {
+  background-color: var(--color-danger);
+  color: #ffffff;
+}
 
 /* ==========================================================================
    Secure Connection Handshake & Connected Banner
@@ -1140,3 +1132,293 @@ body {
   .app-header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .header-right { width: 100%; justify-content: space-between; }
 }
+/* ==========================================================================
+   Modals & Toasts
+   ========================================================================== */
+
+/* Connecting Modal */
+.connecting-card {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: var(--radius-lg);
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+  animation: fadeInScale 200ms ease-out;
+}
+
+.connecting-rings {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.connecting-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(59, 130, 246, 0.6);
+}
+
+.connecting-ring.ring-1 {
+  width: 100%;
+  height: 100%;
+  animation: connectPulse 2s infinite ease-out;
+}
+.connecting-ring.ring-2 {
+  width: 70%;
+  height: 70%;
+  animation: connectPulse 2s infinite ease-out 0.6s;
+}
+.connecting-ring.ring-3 {
+  width: 40%;
+  height: 40%;
+  animation: connectPulse 2s infinite ease-out 1.2s;
+}
+
+.connecting-center-icon {
+  font-size: 24px;
+  z-index: 2;
+}
+
+@keyframes connectPulse {
+  0% { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(1.2); opacity: 0; }
+}
+
+.connecting-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Handshake Stepper */
+.handshake-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 16px 0;
+}
+
+.hs-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.hs-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--bg-surface);
+  border: 2px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.hs-step.active .hs-dot {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+}
+
+.hs-step.completed .hs-dot {
+  border-color: var(--color-wifi);
+  background-color: var(--color-wifi);
+}
+
+.hs-step.completed .hs-dot::after {
+  content: '?';
+  color: #fff;
+  font-size: 12px;
+}
+
+.hs-step span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.hs-step.active span { color: var(--color-accent); }
+.hs-step.completed span { color: var(--color-wifi); }
+
+.hs-line {
+  height: 2px;
+  flex: 1;
+  background-color: var(--border-strong);
+  transition: background-color var(--transition-fast);
+}
+
+.hs-line.completed {
+  background-color: var(--color-wifi);
+}
+
+/* USB Prompt Modal */
+.usb-prompt-card {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  max-width: 440px;
+  box-shadow: var(--shadow-lg);
+  animation: fadeInScale 200ms ease-out;
+}
+
+.usb-icon-container {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--color-usb-bg);
+  color: var(--color-usb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.usb-cable-anim {
+  animation: plugIn 1.5s ease-out infinite alternate;
+}
+
+@keyframes plugIn {
+  0% { transform: translateX(-10px); }
+  100% { transform: translateX(5px); }
+}
+
+.usb-speed-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.usb-speed-hint strong {
+  color: var(--color-usb);
+}
+
+/* Toast Notification */
+.toast-notification {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--color-wifi);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  transform: translateX(120%);
+  transition: transform var(--transition-smooth);
+}
+
+.toast-notification.show {
+  transform: translateX(0);
+}
+
+.toast-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-wifi);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.toast-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast-content strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.toast-content span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Transport Recommendation */
+.transport-recommendation {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.transport-recommendation h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transport-rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transport-rank-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.transport-rank-badge {
+  font-size: 20px;
+}
+
+.transport-rank-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.transport-rank-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.transport-rank-details {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.transport-rank-speed {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+

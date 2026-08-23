@@ -8,7 +8,7 @@ echo ===============================================================
 echo Starting high-performance background engine...
 
 REM Start ShareDash in background if not already running
-start /b "" "target\release\sharedash.exe" --port 54321
+start /b "" "dist\sharedash.exe" --port 54321
 
 timeout /t 1 /nobreak >nul
 

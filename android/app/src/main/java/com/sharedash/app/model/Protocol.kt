@@ -63,6 +63,7 @@ object Protocol {
         // Compute CRC32
         val crc = CRC32()
         crc.update(buf.array(), 0, 30)
+        crc.update(frame.payload)
         val computedCrc = crc.value
         buf.putInt(computedCrc.toInt())
 
@@ -74,5 +75,46 @@ object Protocol {
         val md = MessageDigest.getInstance("SHA-256")
         val digest = md.digest(data)
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    fun decodeFrame(inputStream: java.io.InputStream): Frame? {
+        val headerBytes = ByteArray(HEADER_LEN)
+        var offset = 0
+        while (offset < HEADER_LEN) {
+            val read = inputStream.read(headerBytes, offset, HEADER_LEN - offset)
+            if (read == -1) return null
+            offset += read
+        }
+        val buf = ByteBuffer.wrap(headerBytes).order(ByteOrder.BIG_ENDIAN)
+        val m1 = buf.get()
+        val m2 = buf.get()
+        if (m1 != MAGIC_BYTES[0] || m2 != MAGIC_BYTES[1]) return null
+        buf.get() // ver
+        val typeByte = buf.get()
+        val flags = buf.short
+        
+        val uuidBytes = ByteArray(16)
+        buf.get(uuidBytes)
+        val uuidBuf = ByteBuffer.wrap(uuidBytes)
+        val transferId = UUID(uuidBuf.long, uuidBuf.long)
+        
+        val chunkId = buf.int
+        val payloadLen = buf.int
+        val crc32 = buf.int.toLong() and 0xFFFFFFFFL
+        
+        val payload = ByteArray(payloadLen)
+        offset = 0
+        while (offset < payloadLen) {
+            val read = inputStream.read(payload, offset, payloadLen - offset)
+            if (read == -1) return null
+            offset += read
+        }
+        
+        val crc = CRC32()
+        crc.update(headerBytes, 0, 30)
+        crc.update(payload)
+        if (crc.value != crc32) return null
+        
+        return Frame(FrameHeader(FrameType.fromByte(typeByte) ?: FrameType.HELLO, flags, transferId, chunkId, payloadLen, crc32), payload)
     }
 }

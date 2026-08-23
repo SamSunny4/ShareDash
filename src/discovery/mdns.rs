@@ -55,6 +55,15 @@ fn default_server_port() -> u16 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WifiCapsInfo {
+    pub wifi_standard: String,
+    pub max_frequency_ghz: f64,
+    pub max_channel_width_mhz: u32,
+    pub max_phy_rate_mbps: u32,
+    pub supported_bands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredPeer {
     pub device_id: String,
     pub friendly_name: String,
@@ -66,6 +75,8 @@ pub struct DiscoveredPeer {
     #[serde(default = "default_true")]
     pub is_compatible: bool,
     pub supported_transports: Vec<String>,
+    #[serde(default)]
+    pub wifi_caps: Option<WifiCapsInfo>,
     pub last_seen_epoch_ms: i64,
 }
 
@@ -137,24 +148,31 @@ impl PeerDiscovery {
                         format!("255.255.255.255:{}", DISCOVERY_BROADCAST_PORT).parse().unwrap(),
                     ];
 
-                    if let Ok(local_ip) = local_ip_address::local_ip() {
-                        if let std::net::IpAddr::V4(v4) = local_ip {
-                            let octets = v4.octets();
-                            if let Ok(addr) = format!("{}.{}.{}.255:{}", octets[0], octets[1], octets[2], DISCOVERY_BROADCAST_PORT).parse() {
-                                targets.push(addr);
+                    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+                        for (_, ip) in interfaces {
+                            if let std::net::IpAddr::V4(v4) = ip {
+                                if !v4.is_loopback() {
+                                    let octets = v4.octets();
+                                    if let Ok(addr) = format!("{}.{}.{}.255:{}", octets[0], octets[1], octets[2], DISCOVERY_BROADCAST_PORT).parse() {
+                                        if !targets.contains(&addr) {
+                                            targets.push(addr);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                     if let Ok(addr) = format!("192.168.42.255:{}", DISCOVERY_BROADCAST_PORT).parse() {
-                        targets.push(addr);
+                        if !targets.contains(&addr) { targets.push(addr); }
                     }
                     if let Ok(addr) = format!("172.20.10.255:{}", DISCOVERY_BROADCAST_PORT).parse() {
-                        targets.push(addr);
+                        if !targets.contains(&addr) { targets.push(addr); }
                     }
 
-                    for target in targets {
+                    for target in &targets {
                         let _ = socket_broadcast.send_to(&bytes, target).await;
                     }
+                    tracing::debug!("📡 Beacon broadcast sent to {} targets", targets.len());
                 }
                 sleep(Duration::from_secs(2)).await;
             }
@@ -177,6 +195,11 @@ impl PeerDiscovery {
                                 let app_ver = if beacon.app_version.is_empty() { CURRENT_APP_VERSION.to_string() } else { beacon.app_version };
                                 let compatible = is_version_compatible(&app_ver);
 
+                                tracing::info!(
+                                    "📱 UDP beacon received: \"{}\" ({}) at {} | port={} | v={} | compatible={}",
+                                    beacon.friendly_name, beacon.os_name, peer_addr.ip(), beacon.server_port, app_ver, compatible
+                                );
+
                                 let peer = DiscoveredPeer {
                                     device_id: beacon.device_id.clone(),
                                     friendly_name: if beacon.friendly_name.is_empty() { "Android Device".to_string() } else { beacon.friendly_name },
@@ -186,6 +209,7 @@ impl PeerDiscovery {
                                     app_version: app_ver,
                                     is_compatible: compatible,
                                     supported_transports: if beacon.supported_transports.is_empty() { vec!["Wi-Fi".to_string()] } else { beacon.supported_transports },
+                                    wifi_caps: None,
                                     last_seen_epoch_ms: Utc::now().timestamp_millis(),
                                 };
                                 peers_map.lock().insert(beacon.device_id, peer);
@@ -208,46 +232,43 @@ impl PeerDiscovery {
 
         tokio::spawn(async move {
             let client = reqwest::Client::builder()
-                .timeout(Duration::from_millis(1200))
+                .timeout(Duration::from_millis(800))
                 .pool_max_idle_per_host(10)
                 .build()
                 .unwrap_or_default();
 
             while !stop_http.load(Ordering::SeqCst) {
-                if let Ok(local_ip) = local_ip_address::local_ip() {
-                    if let std::net::IpAddr::V4(v4) = local_ip {
-                        let octets = v4.octets();
-                        let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-
-                        // Probe nearby IPs in parallel batches
-                        let mut tasks = Vec::new();
-                        for host in 1..=254 {
-                            if host == octets[3] { continue; }
-                            let ip = format!("{}.{}", prefix, host);
-                            
-                            {
-                                let cache = negative_cache.lock();
-                                if let Some(t) = cache.get(&ip) {
-                                    if t.elapsed().as_secs() < 60 {
-                                        continue;
-                                    }
-                                }
+                let mut prefixes: Vec<(String, u8)> = Vec::new();
+                if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+                    for (_, ip) in interfaces {
+                        if let std::net::IpAddr::V4(v4) = ip {
+                            if !v4.is_loopback() {
+                                let octets = v4.octets();
+                                prefixes.push((format!("{}.{}.{}", octets[0], octets[1], octets[2]), octets[3]));
                             }
+                        }
+                    }
+                }
 
+                for (prefix, local_host) in prefixes {
+                    // Probe nearby IPs in parallel batches
+                    let mut tasks = Vec::new();
+                    
+                    // Priority hosts (common gateways)
+                    let priority_hosts = [1, 129, 63, 254, 100];
+                    for &h in &priority_hosts {
+                        if h != local_host {
+                            let ip = format!("{}.{}", prefix, h);
                             let client_ref = client.clone();
                             let peers_ref = peers_map_http.clone();
                             let local_id = local_id_http.clone();
                             let permit = semaphore.clone().acquire_owned().await.unwrap();
-                            let neg_cache = negative_cache.clone();
 
                             tasks.push(tokio::spawn(async move {
                                 let _permit = permit;
                                 let url = format!("http://{}:54321/api/v1/info", ip);
-                                let mut success = false;
-                                
                                 if let Ok(resp) = client_ref.get(&url).send().await {
                                     if resp.status().is_success() {
-                                        success = true;
                                         if let Ok(info) = resp.json::<serde_json::Value>().await {
                                             let dev_id = info.get("device_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                             let name = info.get("device_name").and_then(|v| v.as_str()).unwrap_or("Android Device").to_string();
@@ -257,6 +278,10 @@ impl PeerDiscovery {
                                             let compatible = is_version_compatible(&app_ver);
 
                                             if !dev_id.is_empty() && dev_id != local_id {
+                                                tracing::info!(
+                                                    "🌐 HTTP probe found device: \"{}\" ({}) at {}:{} | v={} | compatible={}",
+                                                    name, os, ip, port, app_ver, compatible
+                                                );
                                                 if let Ok(sock) = format!("{}:{}", ip, port).parse::<SocketAddr>() {
                                                     let peer = DiscoveredPeer {
                                                         device_id: dev_id.clone(),
@@ -266,7 +291,8 @@ impl PeerDiscovery {
                                                         server_port: port,
                                                         app_version: app_ver,
                                                         is_compatible: compatible,
-                                                        supported_transports: vec!["Wi-Fi Direct".to_string(), "LAN".to_string()],
+                                                        supported_transports: vec!["🔌 USB Tethering / Wi-Fi".to_string(), "Wi-Fi Direct".to_string(), "LAN".to_string()],
+                                                        wifi_caps: None,
                                                         last_seen_epoch_ms: Utc::now().timestamp_millis(),
                                                     };
                                                     peers_ref.lock().insert(dev_id, peer);
@@ -275,34 +301,108 @@ impl PeerDiscovery {
                                         }
                                     }
                                 }
-                                
-                                if !success {
-                                    neg_cache.lock().insert(ip, Instant::now());
-                                }
                             }));
                         }
+                    }
 
-                        for task in tasks {
-                            let _ = task.await;
+                    for host in 1..=254 {
+                        if host == local_host || priority_hosts.contains(&host) { continue; }
+                        let ip = format!("{}.{}", prefix, host);
+                        
+                        {
+                            let cache = negative_cache.lock();
+                            if let Some(t) = cache.get(&ip) {
+                                if t.elapsed().as_secs() < 60 {
+                                    continue;
+                                }
+                            }
                         }
+
+                        let client_ref = client.clone();
+                        let peers_ref = peers_map_http.clone();
+                        let local_id = local_id_http.clone();
+                        let permit = semaphore.clone().acquire_owned().await.unwrap();
+                        let neg_cache = negative_cache.clone();
+
+                        tasks.push(tokio::spawn(async move {
+                            let _permit = permit;
+                            let url = format!("http://{}:54321/api/v1/info", ip);
+                            let mut success = false;
+                            
+                            if let Ok(resp) = client_ref.get(&url).send().await {
+                                if resp.status().is_success() {
+                                    success = true;
+                                    if let Ok(info) = resp.json::<serde_json::Value>().await {
+                                        let dev_id = info.get("device_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let name = info.get("device_name").and_then(|v| v.as_str()).unwrap_or("Android Device").to_string();
+                                        let os = info.get("os_name").and_then(|v| v.as_str()).unwrap_or("Android").to_string();
+                                        let port = info.get("server_port").and_then(|v| v.as_u64()).unwrap_or(54321) as u16;
+                                        let app_ver = info.get("app_version").and_then(|v| v.as_str()).unwrap_or("0.1.0").to_string();
+                                        let compatible = is_version_compatible(&app_ver);
+
+                                        if !dev_id.is_empty() && dev_id != local_id {
+                                            tracing::info!(
+                                                "🌐 HTTP probe found device: \"{}\" ({}) at {}:{} | v={} | compatible={}",
+                                                name, os, ip, port, app_ver, compatible
+                                            );
+                                            if let Ok(sock) = format!("{}:{}", ip, port).parse::<SocketAddr>() {
+                                                let peer = DiscoveredPeer {
+                                                    device_id: dev_id.clone(),
+                                                    friendly_name: name,
+                                                    os_name: os,
+                                                    remote_addr: sock,
+                                                    server_port: port,
+                                                    app_version: app_ver,
+                                                    is_compatible: compatible,
+                                                    supported_transports: vec!["🔌 USB Tethering / Wi-Fi".to_string(), "Wi-Fi Direct".to_string(), "LAN".to_string()],
+                                                    wifi_caps: None,
+                                                    last_seen_epoch_ms: Utc::now().timestamp_millis(),
+                                                };
+                                                peers_ref.lock().insert(dev_id, peer);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if !success {
+                                neg_cache.lock().insert(ip, Instant::now());
+                            }
+                        }));
+                    }
+
+                    for task in tasks {
+                        let _ = task.await;
                     }
                 }
-                sleep(Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(4)).await;
             }
         });
 
         Ok(())
     }
 
-    /// Return list of all active peers seen within the last 15 seconds
+    /// Return list of all active peers seen within the last 30 seconds
     pub fn get_active_peers(&self) -> Vec<DiscoveredPeer> {
         let mut lock = self.peers.lock();
         let now = Utc::now().timestamp_millis();
+        let before_count = lock.len();
 
-        // Prune peers older than 15 seconds
-        lock.retain(|_, p| now - p.last_seen_epoch_ms < 15_000);
+        // Prune peers older than 30 seconds (was 15s — too aggressive for HTTP probe cycle)
+        lock.retain(|id, p| {
+            let age_ms = now - p.last_seen_epoch_ms;
+            let keep = age_ms < 30_000;
+            if !keep {
+                tracing::debug!("⏰ Pruning stale peer: \"{}\" ({}) — last seen {}ms ago", p.friendly_name, id, age_ms);
+            }
+            keep
+        });
 
-        lock.values().cloned().collect()
+        let peers: Vec<DiscoveredPeer> = lock.values().cloned().collect();
+        if before_count > 0 || !peers.is_empty() {
+            tracing::debug!("📋 get_active_peers: {} active (pruned {} stale)", peers.len(), before_count - lock.len());
+        }
+        peers
     }
 
     pub fn stop(&self) {

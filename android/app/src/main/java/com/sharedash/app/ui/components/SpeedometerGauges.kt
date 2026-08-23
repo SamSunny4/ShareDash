@@ -140,9 +140,8 @@ fun MultipathSpeedometer(
             transports.forEach { t ->
                 val color = when {
                     t.name.contains("USB", true) -> UsbTeal
-                    t.name.contains("Direct", true) || t.name.contains("Wi-Fi", true) -> WifiGreen
-                    t.name.contains("LAN", true) -> LanSky
-                    else -> QuicPurple
+                    t.name.contains("Direct", true) || t.name.contains("Hotspot", true) -> WifiGreen
+                    else -> LanSky
                 }
 
                 TransportBox(

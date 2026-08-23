@@ -138,14 +138,27 @@ impl AsyncTransport for QuicInetTransport {
 
         self.send_frame(probe_frame).await?;
 
-        while let Some(frame) = self.recv_frame().await? {
-            if frame.header.frame_type == FrameType::BenchmarkResp {
+        let recv_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while let Some(frame) = self.recv_frame().await? {
+                if frame.header.frame_type == FrameType::BenchmarkResp {
+                    return Ok(Some(frame));
+                } else {
+                    tracing::warn!("Discarded non-benchmark frame during benchmark");
+                }
+            }
+            Ok::<_, anyhow::Error>(None)
+        }).await;
+
+        match recv_result {
+            Ok(Ok(Some(_))) => {
                 let duration = start.elapsed().as_secs_f64();
                 self.metrics.rtt_ms = duration * 1000.0;
                 let mbps = ((probe_size_bytes as f64) * 8.0) / (duration * 1_000_000.0);
                 self.metrics.current_mbps = mbps;
-                self.metrics.state = TransportState::Active;
-                return Ok(mbps);
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => {}
+            Err(_) => {
+                tracing::warn!("Benchmark timed out");
             }
         }
 

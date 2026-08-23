@@ -1,7 +1,13 @@
 package com.sharedash.app.ui.screens
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,40 +24,47 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sharedash.app.discovery.HotspotState
 import com.sharedash.app.model.DiscoveredPeer
-import com.sharedash.app.ui.components.QuickShareRadar
-import com.sharedash.app.ui.theme.AccentBlue
-import com.sharedash.app.ui.theme.BgApp
-import com.sharedash.app.ui.theme.BgSurface
-import com.sharedash.app.ui.theme.BgSurfaceElevated
-import com.sharedash.app.ui.theme.DangerRed
-import com.sharedash.app.ui.theme.InFlightYellow
+import com.sharedash.app.ui.theme.NeoBg
+import com.sharedash.app.ui.theme.NeoBlue
+import com.sharedash.app.ui.theme.NeoButton
+import com.sharedash.app.ui.theme.NeoCard
+import com.sharedash.app.ui.theme.NeoCardPressed
+import com.sharedash.app.ui.theme.NeoCyan
+import com.sharedash.app.ui.theme.NeoDarkShadow
+import com.sharedash.app.ui.theme.NeoGreen
+import com.sharedash.app.ui.theme.NeoInset
+import com.sharedash.app.ui.theme.NeoLightShadow
+import com.sharedash.app.ui.theme.NeoRed
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary
-import com.sharedash.app.ui.theme.WifiGreen
 
 @Composable
 fun DiscoveryScreen(
@@ -67,257 +80,518 @@ fun DiscoveryScreen(
     onOpenPairing: () -> Unit,
     onOpenDownloadsFolder: () -> Unit,
     onOpenUsbSettings: () -> Unit = {},
+    onOpenHotspotSettings: () -> Unit = {},
+    hotspotState: HotspotState = HotspotState.Idle,
+    onStartHotspot: () -> Unit = {},
+    onStopHotspot: () -> Unit = {},
     onEnableBluetooth: () -> Unit = {},
     onEnableWifi: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val transition = rememberInfiniteTransition(label = "radarPulse")
+    val pulse1 by transition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "pulse1"
+    )
+    val pulse1Alpha by transition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "pulse1Alpha"
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(BgApp)
-            .padding(16.dp)
+            .background(NeoBg)
+            .padding(horizontal = 20.dp, vertical = 16.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Top Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(BgSurface, RoundedCornerShape(14.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // ═══════════════════════════════════════════════════════════════
+        //  NEOMORPHIC HEADER BAR
+        // ═══════════════════════════════════════════════════════════════
+        NeoCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 22.dp,
+            elevation = 6.dp
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AccentBlue),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "Logo",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "ShareDash",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(WifiGreen)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Visible nearby",
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
-                    }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDownloadsFolder) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = "Received Files",
-                        tint = TextPrimary
-                    )
-                }
-                IconButton(onClick = onOpenPairing) {
-                    Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = "Scan QR",
-                        tint = TextPrimary
-                    )
-                }
-            }
-        }
-
-        // Radio Warning Banners if Bluetooth or Wi-Fi is Off
-        if (!isWifiEnabled || !isBluetoothEnabled) {
-            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(InFlightYellow.copy(alpha = 0.12f))
-                    .border(1.dp, InFlightYellow.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = InFlightYellow, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (!isWifiEnabled && !isBluetoothEnabled) "Wi-Fi & Bluetooth are off" else if (!isWifiEnabled) "Wi-Fi is turned off" else "Bluetooth is turned off",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = InFlightYellow
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(NeoBlue, NeoCyan)
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Logo",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "ShareDash",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(NeoGreen)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Ready to Share",
+                                fontSize = 12.sp,
+                                color = TextSecondary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
 
-                if (!isWifiEnabled) {
-                    TextButton(onClick = onEnableWifi) {
-                        Text("Enable Wi-Fi", fontSize = 11.sp, color = AccentBlue, fontWeight = FontWeight.Bold)
-                    }
-                } else if (!isBluetoothEnabled) {
-                    TextButton(onClick = onEnableBluetooth) {
-                        Text("Enable Bluetooth", fontSize = 11.sp, color = AccentBlue, fontWeight = FontWeight.Bold)
-                    }
+                // Received Files Shortcut
+                NeoButton(
+                    onClick = onOpenDownloadsFolder,
+                    cornerRadius = 14.dp,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = "Received Files",
+                        tint = NeoCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Pulsing Quick Share Radar Discovery
-        QuickShareRadar(
-            discoveredPeers = discoveredPeers,
-            onDeviceSelected = onDeviceSelected
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        if (connectedPeer == null) {
-            Text(
-                text = "Looking for nearby devices...",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
-
-            Text(
-                text = "Tap a device on the radar above to establish a secure connection",
-                fontSize = 12.sp,
-                color = TextMuted
-            )
-        } else {
-            // Secure Connection Banner & Post-Connection Tunnels
-            Column(
+        // ═══════════════════════════════════════════════════════════════
+        //  BLUETOOTH OFF ALERT BANNER
+        // ═══════════════════════════════════════════════════════════════
+        if (!isBluetoothEnabled) {
+            NeoCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(WifiGreen.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-                    .border(1.dp, WifiGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                    .padding(14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(bottom = 12.dp),
+                cornerRadius = 18.dp,
+                elevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(NeoBlue.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bluetooth,
+                                contentDescription = "Bluetooth Off",
+                                tint = NeoBlue,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Bluetooth is Turned Off",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Enable for wireless nearby discovery",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    NeoButton(
+                        onClick = onEnableBluetooth,
+                        cornerRadius = 12.dp,
+                        accentColor = NeoBlue
+                    ) {
+                        Text(
+                            text = "Turn On",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  USB 3.x TURBO BOOST BANNER
+        // ═══════════════════════════════════════════════════════════════
+        NeoCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            cornerRadius = 18.dp,
+            elevation = 4.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Secure",
-                        tint = WifiGreen,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Securely Connected to ${connectedPeer.friendlyName}",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = WifiGreen
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "🔒 AES-256-GCM Encrypted",
-                        fontSize = 11.sp,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    TextButton(onClick = onDisconnect) {
-                        Text("Disconnect", color = DangerRed, fontSize = 11.sp)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Post-Connection Tunnels & Booster Suggestions
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.weight(1f)
                 ) {
                     Box(
                         modifier = Modifier
-                            .background(AccentBlue.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(NeoGreen.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("📶 Wi-Fi LAN Active", fontSize = 10.sp, color = AccentBlue, fontWeight = FontWeight.Bold)
+                        Icon(
+                            imageVector = Icons.Default.Usb,
+                            contentDescription = "USB",
+                            tint = NeoGreen,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "⚡ USB Turbo Line Speed",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Plug USB cable to PC for 3+ Gbps transfer",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                NeoButton(
+                    onClick = onOpenUsbSettings,
+                    cornerRadius = 12.dp,
+                    accentColor = NeoGreen
+                ) {
+                    Text(
+                        text = "Setup",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
 
-                    if (isUsbConnected) {
-                        Box(
-                            modifier = Modifier
-                                .background(WifiGreen.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+        // ═══════════════════════════════════════════════════════════════
+        //  NEOMORPHIC RADAR SCANNER
+        // ═══════════════════════════════════════════════════════════════
+        Box(
+            modifier = Modifier
+                .size(200.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Concentric Sunken Well
+            NeoInset(
+                modifier = Modifier.size(190.dp),
+                cornerRadius = 95.dp
+            ) {}
+
+            // Pulsing Outer Radar Ring
+            Box(
+                modifier = Modifier
+                    .size(170.dp)
+                    .scale(pulse1)
+                    .clip(CircleShape)
+                    .background(NeoBlue.copy(alpha = pulse1Alpha * 0.25f))
+            )
+
+            // Inner Neomorphic Central Node
+            NeoCard(
+                modifier = Modifier.size(76.dp),
+                cornerRadius = 38.dp,
+                elevation = 6.dp
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhoneAndroid,
+                        contentDescription = "This Device",
+                        tint = NeoBlue,
+                        modifier = Modifier.size(34.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = if (discoveredPeers.isEmpty()) "Searching for nearby PCs..." else "Found ${discoveredPeers.size} Device(s)",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary
+        )
+        Text(
+            text = "Make sure ShareDash is open on your PC",
+            fontSize = 12.sp,
+            color = TextMuted
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // ═══════════════════════════════════════════════════════════════
+        //  FOUND DEVICES LIST (NEOMORPHIC CARDS)
+        // ═══════════════════════════════════════════════════════════════
+        if (discoveredPeers.isNotEmpty()) {
+            discoveredPeers.forEach { peer ->
+                NeoCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    cornerRadius = 20.dp,
+                    elevation = 6.dp,
+                    onClick = { onDeviceSelected(peer) }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(NeoBlue.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Computer,
+                                    contentDescription = "PC",
+                                    tint = NeoBlue,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = peer.friendlyName,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(NeoGreen)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "High-Speed Multipath Ready",
+                                        fontSize = 11.sp,
+                                        color = NeoCyan,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        NeoButton(
+                            onClick = { onDeviceSelected(peer) },
+                            cornerRadius = 14.dp,
+                            accentColor = NeoBlue,
+                            modifier = Modifier.padding(start = 6.dp)
                         ) {
-                            Text("⚡ USB 3.2 Active", fontSize = 10.sp, color = WifiGreen, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Connect",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            )
                         }
                     }
                 }
-
-                if (!isUsbConnected) {
-                    Spacer(modifier = Modifier.height(6.dp))
+            }
+        } else {
+            // Empty State Inset Card
+            NeoInset(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                cornerRadius = 18.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
-                        text = "💡 Tip: Plug in USB cable to enable 3.2 Gbps wire-speed turbo tunnel!",
-                        fontSize = 10.sp,
+                        text = "📡 Scanning over Wi-Fi, Bluetooth & USB...",
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ═══════════════════════════════════════════════════════════════
+        //  QUICK TOOLS & FAST-PATH SHORTCUTS
+        // ═══════════════════════════════════════════════════════════════
+        Text(
+            text = "Transfer Boost Tools",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextSecondary,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Start
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 5GHz Hotspot Card
+            val isHotspotActive = hotspotState is HotspotState.Active
+            NeoCard(
+                modifier = Modifier.weight(1f),
+                cornerRadius = 18.dp,
+                backgroundColor = if (isHotspotActive) NeoCardPressed else NeoCard,
+                onClick = {
+                    if (isHotspotActive) onStopHotspot() else onStartHotspot()
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background((if (isHotspotActive) NeoGreen else NeoCyan).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WifiTethering,
+                            contentDescription = "Hotspot",
+                            tint = if (isHotspotActive) NeoGreen else NeoCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = if (isHotspotActive) "5GHz Active" else "5GHz Hotspot",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isHotspotActive) NeoGreen else TextPrimary
+                    )
+                    Text(
+                        text = if (isHotspotActive) "Tap to turn off" else "1200 Mbps link",
+                        fontSize = 11.sp,
                         color = TextMuted
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Action Buttons (Only Enabled After Secure Connection)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // USB Cable Mode Card
+            NeoCard(
+                modifier = Modifier.weight(1f),
+                cornerRadius = 18.dp,
+                onClick = onOpenUsbSettings
             ) {
-                Button(
-                    onClick = onPickFiles,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
-                    shape = RoundedCornerShape(12.dp),
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalAlignment = Alignment.Start
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Select Files", fontWeight = FontWeight.Bold)
-                }
-
-                OutlinedButton(
-                    onClick = onPickFolder,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                ) {
-                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Select Folder", fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(NeoCyan.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Usb,
+                            contentDescription = "USB",
+                            tint = NeoCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "USB Cable",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "30+ MB/s wired",
+                        fontSize = 11.sp,
+                        color = TextMuted
+                    )
                 }
             }
         }

@@ -24,17 +24,21 @@ struct Args {
     /// SQLite Manifest Database path
     #[arg(long, default_value = "./sharedash_data/manifest.db")]
     db_path: PathBuf,
+
+    /// Open browser dashboard on startup (default: false, runs fully in terminal)
+    #[arg(long, default_value_t = false)]
+    web: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing subscriber
+    // Initialize tracing subscriber with clean terminal output
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "sharedash=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "sharedash=warn,tower_http=warn".into()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_target(false).without_time())
         .init();
 
     let args = Args::parse();
@@ -58,15 +62,6 @@ async fn main() -> anyhow::Result<()> {
         new_id
     };
 
-    println!("===============================================================");
-    println!("     ShareDash: Multipath Local + Internet Transfer Engine     ");
-    println!("===============================================================");
-    println!("Device ID:   {}", device_id);
-    println!("Device Name: {}", args.name);
-    println!("HTTP/WS:     http://127.0.0.1:{}", args.port);
-    println!("Dashboard:   http://127.0.0.1:{}", args.port);
-    println!("===============================================================\n");
-
     let server = Server::new(
         args.port,
         args.ui_dir,
@@ -74,6 +69,32 @@ async fn main() -> anyhow::Result<()> {
         args.name,
         args.db_path,
     );
+
+    if args.web {
+        let port = args.port;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            let url = format!("http://127.0.0.1:{}", port);
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", &url])
+                    .spawn();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open")
+                    .arg(&url)
+                    .spawn();
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&url)
+                    .spawn();
+            }
+        });
+    }
 
     server.run().await?;
     Ok(())
