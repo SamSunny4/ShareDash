@@ -46,6 +46,7 @@ class AndroidHttpServer(
         val totalChunks: Int,
         val targetFile: File,
         val raf: java.io.RandomAccessFile,
+        val channel: java.nio.channels.FileChannel = raf.channel,
         val receivedChunks: java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
         val startTime: Long = System.currentTimeMillis()
     )
@@ -430,22 +431,20 @@ class AndroidHttpServer(
             ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
         }
 
-        // Out-of-order random access write
-        synchronized(session.raf) {
-            try {
-                session.raf.seek(chunkOffset)
-                session.raf.write(chunkBytes)
-                session.receivedChunks.add(chunkId)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed writing chunk #$chunkId at offset $chunkOffset: ${e.message}")
-                val resp = JSONObject().apply {
-                    put("success", false)
-                    put("error", "WRITE_FAILED")
-                    put("chunk_id", chunkId)
-                }
-                sendJsonResponse(output, 500, resp)
-                return
+        // Out-of-order concurrent random access write via FileChannel
+        try {
+            val byteBuffer = java.nio.ByteBuffer.wrap(chunkBytes)
+            session.channel.write(byteBuffer, chunkOffset)
+            session.receivedChunks.add(chunkId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed writing chunk #$chunkId at offset $chunkOffset: ${e.message}")
+            val resp = JSONObject().apply {
+                put("success", false)
+                put("error", "WRITE_FAILED")
+                put("chunk_id", chunkId)
             }
+            sendJsonResponse(output, 500, resp)
+            return
         }
 
         val completedCount = session.receivedChunks.size
@@ -458,9 +457,9 @@ class AndroidHttpServer(
 
         if (completedCount >= total) {
             try {
-                synchronized(session.raf) {
-                    session.raf.close()
-                }
+                session.channel.force(true)
+                session.channel.close()
+                session.raf.close()
             } catch (_: Exception) {}
             activeChunkTransfers.remove(sessionKey)
             Log.i(TAG, "🎉 Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")

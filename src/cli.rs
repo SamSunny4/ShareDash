@@ -932,15 +932,15 @@ impl TerminalCli {
 
         let mut handles = Vec::new();
 
-        // Adaptive chunk size based on file size
-        let chunk_size: u64 = if file_size < 10 * 1024 * 1024 {
-            256 * 1024 // 256 KB for files < 10 MB
-        } else if file_size < 100 * 1024 * 1024 {
-            512 * 1024 // 512 KB for 10-100 MB
+        // Adaptive high-throughput chunk size based on file size (1MB - 8MB)
+        let chunk_size: u64 = if file_size < 20 * 1024 * 1024 {
+            1024 * 1024 // 1 MB for files < 20 MB
+        } else if file_size < 200 * 1024 * 1024 {
+            2 * 1024 * 1024 // 2 MB for 20-200 MB
         } else if file_size < 1024 * 1024 * 1024 {
-            2 * 1024 * 1024 // 2 MB for 100 MB - 1 GB
+            4 * 1024 * 1024 // 4 MB for 200 MB - 1 GB
         } else {
-            4 * 1024 * 1024 // 4 MB for > 1 GB
+            8 * 1024 * 1024 // 8 MB for > 1 GB
         };
 
         let transfer_id = uuid::Uuid::new_v4().to_string();
@@ -949,21 +949,24 @@ impl TerminalCli {
         ));
         let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // Spawn one dynamic worker per transport — all pull from the same shared pool
+        // Spawn 3 concurrent pipelined in-flight streaming workers per transport for line speed
+        let workers_per_transport = 3;
         for (state, ip, port, name, _) in &channel_states {
-            let h = tokio::spawn(run_transport_chunk_worker(
-                ip.clone(),
-                *port,
-                name.clone(),
-                file_path.to_path_buf(),
-                file_name.to_string(),
-                file_size,
-                transfer_id.clone(),
-                dispatcher.clone(),
-                state.clone(),
-                stop_flag.clone(),
-            ));
-            handles.push(h);
+            for _ in 0..workers_per_transport {
+                let h = tokio::spawn(run_transport_chunk_worker(
+                    ip.clone(),
+                    *port,
+                    name.clone(),
+                    file_path.to_path_buf(),
+                    file_name.to_string(),
+                    file_size,
+                    transfer_id.clone(),
+                    dispatcher.clone(),
+                    state.clone(),
+                    stop_flag.clone(),
+                ));
+                handles.push(h);
+            }
         }
 
         let mut all_ok = true;
@@ -996,9 +999,8 @@ impl TerminalCli {
         let usb_ch = final_channels.iter().find(|c| c.name == "USB");
         let wifi_ch = final_channels.iter().find(|c| c.name == "Wi-Fi");
 
-        let chunk_size = 512 * 1024;
         let total_chunks = if chunk_size > 0 {
-            ((file_size as usize + chunk_size - 1) / chunk_size).max(1)
+            ((file_size + chunk_size - 1) / chunk_size).max(1) as usize
         } else {
             1
         };
@@ -1013,7 +1015,7 @@ impl TerminalCli {
             usb_pct: usb_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
             wifi_speed_mb_s: wifi_ch.map(|c| c.speed_mb_s),
             wifi_pct: wifi_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
-            chunk_size_bytes: chunk_size,
+            chunk_size_bytes: chunk_size as usize,
             total_chunks,
             integrity_ok: all_ok,
         };

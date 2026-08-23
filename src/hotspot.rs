@@ -526,41 +526,83 @@ pub fn generate_hotspot_credentials() -> (String, String) {
     (format!("ShareDash-5G-{}", suffix), password)
 }
 
-/// Connect the PC's Wi-Fi adapter to a phone-hosted hotspot.
-///
-/// Creates a WLAN profile and connects via `netsh wlan`.
-pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool> {
+/// Check if the PC's Wi-Fi adapter is enabled and turned on.
+pub async fn check_pc_wifi_adapter_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
-        // Create a WLAN profile XML for the phone hotspot (supports WPA2PSK and Open)
-        let security_section = if password.is_empty() {
-            r#"<security>
-                <authEncryption>
-                    <authentication>open</authentication>
-                    <encryption>none</encryption>
-                    <useOneX>false</useOneX>
-                </authEncryption>
-            </security>"#.to_string()
-        } else {
-            format!(
-                r#"<security>
-                <authEncryption>
-                    <authentication>WPA2PSK</authentication>
-                    <encryption>AES</encryption>
-                    <useOneX>false</useOneX>
-                </authEncryption>
-                <sharedKey>
-                    <keyType>passPhrase</keyType>
-                    <protected>false</protected>
-                    <keyMaterial>{password}</keyMaterial>
-                </sharedKey>
-            </security>"#,
-                password = password
-            )
-        };
+        let ps_script = r#"
+            $adapter = Get-NetAdapter | Where-Object { ($_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek') -and ($_.Status -ne 'Disabled') }
+            if ($adapter) {
+                Write-Output "WIFI_ON"
+            } else {
+                Write-Output "WIFI_OFF"
+            }
+        "#;
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return stdout.contains("WIFI_ON");
+        }
+    }
+    true
+}
 
-        let profile_xml = format!(
-            r#"<?xml version="1.0"?>
+/// Ensure the PC's Wi-Fi adapter is enabled and ready to connect.
+pub async fn ensure_pc_wifi_adapter_enabled() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if !check_pc_wifi_adapter_enabled().await {
+            tracing::info!("PC Wi-Fi adapter is disabled. Enabling Wi-Fi adapter...");
+            let ps_script = r#"
+                try {
+                    Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek' } | Enable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue
+                } catch {}
+            "#;
+            let _ = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+                .output()
+                .await;
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            return check_pc_wifi_adapter_enabled().await;
+        }
+    }
+    true
+}
+
+#[cfg(target_os = "windows")]
+async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, profile_path: &std::path::Path) -> bool {
+    let security_section = if password.is_empty() {
+        r#"<security>
+            <authEncryption>
+                <authentication>open</authentication>
+                <encryption>none</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+        </security>"#.to_string()
+    } else {
+        format!(
+            r#"<security>
+            <authEncryption>
+                <authentication>{auth_type}</authentication>
+                <encryption>AES</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>{password}</keyMaterial>
+            </sharedKey>
+        </security>"#,
+            auth_type = auth_type,
+            password = password
+        )
+    };
+
+    let profile_xml = format!(
+        r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
     <name>{ssid}</name>
     <SSIDConfig>
@@ -574,62 +616,57 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
         {security}
     </MSM>
 </WLANProfile>"#,
-            ssid = ssid,
-            security = security_section
-        );
+        ssid = ssid,
+        security = security_section
+    );
 
-        // Write the profile XML to a temp file
+    let _ = tokio::fs::write(profile_path, &profile_xml).await;
+    let _ = tokio::process::Command::new("netsh")
+        .args([
+            "wlan",
+            "add",
+            "profile",
+            &format!("filename={}", profile_path.display()),
+        ])
+        .output()
+        .await;
+
+    let connect_result = tokio::process::Command::new("netsh")
+        .args(["wlan", "connect", &format!("name={}", ssid)])
+        .output()
+        .await;
+
+    if let Ok(out) = connect_result {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        tracing::info!("WLAN connect ({}) result: {}", auth_type, stdout.trim());
+        stdout.contains("successfully") || out.status.success()
+    } else {
+        false
+    }
+}
+
+/// Connect the PC's Wi-Fi adapter to a phone-hosted hotspot.
+///
+/// Creates a WLAN profile (supporting both WPA2PSK and WPA3-Personal SAE) and connects via `netsh wlan`.
+pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        ensure_pc_wifi_adapter_enabled().await;
+
         let temp_dir = std::env::temp_dir();
         let profile_path = temp_dir.join("sharedash_phone_hotspot.xml");
-        tokio::fs::write(&profile_path, &profile_xml).await?;
 
-        // Add the WLAN profile
-        let add_result = tokio::process::Command::new("netsh")
-            .args([
-                "wlan",
-                "add",
-                "profile",
-                &format!("filename={}", profile_path.display()),
-            ])
-            .output()
-            .await;
+        // Try WPA2PSK first
+        let mut ok = apply_and_connect_profile(ssid, password, "WPA2PSK", &profile_path).await;
 
-        match add_result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                tracing::info!("WLAN profile add: {}", stdout.trim());
-            }
-            Err(e) => {
-                tracing::warn!("Failed to add WLAN profile: {}", e);
-            }
+        // If not connected and password is provided, try WPA3SAE (for Android 12+ WPA3 hotspots)
+        if !ok && !password.is_empty() {
+            tracing::info!("Trying WPA3SAE profile for {}", ssid);
+            ok = apply_and_connect_profile(ssid, password, "WPA3SAE", &profile_path).await;
         }
 
-        // Clean up temp file
         let _ = tokio::fs::remove_file(&profile_path).await;
-
-        // Connect to the network (with retry loop for Windows WLAN association)
-        for attempt in 0..3 {
-            let connect_result = tokio::process::Command::new("netsh")
-                .args(["wlan", "connect", &format!("name={}", ssid)])
-                .output()
-                .await;
-
-            match connect_result {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    tracing::info!("WLAN connect attempt {}: {}", attempt + 1, stdout.trim());
-                    if stdout.contains("successfully") || output.status.success() {
-                        return Ok(true);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to connect to phone hotspot: {}", e);
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        Ok(false)
+        Ok(ok)
     }
     #[cfg(not(target_os = "windows"))]
     {

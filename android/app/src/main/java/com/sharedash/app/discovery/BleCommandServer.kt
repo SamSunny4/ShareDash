@@ -283,6 +283,8 @@ class BleCommandServer(private val context: Context) {
 
         when (cmd) {
             "ping", "get_info", "get_network_info" -> {
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val isWifiOn = wifiManager?.isWifiEnabled ?: false
                 val ips = getLocalIpAddresses()
                 sendResponse(device, JSONObject().apply {
                     put("status", "pong")
@@ -290,6 +292,7 @@ class BleCommandServer(private val context: Context) {
                     put("device_id", com.sharedash.app.DeviceIdentity.id)
                     put("app_version", "0.1.0")
                     put("server_port", 54321)
+                    put("wifi_enabled", isWifiOn)
                     put("local_ips", org.json.JSONArray(ips))
                 })
             }
@@ -302,12 +305,15 @@ class BleCommandServer(private val context: Context) {
             "wifi_connect" -> {
                 val ssid = json.optString("ssid", "")
                 val password = json.optString("password", "")
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val isWifiOn = wifiManager?.isWifiEnabled ?: false
                 if (ssid.isNotBlank()) {
-                    Log.i(TAG, "📶 Wi-Fi connect request: SSID='$ssid'")
+                    Log.i(TAG, "📶 Wi-Fi connect request: SSID='$ssid', phone wifi_enabled=$isWifiOn")
                     onWifiConnectRequest?.invoke(ssid, password)
                     sendResponse(device, JSONObject().apply {
                         put("status", "wifi_connecting")
                         put("ssid", ssid)
+                        put("wifi_enabled", isWifiOn)
                     })
                 } else {
                     sendResponse(device, JSONObject().apply {

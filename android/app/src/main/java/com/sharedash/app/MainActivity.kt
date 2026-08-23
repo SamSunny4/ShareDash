@@ -1050,15 +1050,44 @@ class MainActivity : ComponentActivity() {
      */
     @android.annotation.SuppressLint("MissingPermission")
     private fun connectToWifiNetwork(ssid: String, password: String) {
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager
+        if (wifiManager != null && !wifiManager.isWifiEnabled) {
+            android.util.Log.w("MainActivity", "Phone Wi-Fi is OFF! Requesting Wi-Fi to be enabled for connection to $ssid...")
+            lifecycleScope.launch(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "⚠️ Wi-Fi is OFF. Turning Wi-Fi on to connect to $ssid...", Toast.LENGTH_LONG).show()
+                try {
+                    @Suppress("DEPRECATION")
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        wifiManager.isWifiEnabled = true
+                    } else {
+                        try {
+                            val panelIntent = Intent(android.provider.Settings.Panel.ACTION_WIFI)
+                            panelIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            startActivity(panelIntent)
+                        } catch (_: Exception) {
+                            val settingsIntent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                            settingsIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            startActivity(settingsIntent)
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Could not toggle Wi-Fi: ${e.message}")
+                }
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android 10+: Use WifiNetworkSuggestion
-            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager
             if (wifiManager != null) {
-                val suggestion = android.net.wifi.WifiNetworkSuggestion.Builder()
+                val suggestionBuilder = android.net.wifi.WifiNetworkSuggestion.Builder()
                     .setSsid(ssid)
-                    .setWpa2Passphrase(password)
                     .setIsAppInteractionRequired(false)
-                    .build()
+
+                if (password.isNotEmpty()) {
+                    suggestionBuilder.setWpa2Passphrase(password)
+                }
+
+                val suggestion = suggestionBuilder.build()
 
                 // Remove any previous suggestions from us first
                 wifiManager.removeNetworkSuggestions(listOf(suggestion))
@@ -1066,18 +1095,23 @@ class MainActivity : ComponentActivity() {
                 val status = wifiManager.addNetworkSuggestions(listOf(suggestion))
                 if (status == android.net.wifi.WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
                     android.util.Log.i("MainActivity", "📶 Wi-Fi suggestion added for SSID='$ssid'")
-                    Toast.makeText(this, "📶 Connecting to $ssid...", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "📶 Connecting to $ssid...", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
                     android.util.Log.e("MainActivity", "Wi-Fi suggestion failed with status: $status")
-                    Toast.makeText(this, "⚠️ Could not add Wi-Fi network: $ssid", Toast.LENGTH_SHORT).show()
                 }
 
                 // Also try WifiNetworkSpecifier for immediate connection
                 try {
-                    val specifier = android.net.wifi.WifiNetworkSpecifier.Builder()
+                    val specifierBuilder = android.net.wifi.WifiNetworkSpecifier.Builder()
                         .setSsid(ssid)
-                        .setWpa2Passphrase(password)
-                        .build()
+
+                    if (password.isNotEmpty()) {
+                        specifierBuilder.setWpa2Passphrase(password)
+                    }
+
+                    val specifier = specifierBuilder.build()
                     val request = android.net.NetworkRequest.Builder()
                         .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
                         .setNetworkSpecifier(specifier)
@@ -1099,18 +1133,23 @@ class MainActivity : ComponentActivity() {
         } else {
             // Android 9 and below: Use deprecated addNetwork
             @Suppress("DEPRECATION")
-            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager
             if (wifiManager != null) {
                 val wifiConfig = android.net.wifi.WifiConfiguration().apply {
                     SSID = "\"$ssid\""
-                    preSharedKey = "\"$password\""
+                    if (password.isNotEmpty()) {
+                        preSharedKey = "\"$password\""
+                    } else {
+                        allowedKeyManagement.set(android.net.wifi.WifiConfiguration.KeyMgmt.NONE)
+                    }
                 }
                 val netId = wifiManager.addNetwork(wifiConfig)
                 if (netId != -1) {
                     wifiManager.disconnect()
                     wifiManager.enableNetwork(netId, true)
                     wifiManager.reconnect()
-                    Toast.makeText(this, "📶 Connecting to $ssid...", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "📶 Connecting to $ssid...", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
