@@ -52,6 +52,50 @@ class AndroidHttpServer(
     )
 
     private val activeChunkTransfers = java.util.concurrent.ConcurrentHashMap<String, ActiveChunkTransfer>()
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    private fun acquireHighPerfLocks() {
+        try {
+            if (wakeLock == null) {
+                val powerManager = context.applicationContext.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                wakeLock = powerManager?.newWakeLock(
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                    "ShareDash::HttpServerWakeLock"
+                )?.apply {
+                    acquire(30 * 60 * 1000L)
+                }
+            }
+            if (wifiLock == null) {
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                val lockMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wifiManager?.createWifiLock(lockMode, "ShareDash::HttpServerWifiLock")?.apply {
+                    acquire()
+                }
+                Log.i(TAG, "🔒 Acquired Low-Latency High-Perf WifiLock & WakeLock for high-speed reception")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed acquiring high-perf locks: ${e.message}")
+        }
+    }
+
+    private fun releaseHighPerfLocksIfIdle() {
+        if (activeChunkTransfers.isEmpty()) {
+            try {
+                wakeLock?.let { if (it.isHeld) it.release() }
+                wakeLock = null
+                wifiLock?.let { if (it.isHeld) it.release() }
+                wifiLock = null
+                Log.i(TAG, "🔓 Released High-Perf WifiLock & WakeLock")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing high-perf locks: ${e.message}")
+            }
+        }
+    }
 
     var activePairedPeerName: String? = null
     var pendingPairRequest: JSONObject? = null
@@ -87,269 +131,300 @@ class AndroidHttpServer(
 
     private fun handleClientConnection(socket: Socket) {
         try {
-            socket.soTimeout = 8000
-            val input = BufferedInputStream(socket.getInputStream())
-            val output = BufferedOutputStream(socket.getOutputStream())
+            socket.tcpNoDelay = true
+            socket.receiveBufferSize = 2 * 1024 * 1024
+            socket.sendBufferSize = 512 * 1024
+            socket.soTimeout = 30000
 
-            // Read HTTP request line
-            val firstLine = readLine(input) ?: return
-            val parts = firstLine.split(" ")
-            if (parts.size < 2) return
+            val input = BufferedInputStream(socket.getInputStream(), 512 * 1024)
+            val output = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
 
-            val method = parts[0].uppercase()
-            val path = parts[1]
+            while (true) {
+                // Read HTTP request line
+                val firstLine = readLine(input) ?: break
+                val parts = firstLine.split(" ")
+                if (parts.size < 2) break
 
-            // Read headers
-            val headers = mutableMapOf<String, String>()
-            var line = readLine(input)
-            while (!line.isNullOrBlank()) {
-                val colon = line.indexOf(':')
-                if (colon != -1) {
-                    val key = line.substring(0, colon).trim().lowercase()
-                    val value = line.substring(colon + 1).trim()
-                    headers[key] = value
-                }
-                line = readLine(input)
-            }
+                val method = parts[0].uppercase()
+                val path = parts[1]
 
-            val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-
-            // Route handler
-            when {
-                // 1. Peer Discovery Probe: GET /api/v1/info
-                method == "GET" && path == "/api/v1/info" -> {
-                    val info = JSONObject().apply {
-                        put("device_id", deviceId)
-                        put("device_name", deviceName)
-                        put("os_name", "Android " + Build.VERSION.RELEASE)
-                        put("app_version", UdpDiscoveryManager.CURRENT_APP_VERSION)
-                        put("server_port", port)
-                        put("local_ips", JSONArray(getLocalIpAddresses()))
+                // Read headers
+                val headers = mutableMapOf<String, String>()
+                var line = readLine(input)
+                while (!line.isNullOrBlank()) {
+                    val colon = line.indexOf(':')
+                    if (colon != -1) {
+                        val key = line.substring(0, colon).trim().lowercase()
+                        val value = line.substring(colon + 1).trim()
+                        headers[key] = value
                     }
-                    sendJsonResponse(output, 200, info)
+                    line = readLine(input)
                 }
 
-                // 2. 3-Way Handshake Step 1 (SYN): POST /api/v1/pair/request
-                method == "POST" && path == "/api/v1/pair/request" -> {
-                    val bodyBytes = readExactBytes(input, contentLength)
-                    val bodyStr = String(bodyBytes, Charsets.UTF_8)
-                    val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+                val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+                val isKeepAlive = !headers["connection"].equals("close", ignoreCase = true)
 
-                    val initiatorId = json.optString("initiator_device_id", "unknown")
-                    val initiatorName = json.optString("initiator_name", "Remote Device")
-                    var initiatorIp = json.optString("initiator_ip", "")
-                    if (initiatorIp.isBlank() || initiatorIp == "127.0.0.1") {
-                        initiatorIp = socket.inetAddress.hostAddress ?: "127.0.0.1"
+                // Route handler
+                when {
+                    // 1. Peer Discovery Probe: GET /api/v1/info
+                    method == "GET" && path == "/api/v1/info" -> {
+                        val info = JSONObject().apply {
+                            put("device_id", deviceId)
+                            put("device_name", deviceName)
+                            put("os_name", "Android " + Build.VERSION.RELEASE)
+                            put("app_version", UdpDiscoveryManager.CURRENT_APP_VERSION)
+                            put("server_port", port)
+                            put("local_ips", JSONArray(getLocalIpAddresses()))
+                        }
+                        sendJsonResponse(output, 200, info, isKeepAlive)
                     }
-                    val pin = json.optString("pin_code", "000000")
-                    val appVer = json.optString("app_version", "0.1.0")
 
-                    if (!UdpDiscoveryManager.isVersionCompatible(appVer)) {
-                        val resp = JSONObject().apply {
-                            put("success", false)
-                            put("status", "VERSION_INCOMPATIBLE")
-                            put("message", "Version mismatch. Minimum required version: ${UdpDiscoveryManager.MIN_SUPPORTED_APP_VERSION}")
+                    // 2. 3-Way Handshake Step 1 (SYN): POST /api/v1/pair/request
+                    method == "POST" && path == "/api/v1/pair/request" -> {
+                        val bodyBytes = readExactBytes(input, contentLength)
+                        val bodyStr = String(bodyBytes, Charsets.UTF_8)
+                        val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+
+                        val initiatorId = json.optString("initiator_device_id", "unknown")
+                        val initiatorName = json.optString("initiator_name", "Remote Device")
+                        var initiatorIp = json.optString("initiator_ip", "")
+                        if (initiatorIp.isBlank() || initiatorIp == "127.0.0.1") {
+                            initiatorIp = socket.inetAddress.hostAddress ?: "127.0.0.1"
                         }
-                        sendJsonResponse(output, 400, resp)
-                    } else {
-                        pendingPairRequest = json.apply {
-                            put("initiator_ip", initiatorIp)
-                            put("status", "PENDING")
-                            put("timestamp_ms", System.currentTimeMillis())
+                        val pin = json.optString("pin_code", "000000")
+                        val appVer = json.optString("app_version", "0.1.0")
+
+                        if (!UdpDiscoveryManager.isVersionCompatible(appVer)) {
+                            val resp = JSONObject().apply {
+                                put("success", false)
+                                put("status", "VERSION_INCOMPATIBLE")
+                                put("message", "Version mismatch. Minimum required version: ${UdpDiscoveryManager.MIN_SUPPORTED_APP_VERSION}")
+                            }
+                            sendJsonResponse(output, 400, resp, isKeepAlive)
+                        } else {
+                            pendingPairRequest = json.apply {
+                                put("initiator_ip", initiatorIp)
+                                put("status", "PENDING")
+                                put("timestamp_ms", System.currentTimeMillis())
+                            }
+
+                            onIncomingPairRequest(initiatorId, initiatorName, initiatorIp, pin, appVer)
+
+                            val resp = JSONObject().apply {
+                                put("success", true)
+                                put("status", "PENDING")
+                                put("step", "SYN_RECEIVED")
+                            }
+                            sendJsonResponse(output, 200, resp, isKeepAlive)
                         }
+                    }
 
-                        onIncomingPairRequest(initiatorId, initiatorName, initiatorIp, pin, appVer)
+                    // 3. 3-Way Handshake Step 2 (SYN-ACK): POST /api/v1/pair/respond
+                    method == "POST" && path == "/api/v1/pair/respond" -> {
+                        val bodyBytes = readExactBytes(input, contentLength)
+                        val bodyStr = String(bodyBytes, Charsets.UTF_8)
+                        val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
 
+                        val action = json.optString("action", "REJECT")
+                        val targetName = json.optString("target_name", "Remote PC")
+                        val targetId = json.optString("target_device_id", "")
+
+                        if (action.equals("ACCEPT", ignoreCase = true)) {
+                            activePairedPeerName = targetName
+                            onPairAccepted(targetId, targetName)
+
+                            val resp = JSONObject().apply {
+                                put("success", true)
+                                put("status", "ACCEPTED")
+                                put("step", "SYN_ACK_ACCEPTED")
+                            }
+                            sendJsonResponse(output, 200, resp, isKeepAlive)
+                        } else {
+                            activePairedPeerName = null
+                            pendingPairRequest = null
+                            val resp = JSONObject().apply {
+                                put("success", true)
+                                put("status", "REJECTED")
+                            }
+                            sendJsonResponse(output, 200, resp, isKeepAlive)
+                        }
+                    }
+
+                    // 4. 3-Way Handshake Step 3 (ACK): POST /api/v1/pair/confirm
+                    method == "POST" && path == "/api/v1/pair/confirm" -> {
+                        onPairConfirmed()
                         val resp = JSONObject().apply {
                             put("success", true)
-                            put("status", "PENDING")
-                            put("step", "SYN_RECEIVED")
+                            put("status", "ESTABLISHED")
+                            put("step", "ACK_CONFIRMED")
                         }
-                        sendJsonResponse(output, 200, resp)
+                        sendJsonResponse(output, 200, resp, isKeepAlive)
                     }
-                }
 
-                // 3. 3-Way Handshake Step 2 (SYN-ACK): POST /api/v1/pair/respond
-                method == "POST" && path == "/api/v1/pair/respond" -> {
-                    val bodyBytes = readExactBytes(input, contentLength)
-                    val bodyStr = String(bodyBytes, Charsets.UTF_8)
-                    val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
-
-                    val action = json.optString("action", "REJECT")
-                    val targetName = json.optString("target_name", "Remote PC")
-                    val targetId = json.optString("target_device_id", "")
-
-                    if (action.equals("ACCEPT", ignoreCase = true)) {
-                        activePairedPeerName = targetName
-                        onPairAccepted(targetId, targetName)
-
+                    // 5. Pairing Status: GET /api/v1/pair/status
+                    method == "GET" && path == "/api/v1/pair/status" -> {
                         val resp = JSONObject().apply {
-                            put("success", true)
-                            put("status", "ACCEPTED")
-                            put("step", "SYN_ACK_ACCEPTED")
+                            put("is_paired", activePairedPeerName != null)
+                            put("paired_device_name", activePairedPeerName)
+                            put("pending_request", pendingPairRequest)
                         }
-                        sendJsonResponse(output, 200, resp)
-                    } else {
-                        activePairedPeerName = null
-                        pendingPairRequest = null
-                        val resp = JSONObject().apply {
-                            put("success", true)
-                            put("status", "REJECTED")
+                        sendJsonResponse(output, 200, resp, isKeepAlive)
+                    }
+
+                    // 6. Adaptive Out-of-Order Chunk Receiver: POST /api/v1/transfers/chunk
+                    method == "POST" && (path.startsWith("/api/v1/transfers/chunk") || headers.containsKey("x-chunk-id")) -> {
+                        socket.soTimeout = 0
+                        try {
+                            handleIncomingChunkUpload(input, headers, contentLength, output, isKeepAlive)
+                        } finally {
+                            socket.soTimeout = 30000
                         }
-                        sendJsonResponse(output, 200, resp)
                     }
-                }
 
-                // 4. 3-Way Handshake Step 3 (ACK): POST /api/v1/pair/confirm
-                method == "POST" && path == "/api/v1/pair/confirm" -> {
-                    onPairConfirmed()
-                    val resp = JSONObject().apply {
-                        put("success", true)
-                        put("status", "ESTABLISHED")
-                        put("step", "ACK_CONFIRMED")
+                    // 7. Direct File Stream Receiver: POST /api/v1/transfers/send
+                    method == "POST" && path.startsWith("/api/v1/transfers/send") -> {
+                        socket.soTimeout = 0
+                        try {
+                            handleIncomingFileUpload(input, headers, contentLength, output, isKeepAlive)
+                        } finally {
+                            socket.soTimeout = 30000
+                        }
                     }
-                    sendJsonResponse(output, 200, resp)
-                }
 
-                // 5. Pairing Status: GET /api/v1/pair/status
-                method == "GET" && path == "/api/v1/pair/status" -> {
-                    val resp = JSONObject().apply {
-                        put("is_paired", activePairedPeerName != null)
-                        put("paired_device_name", activePairedPeerName)
-                        put("pending_request", pendingPairRequest)
-                    }
-                    sendJsonResponse(output, 200, resp)
-                }
+                    // 8. Wi-Fi Hardware Capabilities: GET /api/v1/wifi_caps
+                    method == "GET" && path == "/api/v1/wifi_caps" -> {
+                        val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                        var wifiStandard = "Wi-Fi 6 (802.11ax)"
+                        var maxFreqGhz = 6.0
+                        var maxChannelWidthMhz = 160
+                        var maxPhyRateMbps = 1200
 
-                // 6. Adaptive Out-of-Order Chunk Receiver: POST /api/v1/transfers/chunk
-                method == "POST" && (path.startsWith("/api/v1/transfers/chunk") || headers.containsKey("x-chunk-id")) -> {
-                    socket.soTimeout = 0
-                    try {
-                        handleIncomingChunkUpload(input, headers, contentLength, output)
-                    } finally {
-                        socket.soTimeout = 8000
-                    }
-                }
-
-                // 7. Direct File Stream Receiver: POST /api/v1/transfers/send
-                method == "POST" && path.startsWith("/api/v1/transfers/send") -> {
-                    socket.soTimeout = 0
-                    try {
-                        handleIncomingFileUpload(input, headers, contentLength, output)
-                    } finally {
-                        socket.soTimeout = 8000
-                    }
-                }
-
-                // 8. Wi-Fi Hardware Capabilities: GET /api/v1/wifi_caps
-                method == "GET" && path == "/api/v1/wifi_caps" -> {
-                    val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
-                    var wifiStandard = "Wi-Fi 6 (802.11ax)"
-                    var maxFreqGhz = 6.0
-                    var maxChannelWidthMhz = 160
-                    var maxPhyRateMbps = 1200
-
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            val wifiInfo = wifiManager?.connectionInfo
-                            if (wifiInfo != null) {
-                                when (wifiInfo.wifiStandard) {
-                                    6 -> { wifiStandard = "Wi-Fi 6 (802.11ax)"; maxPhyRateMbps = 1200; maxChannelWidthMhz = 160 }
-                                    7 -> { wifiStandard = "Wi-Fi 6E (802.11ax)"; maxFreqGhz = 6.0; maxPhyRateMbps = 2402; maxChannelWidthMhz = 160 }
-                                    8 -> { wifiStandard = "Wi-Fi 7 (802.11be)"; maxFreqGhz = 6.0; maxPhyRateMbps = 4804; maxChannelWidthMhz = 320 }
-                                    else -> {}
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                val wifiInfo = wifiManager?.connectionInfo
+                                if (wifiInfo != null) {
+                                    when (wifiInfo.wifiStandard) {
+                                        6 -> { wifiStandard = "Wi-Fi 6 (802.11ax)"; maxPhyRateMbps = 1200; maxChannelWidthMhz = 160 }
+                                        7 -> { wifiStandard = "Wi-Fi 6E (802.11ax)"; maxFreqGhz = 6.0; maxPhyRateMbps = 2402; maxChannelWidthMhz = 160 }
+                                        8 -> { wifiStandard = "Wi-Fi 7 (802.11be)"; maxFreqGhz = 6.0; maxPhyRateMbps = 4804; maxChannelWidthMhz = 320 }
+                                        else -> {}
+                                    }
                                 }
                             }
-                        }
-                    } catch (_: Exception) {}
-
-                    val bands = org.json.JSONArray().apply {
-                        put("2.4 GHz")
-                        put("5 GHz")
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wifiManager?.is6GHzBandSupported == true) {
-                                put("6 GHz")
-                            }
                         } catch (_: Exception) {}
+
+                        val bands = org.json.JSONArray().apply {
+                            put("2.4 GHz")
+                            put("5 GHz")
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wifiManager?.is6GHzBandSupported == true) {
+                                    put("6 GHz")
+                                }
+                            } catch (_: Exception) {}
+                        }
+
+                        val resp = JSONObject().apply {
+                            put("wifi_standard", wifiStandard)
+                            put("max_frequency_ghz", maxFreqGhz)
+                            put("max_channel_width_mhz", maxChannelWidthMhz)
+                            put("max_phy_rate_mbps", maxPhyRateMbps)
+                            put("supported_bands", bands)
+                            put("hotspot_supported", true)
+                            put("hotspot_5ghz_supported", true)
+                        }
+                        sendJsonResponse(output, 200, resp, isKeepAlive)
                     }
 
-                    val resp = JSONObject().apply {
-                        put("wifi_standard", wifiStandard)
-                        put("max_frequency_ghz", maxFreqGhz)
-                        put("max_channel_width_mhz", maxChannelWidthMhz)
-                        put("max_phy_rate_mbps", maxPhyRateMbps)
-                        put("supported_bands", bands)
-                        put("hotspot_supported", true)
-                        put("hotspot_5ghz_supported", true)
+                    // 9. Wi-Fi Connect over USB: POST /api/v1/wifi_connect
+                    method == "POST" && path == "/api/v1/wifi_connect" -> {
+                        val bodyBytes = readExactBytes(input, contentLength)
+                        val bodyStr = String(bodyBytes, Charsets.UTF_8)
+                        val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+                        val ssid = json.optString("ssid", "")
+                        val password = json.optString("password", "")
+                        if (ssid.isNotBlank()) {
+                            onWifiConnectRequest?.invoke(ssid, password)
+                            val resp = JSONObject().apply {
+                                put("success", true)
+                                put("status", "CONNECTING")
+                                put("ssid", ssid)
+                            }
+                            sendJsonResponse(output, 200, resp, isKeepAlive)
+                        } else {
+                            val resp = JSONObject().apply {
+                                put("success", false)
+                                put("error", "INVALID_SSID")
+                            }
+                            sendJsonResponse(output, 400, resp, isKeepAlive)
+                        }
                     }
-                    sendJsonResponse(output, 200, resp)
-                }
 
-                // 9. Wi-Fi Connect over USB: POST /api/v1/wifi_connect
-                method == "POST" && path == "/api/v1/wifi_connect" -> {
-                    val bodyBytes = readExactBytes(input, contentLength)
-                    val bodyStr = String(bodyBytes, Charsets.UTF_8)
-                    val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
-                    val ssid = json.optString("ssid", "")
-                    val password = json.optString("password", "")
-                    if (ssid.isNotBlank()) {
-                        onWifiConnectRequest?.invoke(ssid, password)
-                        val resp = JSONObject().apply {
-                            put("success", true)
-                            put("status", "CONNECTING")
-                            put("ssid", ssid)
+                    // 10. Start Hotspot over USB: POST /api/v1/hotspot/start
+                    method == "POST" && path == "/api/v1/hotspot/start" -> {
+                        if (onStartHotspotRequest != null) {
+                            val latch = java.util.concurrent.CountDownLatch(1)
+                            var resultSsid = ""
+                            var resultPass = ""
+                            var resultGw = "192.168.49.1"
+                            try {
+                                onStartHotspotRequest?.invoke { s, p, g ->
+                                    resultSsid = s
+                                    resultPass = p
+                                    resultGw = g
+                                    latch.countDown()
+                                }
+                                val completed = latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                                val resp = JSONObject().apply {
+                                    put("success", completed && resultSsid.isNotBlank())
+                                    put("status", if (completed && resultSsid.isNotBlank()) "hotspot_started" else "failed")
+                                    put("ssid", resultSsid)
+                                    put("password", resultPass)
+                                    put("gateway", resultGw)
+                                }
+                                sendJsonResponse(output, 200, resp, isKeepAlive)
+                            } catch (e: Exception) {
+                                val resp = JSONObject().apply {
+                                    put("success", false)
+                                    put("error", e.message ?: "START_HOTSPOT_ERROR")
+                                }
+                                sendJsonResponse(output, 500, resp, isKeepAlive)
+                            }
+                        } else {
+                            val resp = JSONObject().apply {
+                                put("success", false)
+                                put("error", "HOTSPOT_HANDLER_NOT_REGISTERED")
+                            }
+                            sendJsonResponse(output, 500, resp, isKeepAlive)
                         }
-                        sendJsonResponse(output, 200, resp)
-                    } else {
+                    }
+
+                    // 11. CORS pre-flight OPTIONS
+                    method == "OPTIONS" -> {
+                        val headersStr = "HTTP/1.1 204 No Content\r\n" +
+                                "Access-Control-Allow-Origin: *\r\n" +
+                                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                                "Access-Control-Allow-Headers: *\r\n" +
+                                (if (isKeepAlive) "Connection: keep-alive\r\n" else "Connection: close\r\n") +
+                                "\r\n"
+                        output.write(headersStr.toByteArray(Charsets.UTF_8))
+                        output.flush()
+                    }
+
+                    else -> {
                         val resp = JSONObject().apply {
-                            put("success", false)
-                            put("error", "MISSING_SSID")
+                            put("error", "NOT_FOUND")
+                            put("path", path)
                         }
-                        sendJsonResponse(output, 400, resp)
+                        sendJsonResponse(output, 404, resp, isKeepAlive)
                     }
                 }
 
-                // 10. Start Hotspot over USB: POST /api/v1/hotspot/start
-                method == "POST" && path == "/api/v1/hotspot/start" -> {
-                    if (onStartHotspotRequest != null) {
-                        val latch = java.util.concurrent.CountDownLatch(1)
-                        var resultSsid = ""
-                        var resultPass = ""
-                        var resultGw = "192.168.43.1"
-                        onStartHotspotRequest?.invoke { s, p, g ->
-                            resultSsid = s
-                            resultPass = p
-                            resultGw = g
-                            latch.countDown()
-                        }
-                        latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
-                        val resp = JSONObject().apply {
-                            put("success", resultSsid.isNotBlank())
-                            put("status", if (resultSsid.isNotBlank()) "hotspot_started" else "failed")
-                            put("ssid", resultSsid)
-                            put("password", resultPass)
-                            put("gateway", resultGw)
-                        }
-                        sendJsonResponse(output, 200, resp)
-                    } else {
-                        val resp = JSONObject().apply {
-                            put("success", false)
-                            put("error", "HANDLER_NOT_SET")
-                        }
-                        sendJsonResponse(output, 500, resp)
-                    }
-                }
-
-                // 11. CORS Preflight
-                method == "OPTIONS" -> {
-                    sendRawResponse(output, 204, "No Content", "text/plain", ByteArray(0))
-                }
-
-                else -> {
-                    sendRawResponse(output, 404, "Not Found", "text/plain", "Not Found".toByteArray())
-                }
+                if (!isKeepAlive) break
             }
-        } catch (_: Exception) {
+        } catch (_: java.net.SocketTimeoutException) {
+            // Normal keep-alive timeout idle close
+        } catch (e: Exception) {
+            Log.d(TAG, "Client socket handled: ${e.message}")
         } finally {
             try { socket.close() } catch (_: Exception) {}
         }
@@ -357,21 +432,12 @@ class AndroidHttpServer(
 
     var onTransferProgress: (fileName: String, bytesReceived: Long, totalBytes: Long, speedMbps: Double) -> Unit = { _, _, _, _ -> }
 
-    private fun computeSha256(bytes: ByteArray): String {
-        return try {
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
-            val hash = digest.digest(bytes)
-            hash.joinToString("") { "%02x".format(it) }
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
     private fun handleIncomingChunkUpload(
         input: BufferedInputStream,
         headers: Map<String, String>,
         contentLength: Int,
-        output: BufferedOutputStream
+        output: BufferedOutputStream,
+        isKeepAlive: Boolean = true
     ) {
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -381,7 +447,6 @@ class AndroidHttpServer(
 
         val chunkId = headers["x-chunk-id"]?.toIntOrNull() ?: 0
         val chunkOffset = headers["x-chunk-offset"]?.toLongOrNull() ?: 0L
-        val expectedSha256 = headers["x-chunk-sha256"]?.lowercase()?.trim() ?: ""
         val expectedCrc32 = headers["x-chunk-crc32"]?.lowercase()?.trim() ?: ""
         val totalChunks = headers["x-total-chunks"]?.toIntOrNull() ?: 1
         val transferId = headers["x-transfer-id"] ?: "default"
@@ -389,40 +454,9 @@ class AndroidHttpServer(
         var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
-        val chunkBytes = readExactBytes(input, contentLength)
-
-        // Automatic error detection: Verify chunk hash (CRC32 or SHA-256) if present
-        if (expectedCrc32.isNotBlank()) {
-            val crc = java.util.zip.CRC32().apply { update(chunkBytes) }.value
-            val actualCrc32 = String.format("%08x", crc)
-            if (actualCrc32 != expectedCrc32) {
-                Log.w(TAG, "Chunk #$chunkId CRC32 verification failed! Expected $expectedCrc32, got $actualCrc32")
-                val resp = JSONObject().apply {
-                    put("success", false)
-                    put("error", "CORRUPT_CHUNK")
-                    put("chunk_id", chunkId)
-                    put("message", "CRC32 mismatch - requesting retransmission")
-                }
-                sendJsonResponse(output, 400, resp)
-                return
-            }
-        } else if (expectedSha256.isNotBlank()) {
-            val actualSha256 = computeSha256(chunkBytes)
-            if (actualSha256 != expectedSha256) {
-                Log.w(TAG, "Chunk #$chunkId verification failed! Expected $expectedSha256, got $actualSha256")
-                val resp = JSONObject().apply {
-                    put("success", false)
-                    put("error", "CORRUPT_CHUNK")
-                    put("chunk_id", chunkId)
-                    put("message", "SHA-256 mismatch - requesting retransmission")
-                }
-                sendJsonResponse(output, 400, resp)
-                return
-            }
-        }
-
         val sessionKey = if (transferId.isNotBlank()) transferId else fileName
         val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
+            acquireHighPerfLocks()
             val targetFile = File(downloadDir, fileName)
             val raf = java.io.RandomAccessFile(targetFile, "rw")
             if (fileSize > 0) {
@@ -431,20 +465,50 @@ class AndroidHttpServer(
             ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
         }
 
-        // Out-of-order concurrent random access write via FileChannel
+        // Direct stream from socket to FileChannel in 512KB increments with in-flight CRC32 (zero heap garbage)
+        val crcHasher = if (expectedCrc32.isNotBlank()) java.util.zip.CRC32() else null
+        val buf = ByteArray(512 * 1024)
+        var remaining = contentLength
+        var currentOffset = chunkOffset
+
         try {
-            val byteBuffer = java.nio.ByteBuffer.wrap(chunkBytes)
-            session.channel.write(byteBuffer, chunkOffset)
+            while (remaining > 0) {
+                val toRead = minOf(buf.size, remaining)
+                val read = input.read(buf, 0, toRead)
+                if (read == -1) break
+                if (crcHasher != null) {
+                    crcHasher.update(buf, 0, read)
+                }
+                val byteBuffer = java.nio.ByteBuffer.wrap(buf, 0, read)
+                session.channel.write(byteBuffer, currentOffset)
+                currentOffset += read
+                remaining -= read
+            }
             session.receivedChunks.add(chunkId)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed writing chunk #$chunkId at offset $chunkOffset: ${e.message}")
+            Log.e(TAG, "Failed streaming chunk #$chunkId at offset $chunkOffset: ${e.message}")
             val resp = JSONObject().apply {
                 put("success", false)
                 put("error", "WRITE_FAILED")
                 put("chunk_id", chunkId)
             }
-            sendJsonResponse(output, 500, resp)
+            sendJsonResponse(output, 500, resp, isKeepAlive)
             return
+        }
+
+        if (crcHasher != null) {
+            val actualCrc32 = String.format("%08x", crcHasher.value)
+            if (actualCrc32 != expectedCrc32) {
+                Log.w(TAG, "Chunk #$chunkId CRC32 mismatch! Expected $expectedCrc32, got $actualCrc32")
+                val resp = JSONObject().apply {
+                    put("success", false)
+                    put("error", "CORRUPT_CHUNK")
+                    put("chunk_id", chunkId)
+                    put("message", "CRC32 mismatch - requesting retransmission")
+                }
+                sendJsonResponse(output, 400, resp, isKeepAlive)
+                return
+            }
         }
 
         val completedCount = session.receivedChunks.size
@@ -462,6 +526,7 @@ class AndroidHttpServer(
                 session.raf.close()
             } catch (_: Exception) {}
             activeChunkTransfers.remove(sessionKey)
+            releaseHighPerfLocksIfIdle()
             Log.i(TAG, "🎉 Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")
             onFileReceived(session.fileName, session.targetFile.length())
         }
@@ -472,14 +537,15 @@ class AndroidHttpServer(
             put("completed_chunks", completedCount)
             put("total_chunks", total)
         }
-        sendJsonResponse(output, 200, resp)
+        sendJsonResponse(output, 200, resp, isKeepAlive)
     }
 
     private fun handleIncomingFileUpload(
         input: BufferedInputStream,
         headers: Map<String, String>,
         contentLength: Int,
-        output: BufferedOutputStream
+        output: BufferedOutputStream,
+        isKeepAlive: Boolean = true
     ) {
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -569,7 +635,7 @@ class AndroidHttpServer(
             put("bytes_received", totalWritten)
             put("download_folder", downloadDir.absolutePath)
         }
-        sendJsonResponse(output, 200, resp)
+        sendJsonResponse(output, 200, resp, isKeepAlive)
     }
 
     private fun checkAndMergeParts(partFileName: String, downloadDir: File) {
@@ -616,18 +682,13 @@ class AndroidHttpServer(
     }
 
     private fun readLine(input: BufferedInputStream): String? {
-        val baos = ByteArrayOutputStream()
-        var b: Int
-        while (true) {
-            b = input.read()
-            if (b == -1) {
-                if (baos.size() == 0) return null
-                break
-            }
+        val baos = java.io.ByteArrayOutputStream()
+        var b = input.read()
+        if (b == -1) return null
+        while (b != -1) {
             if (b == '\n'.code) break
-            if (b != '\r'.code) {
-                baos.write(b)
-            }
+            if (b != '\r'.code) baos.write(b)
+            b = input.read()
         }
         return baos.toString("UTF-8")
     }
@@ -643,9 +704,9 @@ class AndroidHttpServer(
         return if (offset == length) bytes else bytes.copyOf(offset)
     }
 
-    private fun sendJsonResponse(output: BufferedOutputStream, code: Int, json: JSONObject) {
+    private fun sendJsonResponse(output: BufferedOutputStream, code: Int, json: JSONObject, keepAlive: Boolean = true) {
         val body = json.toString().toByteArray(Charsets.UTF_8)
-        sendRawResponse(output, code, if (code == 200) "OK" else "Error", "application/json; charset=utf-8", body)
+        sendRawResponse(output, code, if (code == 200) "OK" else "Error", "application/json; charset=utf-8", body, keepAlive)
     }
 
     private fun sendRawResponse(
@@ -653,15 +714,17 @@ class AndroidHttpServer(
         code: Int,
         statusText: String,
         contentType: String,
-        body: ByteArray
+        body: ByteArray,
+        keepAlive: Boolean = true
     ) {
+        val connHeader = if (keepAlive) "Connection: keep-alive\r\nKeep-Alive: timeout=60, max=1000\r\n" else "Connection: close\r\n"
         val headers = "HTTP/1.1 $code $statusText\r\n" +
                 "Content-Type: $contentType\r\n" +
                 "Content-Length: ${body.size}\r\n" +
                 "Access-Control-Allow-Origin: *\r\n" +
                 "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
                 "Access-Control-Allow-Headers: *\r\n" +
-                "Connection: close\r\n\r\n"
+                connHeader + "\r\n"
         output.write(headers.toByteArray(Charsets.UTF_8))
         output.write(body)
         output.flush()

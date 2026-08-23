@@ -1041,29 +1041,14 @@ impl TerminalCli {
 
         let mut handles = Vec::new();
 
-        // Adaptive high-throughput chunk size based on file size (2MB - 64MB)
-        let chunk_size: u64 = if file_size < 20 * 1024 * 1024 {
-            2 * 1024 * 1024 // 2 MB for files < 20 MB
-        } else if file_size < 100 * 1024 * 1024 {
-            4 * 1024 * 1024 // 4 MB for 20 - 100 MB
-        } else if file_size < 500 * 1024 * 1024 {
-            8 * 1024 * 1024 // 8 MB for 100 - 500 MB
-        } else if file_size < 2 * 1024 * 1024 * 1024 {
-            16 * 1024 * 1024 // 16 MB for 500 MB - 2 GB
-        } else if file_size < 8 * 1024 * 1024 * 1024 {
-            32 * 1024 * 1024 // 32 MB for 2 GB - 8 GB
-        } else {
-            64 * 1024 * 1024 // 64 MB for > 8 GB
-        };
-
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let dispatcher = Arc::new(parking_lot::Mutex::new(
-            DynamicWorkDispatcher::new(file_size, chunk_size),
+            DynamicWorkDispatcher::new(file_size),
         ));
         let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        // Spawn 3 concurrent pipelined in-flight streaming workers per transport for line speed
-        let workers_per_transport = 3;
+        // Spawn 4 concurrent pipelined in-flight streaming workers per transport for line speed
+        let workers_per_transport = 4;
         for (state, ip, port, name, _) in &channel_states {
             for _ in 0..workers_per_transport {
                 let h = tokio::spawn(run_transport_chunk_worker(
@@ -1112,10 +1097,11 @@ impl TerminalCli {
         let usb_ch = final_channels.iter().find(|c| c.name == "USB");
         let wifi_ch = final_channels.iter().find(|c| c.name == "Wi-Fi");
 
-        let total_chunks = if chunk_size > 0 {
-            ((file_size + chunk_size - 1) / chunk_size).max(1) as usize
+        let total_chunks = dispatcher.lock().chunks.len();
+        let chunk_size_bytes = if total_chunks > 0 {
+            (file_size as usize / total_chunks).max(1)
         } else {
-            1
+            file_size as usize
         };
 
         let usb_speed_mb_s = usb_ch.map(|c| (c.bytes_sent as f64 / (1024.0 * 1024.0)) / elapsed);
@@ -1131,7 +1117,7 @@ impl TerminalCli {
             usb_pct: usb_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
             wifi_speed_mb_s,
             wifi_pct: wifi_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
-            chunk_size_bytes: chunk_size as usize,
+            chunk_size_bytes,
             total_chunks,
             integrity_ok: all_ok,
         };
@@ -1552,26 +1538,59 @@ struct DynamicWorkDispatcher {
 }
 
 impl DynamicWorkDispatcher {
-    fn new(total_bytes: u64, chunk_size: u64) -> Self {
-        let total_chunks = if total_bytes == 0 {
-            1
+    fn new(total_bytes: u64) -> Self {
+        let mut chunks = Vec::new();
+        let mut unassigned = std::collections::VecDeque::new();
+
+        let base_chunk_size: u64 = if total_bytes < 20 * 1024 * 1024 {
+            2 * 1024 * 1024 // 2 MB for < 20 MB
+        } else if total_bytes < 100 * 1024 * 1024 {
+            4 * 1024 * 1024 // 4 MB for 20 - 100 MB
+        } else if total_bytes < 500 * 1024 * 1024 {
+            8 * 1024 * 1024 // 8 MB for 100 - 500 MB
+        } else if total_bytes < 2 * 1024 * 1024 * 1024 {
+            16 * 1024 * 1024 // 16 MB for 500 MB - 2 GB
         } else {
-            ((total_bytes + chunk_size - 1) / chunk_size) as usize
+            32 * 1024 * 1024 // 32 MB for >= 2 GB
         };
 
-        let mut chunks = Vec::with_capacity(total_chunks);
-        let mut unassigned = std::collections::VecDeque::with_capacity(total_chunks);
+        let mut current_offset: u64 = 0;
+        let mut chunk_id: u32 = 0;
 
-        for i in 0..total_chunks {
-            let offset = i as u64 * chunk_size;
-            let length = (total_bytes.saturating_sub(offset)).min(chunk_size);
-            let cid = i as u32;
+        if total_bytes == 0 {
             chunks.push(TransferChunkInfo {
-                chunk_id: cid,
-                offset,
-                length,
+                chunk_id: 0,
+                offset: 0,
+                length: 0,
             });
-            unassigned.push_back(cid);
+            unassigned.push_back(0);
+        } else {
+            while current_offset < total_bytes {
+                let remaining = total_bytes - current_offset;
+
+                // Tail-End Chunk Tapering:
+                // When remaining bytes enter the final 10-15% phase, taper chunk sizes down
+                // so faster transports can steal smaller slices and avoid waiting on slow stragglers.
+                let chunk_size = if remaining <= 16 * 1024 * 1024 && base_chunk_size > 4 * 1024 * 1024 {
+                    4 * 1024 * 1024 // Final 16 MB -> 4 MB micro-chunks
+                } else if remaining <= 48 * 1024 * 1024 && base_chunk_size > 8 * 1024 * 1024 {
+                    8 * 1024 * 1024 // Final 48 MB -> 8 MB chunks
+                } else if remaining <= 96 * 1024 * 1024 && base_chunk_size > 16 * 1024 * 1024 {
+                    16 * 1024 * 1024 // Final 96 MB -> 16 MB chunks
+                } else {
+                    base_chunk_size
+                };
+
+                let length = remaining.min(chunk_size);
+                chunks.push(TransferChunkInfo {
+                    chunk_id,
+                    offset: current_offset,
+                    length,
+                });
+                unassigned.push_back(chunk_id);
+                current_offset += length;
+                chunk_id += 1;
+            }
         }
 
         Self {
@@ -1652,9 +1671,10 @@ async fn run_transport_chunk_worker(
 ) {
     let client = reqwest::Client::builder()
         .tcp_nodelay(true)
-        .pool_idle_timeout(None)
-        .pool_max_idle_per_host(8)
-        .timeout(Duration::from_secs(30))
+        .http1_only()
+        .pool_idle_timeout(Some(Duration::from_secs(60)))
+        .pool_max_idle_per_host(16)
+        .timeout(Duration::from_secs(60))
         .build()
         .unwrap_or_default();
 

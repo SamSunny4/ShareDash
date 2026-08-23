@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -253,16 +254,23 @@ class MainActivity : ComponentActivity() {
             connectToWifiNetwork(ssid, password)
         }
         httpServer?.onStartHotspotRequest = { callback ->
-            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
-                callback(ssid, password, gateway)
-                val resp = org.json.JSONObject().apply {
-                    put("status", "hotspot_started")
-                    put("ssid", ssid)
-                    put("password", password)
-                    put("gateway", gateway)
+            lifecycleScope.launch(Dispatchers.Main) {
+                try {
+                    hotspotManager.start5GHzHotspot { ssid, password, gateway ->
+                        callback(ssid, password, gateway)
+                        val resp = org.json.JSONObject().apply {
+                            put("status", "hotspot_started")
+                            put("ssid", ssid)
+                            put("password", password)
+                            put("gateway", gateway)
+                        }
+                        rfcommServer.broadcastJson(resp)
+                        bleManager.startAdvertising()
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error in onStartHotspotRequest: ${e.message}")
+                    callback("", "", "")
                 }
-                rfcommServer.broadcastJson(resp)
-                bleManager.startAdvertising()
             }
         }
         httpServer?.start(lifecycleScope)
