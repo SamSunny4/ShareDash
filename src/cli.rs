@@ -301,15 +301,16 @@ impl TerminalCli {
                             println!("  Connecting PC to phone hotspot...");
                             let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                             let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot...", async {
-                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(12), Some(&p_gw)).await
+                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
                             }).await;
-                            let target = detected_ip.unwrap_or(p_gw);
-                            if self.http_probe(&target, 54321).await {
-                                let synack = self.pair_handshake_target(&target, 54321).await;
-                                if synack {
-                                    print_ok(&format!("Direct 5GHz Wi-Fi link verified: {}:54321", target));
-                                    wifi_ip = Some(target);
-                                    wifi_ready = true;
+                            if let Some(target) = detected_ip {
+                                if self.http_probe(&target, 54321).await {
+                                    let synack = self.pair_handshake_target(&target, 54321).await;
+                                    if synack {
+                                        print_ok(&format!("Direct 5GHz Wi-Fi link verified: {}:54321", target));
+                                        wifi_ip = Some(target);
+                                        wifi_ready = true;
+                                    }
                                 }
                             }
                         }
@@ -323,23 +324,50 @@ impl TerminalCli {
                     println!("  Connecting PC to phone 5GHz hotspot...");
                     let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                     let detected_ip = with_spinner("Waiting for PC to bind to 5GHz network...", async {
-                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(12), Some(&p_gw)).await
+                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
                     }).await;
-                    let target = detected_ip.unwrap_or(p_gw);
-                    if self.http_probe(&target, 54321).await {
-                        let synack = self.pair_handshake_target(&target, 54321).await;
-                        if synack {
-                            print_ok(&format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target));
-                            wifi_ip = Some(target);
-                            wifi_ready = true;
+                    if let Some(target) = detected_ip {
+                        if self.http_probe(&target, 54321).await {
+                            let synack = self.pair_handshake_target(&target, 54321).await;
+                            if synack {
+                                print_ok(&format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target));
+                                wifi_ip = Some(target);
+                                wifi_ready = true;
+                            } else {
+                                print_warn(&format!("Wi-Fi handshake failed at {}:54321. Wi-Fi disabled.", target));
+                            }
                         } else {
-                            print_warn(&format!("Wi-Fi handshake failed at {}:54321. Wi-Fi disabled.", target));
+                            print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
                         }
                     } else {
-                        print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
+                        print_warn("PC Wi-Fi did not associate to phone hotspot. Continuing in pure USB mode.");
                     }
                 } else {
-                    print_warn("Phone hotspot start failed over USB. Continuing in USB-Only Mode.");
+                    print_warn("Phone hotspot start failed over USB. Trying PC Hotspot fallback...");
+                    if let Ok(info) = hotspot::create_hotspot(&ssid, &password, true).await {
+                        let sent = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
+                        if sent {
+                            let client_ip = with_spinner("Waiting for phone on PC 5GHz Wi-Fi...", async {
+                                for _ in 0..20 {
+                                    if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                        return Some(ip);
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(300)).await;
+                                }
+                                None
+                            }).await;
+                            if let Some(client_ip) = client_ip {
+                                if self.http_probe(&client_ip, 54321).await {
+                                    let synack = self.pair_handshake_target(&client_ip, 54321).await;
+                                    if synack {
+                                        print_ok(&format!("Phone connected to PC fallback hotspot: {}", client_ip));
+                                        wifi_ip = Some(client_ip);
+                                        wifi_ready = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -503,15 +531,19 @@ impl TerminalCli {
                 }
 
                 let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot subnet...", async {
-                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(12), Some(&p_gw)).await
+                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
                 }).await;
 
-                let target_ip = detected_ip.unwrap_or(p_gw);
-                if self.http_probe(&target_ip, 54321).await {
-                    print_ok(&format!("Direct Wi-Fi link verified: {}:54321", target_ip));
-                    wifi_ip = Some(target_ip);
+                if let Some(target_ip) = detected_ip {
+                    if self.http_probe(&target_ip, 54321).await {
+                        print_ok(&format!("Direct Wi-Fi link verified: {}:54321", target_ip));
+                        wifi_ip = Some(target_ip);
+                    } else {
+                        print_fail(&format!("Could not reach phone at {}:54321 over Wi-Fi", target_ip));
+                        wifi_ip = None;
+                    }
                 } else {
-                    print_fail(&format!("Could not reach phone at {}:54321 over Wi-Fi", target_ip));
+                    print_fail("PC Wi-Fi did not associate to phone hotspot.");
                     wifi_ip = None;
                 }
             } else {

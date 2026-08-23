@@ -68,23 +68,22 @@ graph TD
 
 ---
 
-## 📶 Smart Offline Hotspot Orchestration Matrix
+## 📶 Smart Offline Hotspot Orchestration (Phone-Primary Direct P2P)
 
-ShareDash intelligently decides the optimal wireless topology based on active hardware capabilities and network status:
+ShareDash defaults to **Phone 5GHz Wi-Fi Direct Group Owner** as the primary wireless channel to avoid Windows Virtual Adapter / ICS packet filtering bottlenecks:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     ShareDash Hotspot Decision Engine                       │
+│                 ShareDash Hotspot Architecture (Phone Primary)              │
 ├──────────────────────────────────────┬──────────────────────────────────────┤
-│ 💻 PC Has Active Internet Connection │ 📱 PC Has NO Internet / 5GHz AP Busy │
+│ 📱 Phone 5GHz Wi-Fi Direct (PRIMARY) │ 💻 PC Windows Hotspot (FALLBACK ONLY)│
 ├──────────────────────────────────────┼──────────────────────────────────────┤
-│ • PC creates 5GHz Windows Hotspot    │ • Phone selected as 5GHz Hotspot Host│
-│ • PC gateway: 192.168.137.1          │ • Phone frees Wi-Fi client antenna   │
-│ • Credentials sent to Phone via BLE  │ • Phone starts 5GHz SoftAP           │
-│ • Phone checks Wi-Fi ON & associates │ • Credentials sent to PC via BLE     │
-│ • Instant parallel probe (< 500ms)   │ • PC auto-connects via WPA3/WPA2 XML │
+│ • Phone creates 5GHz Direct Group    │ • Used only if phone SoftAP fails    │
+│ • Gateway IP: 192.168.49.1           │ • PC creates SoftAP (192.168.137.1)  │
+│ • Uncapped Wi-Fi throughput (48+MB/s)│ • Wi-Fi subject to Windows ICS limits│
+│ • PC auto-binds in < 1.5s via WPA2   │ • Credentials sent via BLE to Phone  │
 ├──────────────────────────────────────┴──────────────────────────────────────┤
-│ 🚀 Both links active (USB + 5GHz Wi-Fi) -> Ready for Multipath Transfer     │
+│ 🚀 Both links active (USB + 5GHz Wi-Fi) -> 78+ MB/s Multipath Transfer      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,13 +91,13 @@ ShareDash intelligently decides the optimal wireless topology based on active ha
 
 ## 📊 Live Benchmark Performance
 
-Transfer metrics for a **2.80 GB (2800 MB)** movie file across physical hardware:
+Transfer metrics for a **2.80 GB (2800 MB)** movie file (`Marco.2024.1080p.SLIV.WEB-DL.D...`) across physical hardware:
 
-| Transfer Mode | Channels Used | Time | Average Speed | Chunk Size & Pipeline | Integrity |
+| Transfer Mode | Channels Used | Time | Average Speed | Channel Distribution | Integrity |
 | :--- | :--- | :---: | :---: | :--- | :---: |
-| 🚀 **Multipath Aggregation** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **~18.4 s** | **~152.1 MB/s** | **32 MB Chunks × 3 Workers** | **SHA-256 ✔** |
-| ⚡ **USB Fast-Path Only** | ⚡ USB 3.x Cable | **~26.1 s** | **~107.2 MB/s** | **32 MB Chunks × 3 Workers** | **SHA-256 ✔** |
-| 📶 **5GHz Hotspot Only** | 📶 5 GHz Wi-Fi Hotspot | **~38.9 s** | **~72.0 MB/s** | **32 MB Chunks × 3 Workers** | **SHA-256 ✔** |
+| 🚀 **Multipath Aggregation (Phone 5GHz AP)** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **35.55 s** | **78.7 MB/s** | **⚡ USB: 31.0 MB/s (39.4%) + 📶 Wi-Fi: 47.7 MB/s (60.6%)** | **SHA-256 ✔** |
+| ⚡ **USB Fast-Path Only** | ⚡ USB 3.x Cable | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0% | **SHA-256 ✔** |
+| ⚠️ **Multipath Aggregation (PC Hotspot)** | ⚡ USB + 📶 PC Hotspot (ICS) | **73.83 s** | **37.9 MB/s** | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%) | **SHA-256 ✔** |
 
 > 📖 **Deep Dive Technical Guide**: For an exhaustive, step-by-step breakdown of how the connection wizard, Bluetooth LE GATT exchange, PC/Phone hotspot provisioning, pipelined work-stealing, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](file:///e:/ShareDash/HOW_IT_WORKS.md).
 

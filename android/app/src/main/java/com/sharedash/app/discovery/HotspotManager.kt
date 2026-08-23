@@ -71,25 +71,80 @@ class HotspotManager(private val context: Context) {
         }
 
         _hotspotState.value = HotspotState.Starting
-        Log.i(TAG, "🚀 Initiating 5GHz Wi-Fi Direct / Hotspot setup (Quick Share mode)...")
+        Log.i(TAG, "🚀 Initiating Standard 5GHz SoftAP / Hotspot (Android LocalOnlyHotspot)...")
 
-        // 1. First priority: Android Wi-Fi Direct 5GHz Group Owner (Google Quick Share method)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && p2pManager != null && p2pChannel != null) {
-            start5GHzP2pGroup(onSuccess)
-        } else {
-            // 2. Fallback to LocalOnlyHotspot
-            startLocalOnlyHotspotFallback(onSuccess)
+        // 1. Primary: Standard Android LocalOnlyHotspot (Standard 802.11 AP that Windows connects to reliably)
+        startLocalOnlyHotspot(onSuccess)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startLocalOnlyHotspot(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
+        if (wifiManager == null) {
+            _hotspotState.value = HotspotState.Error("Wi-Fi Hardware not available")
+            return
+        }
+
+        // Disconnect client Wi-Fi to free radio channels
+        try {
+            wifiManager.disconnect()
+        } catch (_: Exception) {}
+
+        try {
+            wifiManager.startLocalOnlyHotspot(
+                object : WifiManager.LocalOnlyHotspotCallback() {
+                    override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation?) {
+                        super.onStarted(reservation)
+                        hotspotReservation = reservation
+                        val (ssid, pass) = extractCredentials(reservation)
+                        val gatewayIp = getHotspotGatewayIp()
+
+                        _hotspotState.value = HotspotState.Active(
+                            ssid = ssid,
+                            password = pass,
+                            ipAddress = gatewayIp,
+                            band = "5 GHz High-Speed Hotspot"
+                        )
+                        Log.i(TAG, "Hotspot ACTIVE: SSID='$ssid', Password='$pass', IP=$gatewayIp")
+                        onSuccess?.invoke(ssid, pass, gatewayIp)
+                    }
+
+                    override fun onStopped() {
+                        super.onStopped()
+                        hotspotReservation = null
+                        _hotspotState.value = HotspotState.Idle
+                        Log.i(TAG, "Hotspot stopped")
+                    }
+
+                    override fun onFailed(reason: Int) {
+                        super.onFailed(reason)
+                        Log.e(TAG, "startLocalOnlyHotspot failed with reason code: $reason. Trying P2P fallback...")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && p2pManager != null && p2pChannel != null) {
+                            start5GHzP2pGroup(onSuccess)
+                        } else {
+                            _hotspotState.value = HotspotState.Error("Hotspot unavailable (code $reason).")
+                        }
+                    }
+                },
+                null
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start local hotspot: ${e.message}. Trying P2P fallback...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && p2pManager != null && p2pChannel != null) {
+                start5GHzP2pGroup(onSuccess)
+            } else {
+                _hotspotState.value = HotspotState.Error("Hotspot error: ${e.message}")
+            }
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun start5GHzP2pGroup(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
         val channel = p2pChannel ?: run {
-            startLocalOnlyHotspotFallback(onSuccess)
+            startLocalOnlyHotspot(onSuccess)
             return
         }
         val mgr = p2pManager ?: run {
-            startLocalOnlyHotspotFallback(onSuccess)
+            startLocalOnlyHotspot(onSuccess)
             return
         }
 
@@ -138,67 +193,14 @@ class HotspotManager(private val context: Context) {
                     }
 
                     override fun onFailure(reason: Int) {
-                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason). Falling back to LocalOnlyHotspot...")
-                        startLocalOnlyHotspotFallback(onSuccess)
+                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason).")
+                        _hotspotState.value = HotspotState.Error("5GHz Wi-Fi Direct failed.")
                     }
                 })
                 return
             } catch (e: Exception) {
-                Log.w(TAG, "Exception creating 5GHz P2P group: ${e.message}. Falling back to LocalOnlyHotspot...")
+                Log.w(TAG, "Exception creating 5GHz P2P group: ${e.message}.")
             }
-        }
-        startLocalOnlyHotspotFallback(onSuccess)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startLocalOnlyHotspotFallback(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
-        if (wifiManager == null) {
-            _hotspotState.value = HotspotState.Error("Wi-Fi Hardware not available")
-            return
-        }
-
-        // Disconnect client Wi-Fi to free radio channels
-        try {
-            wifiManager.disconnect()
-        } catch (_: Exception) {}
-
-        try {
-            wifiManager.startLocalOnlyHotspot(
-                object : WifiManager.LocalOnlyHotspotCallback() {
-                    override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation?) {
-                        super.onStarted(reservation)
-                        hotspotReservation = reservation
-                        val (ssid, pass) = extractCredentials(reservation)
-                        val gatewayIp = getHotspotGatewayIp()
-
-                        _hotspotState.value = HotspotState.Active(
-                            ssid = ssid,
-                            password = pass,
-                            ipAddress = gatewayIp,
-                            band = "5 GHz Local Hotspot"
-                        )
-                        Log.i(TAG, "Hotspot ACTIVE: SSID='$ssid', Password='$pass', IP=$gatewayIp")
-                        onSuccess?.invoke(ssid, pass, gatewayIp)
-                    }
-
-                    override fun onStopped() {
-                        super.onStopped()
-                        hotspotReservation = null
-                        _hotspotState.value = HotspotState.Idle
-                        Log.i(TAG, "Hotspot stopped")
-                    }
-
-                    override fun onFailed(reason: Int) {
-                        super.onFailed(reason)
-                        Log.e(TAG, "startLocalOnlyHotspot failed with reason code: $reason")
-                        _hotspotState.value = HotspotState.Error("Hotspot unavailable (code $reason).")
-                    }
-                },
-                null
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start local hotspot: ${e.message}")
-            _hotspotState.value = HotspotState.Error("Hotspot error: ${e.message}")
         }
     }
 

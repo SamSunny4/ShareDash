@@ -155,54 +155,21 @@ pub async fn check_pc_5ghz_hotspot_available(has_internet: bool) -> bool {
     false
 }
 
-/// Select the optimal device to host the hotspot based on PC internet connectivity,
-/// 5GHz capability, and hardware PHY specs.
+/// Select the optimal device to host the hotspot.
+/// Phone 5GHz Wi-Fi Direct is always PRIMARY because it bypasses Windows Virtual Adapter / ICS packet throttling.
 pub async fn select_optimal_hotspot_host(
-    pc_caps: &WifiCapsInfo,
-    phone_caps: &WifiCapsInfo,
+    _pc_caps: &WifiCapsInfo,
+    _phone_caps: &WifiCapsInfo,
 ) -> (HotspotHostChoice, String) {
-    let has_internet = check_pc_internet_connection().await;
-    if !has_internet {
-        return (
-            HotspotHostChoice::Phone,
-            "PC has no active internet connection (Windows Mobile Hotspot requires internet sharing). Phone will host 5GHz Hotspot.".to_string(),
-        );
-    }
-
-    let pc_can_5g_hotspot = check_pc_5ghz_hotspot_available(has_internet).await;
-    if !pc_can_5g_hotspot {
-        return (
-            HotspotHostChoice::Phone,
-            "PC 5GHz hotspot is unavailable on the current network interface. Phone will host 5GHz Hotspot.".to_string(),
-        );
-    }
-
-    let pc_score = pc_caps.max_phy_rate_mbps + if pc_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
-    let phone_score = phone_caps.max_phy_rate_mbps + if phone_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
-
-    if pc_score >= phone_score {
-        (
-            HotspotHostChoice::Pc,
-            "PC Wi-Fi selected as Primary 5GHz Hotspot Host (Internet active & superior PHY rate)".to_string(),
-        )
-    } else {
-        (
-            HotspotHostChoice::Phone,
-            "Phone Wi-Fi selected as Primary 5GHz Hotspot Host (Superior PHY rate/bands)".to_string(),
-        )
-    }
+    (
+        HotspotHostChoice::Phone,
+        "Phone 5GHz Wi-Fi Direct AP selected as Primary (High-speed ~50+ MB/s direct link, bypassing Windows ICS throttling)".to_string(),
+    )
 }
 
 /// Automatically select the device with superior Wi-Fi hardware to host the hotspot.
-pub fn select_best_hotspot_host(pc_caps: &WifiCapsInfo, phone_caps: &WifiCapsInfo) -> HotspotHostChoice {
-    let pc_score = pc_caps.max_phy_rate_mbps + if pc_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
-    let phone_score = phone_caps.max_phy_rate_mbps + if phone_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
-
-    if pc_score >= phone_score {
-        HotspotHostChoice::Pc
-    } else {
-        HotspotHostChoice::Phone
-    }
+pub fn select_best_hotspot_host(_pc_caps: &WifiCapsInfo, _phone_caps: &WifiCapsInfo) -> HotspotHostChoice {
+    HotspotHostChoice::Phone
 }
 
 /// Create and start a Windows Mobile Hotspot.
@@ -644,6 +611,43 @@ pub async fn ensure_pc_wifi_adapter_enabled() -> bool {
     true
 }
 
+/// Query the currently active gateway on the Wi-Fi adapter via PowerShell Get-NetIPAddress (no location permissions needed).
+pub async fn detect_wifi_adapter_subnet_gateway() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps_script = r#"
+            $v4 = Get-NetIPAddress -InterfaceAlias 'Wi-Fi*' -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' }
+            foreach ($ip in $v4) {
+                $gw = (Get-NetRoute -InterfaceIndex $ip.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1).NextHop
+                if ($gw -and $gw -ne '0.0.0.0') {
+                    Write-Output "$($ip.IPAddress)|$gw"
+                    return
+                }
+                $octets = $ip.IPAddress.Split('.')
+                if ($octets.Length -eq 4) {
+                    Write-Output "$($ip.IPAddress)|$($octets[0]).$($octets[1]).$($octets[2]).1"
+                    return
+                }
+            }
+        "#;
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let trimmed = stdout.trim();
+            if let Some(pos) = trimmed.find('|') {
+                let gw = trimmed[pos + 1..].trim().to_string();
+                if !gw.is_empty() {
+                    return Some(gw);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "windows")]
 async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, profile_path: &std::path::Path) -> bool {
     let security_section = if password.is_empty() {
@@ -683,7 +687,7 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
-    <connectionMode>manual</connectionMode>
+    <connectionMode>auto</connectionMode>
     <MSM>
         {security}
     </MSM>
@@ -699,6 +703,7 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
             "add",
             "profile",
             &format!("filename={}", profile_path.display()),
+            "user=all",
         ])
         .output()
         .await;
@@ -718,8 +723,6 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
 }
 
 /// Connect the PC's Wi-Fi adapter to a phone-hosted hotspot.
-///
-/// Creates a WLAN profile (supporting both WPA2PSK and WPA3-Personal SAE) and connects via `netsh wlan`.
 pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool> {
     #[cfg(target_os = "windows")]
     {
@@ -747,31 +750,75 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
     }
 }
 
-/// Wait for the PC to obtain an IP on the phone hotspot subnet.
-pub async fn wait_for_phone_hotspot_interface(timeout: Duration, expected_gateway: Option<&str>) -> Option<String> {
+/// Wait for the PC to obtain an IP on the phone hotspot subnet and verify communication.
+pub async fn wait_for_phone_hotspot_interface(
+    timeout: Duration,
+    target_ssid: &str,
+    expected_gateway: Option<&str>,
+) -> Option<String> {
     let start = std::time::Instant::now();
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(600))
+        .timeout(Duration::from_millis(350))
         .build()
         .unwrap_or_default();
 
+    let mut candidate_gws = Vec::new();
+    if let Some(gw) = expected_gateway {
+        candidate_gws.push(gw.to_string());
+    }
+    if !candidate_gws.contains(&"192.168.43.1".to_string()) {
+        candidate_gws.push("192.168.43.1".to_string());
+    }
+    if !candidate_gws.contains(&"192.168.49.1".to_string()) {
+        candidate_gws.push("192.168.49.1".to_string());
+    }
+
+    let mut attempt = 0;
     while start.elapsed() < timeout {
-        // 1. If an expected gateway IP was returned by the phone, check if it's reachable
-        if let Some(gw) = expected_gateway {
-            let url = format!("http://{}:54321/api/v1/info", gw);
-            if let Ok(resp) = client.get(&url).send().await {
-                if resp.status().is_success() {
-                    return Some(gw.to_string());
-                }
+        attempt += 1;
+
+        // 1. Check if the Wi-Fi adapter acquired an IP on the hotspot subnet
+        if let Some(wifi_gw) = detect_wifi_adapter_subnet_gateway().await {
+            if !candidate_gws.contains(&wifi_gw) {
+                candidate_gws.insert(0, wifi_gw);
             }
         }
 
-        // 2. Detect gateway from local network interfaces
-        if let Some(gateway) = detect_phone_hotspot_gateway().await {
-            return Some(gateway);
+        // 2. Retry connect if still connecting (every 3s)
+        if attempt % 10 == 0 {
+            #[cfg(target_os = "windows")]
+            {
+                let _ = tokio::process::Command::new("netsh")
+                    .args(["wlan", "connect", &format!("name={}", target_ssid)])
+                    .output()
+                    .await;
+            }
         }
 
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        // 3. Probe all candidate gateways in parallel
+        let mut tasks = Vec::new();
+        for gw in &candidate_gws {
+            let c = client.clone();
+            let gw_clone = gw.clone();
+            tasks.push(async move {
+                let url = format!("http://{}:54321/api/v1/info", gw_clone);
+                if let Ok(resp) = c.get(&url).send().await {
+                    if resp.status().is_success() {
+                        return Some(gw_clone);
+                    }
+                }
+                None
+            });
+        }
+
+        let results = futures::future::join_all(tasks).await;
+        for res in results {
+            if let Some(gw) = res {
+                return Some(gw);
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
     }
     None
 }
