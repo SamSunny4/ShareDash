@@ -44,7 +44,7 @@ class HotspotManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun start5GHzHotspot(onSuccess: ((ssid: String, password: String) -> Unit)? = null) {
+    fun start5GHzHotspot(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
         if (wifiManager == null) {
             _hotspotState.value = HotspotState.Error("Wi-Fi Hardware not available")
             return
@@ -56,11 +56,25 @@ class HotspotManager(private val context: Context) {
         }
 
         if (_hotspotState.value is HotspotState.Active) {
+            val active = _hotspotState.value as HotspotState.Active
+            onSuccess?.invoke(active.ssid, active.password, active.ipAddress)
             return
         }
 
         _hotspotState.value = HotspotState.Starting
-        Log.i(TAG, "Starting Local-Only Hotspot...")
+        Log.i(TAG, "Freeing Wi-Fi band & starting 5GHz Local-Only Hotspot...")
+
+        // Disconnect client Wi-Fi to free radio/antenna bands for maximum 5GHz/6GHz throughput
+        try {
+            Log.i(TAG, "Disconnecting client Wi-Fi connection to free radio channels...")
+            wifiManager.disconnect()
+            @Suppress("DEPRECATION")
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                wifiManager.isWifiEnabled = false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice while freeing Wi-Fi: ${e.message}")
+        }
 
         try {
             wifiManager.startLocalOnlyHotspot(
@@ -69,15 +83,16 @@ class HotspotManager(private val context: Context) {
                         super.onStarted(reservation)
                         hotspotReservation = reservation
                         val (ssid, pass) = extractCredentials(reservation)
+                        val gatewayIp = getHotspotGatewayIp()
 
                         _hotspotState.value = HotspotState.Active(
                             ssid = ssid,
                             password = pass,
-                            ipAddress = "192.168.43.1",
+                            ipAddress = gatewayIp,
                             band = "5 GHz High-Speed Hotspot"
                         )
-                        Log.i(TAG, "Hotspot ACTIVE: SSID='$ssid', Password='$pass', IP=192.168.43.1")
-                        onSuccess?.invoke(ssid, pass)
+                        Log.i(TAG, "Hotspot ACTIVE: SSID='$ssid', Password='$pass', IP=$gatewayIp")
+                        onSuccess?.invoke(ssid, pass, gatewayIp)
                     }
 
                     override fun onStopped() {
@@ -99,6 +114,44 @@ class HotspotManager(private val context: Context) {
             Log.e(TAG, "Failed to start local hotspot: ${e.message}")
             _hotspotState.value = HotspotState.Error("Hotspot error: ${e.message}")
         }
+    }
+
+    /**
+     * Dynamically detect the gateway IP of the active AP/tethering network interface.
+     */
+    fun getHotspotGatewayIp(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return "192.168.43.1"
+            val ifaceList = interfaces.toList()
+            // 1. Look specifically for AP / Tethering / Hotspot interfaces
+            for (iface in ifaceList) {
+                val name = iface.name.lowercase()
+                if (name.contains("ap") || name.contains("wlan1") || name.contains("swlan") || name.contains("softap") || name.contains("rndis") || name.contains("tether")) {
+                    for (addr in iface.inetAddresses) {
+                        if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                            val host = addr.hostAddress
+                            if (host != null && !host.startsWith("127.")) {
+                                return host
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Check for standard subnet IP patterns
+            for (iface in ifaceList) {
+                if (iface.isLoopback || !iface.isUp) continue
+                for (addr in iface.inetAddresses) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        val host = addr.hostAddress
+                        if (host != null && (host.startsWith("192.168.43.") || host.startsWith("192.168.49.") || host.startsWith("172.20.10."))) {
+                            return host
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "192.168.43.1"
     }
 
     private fun extractCredentials(reservation: WifiManager.LocalOnlyHotspotReservation?): Pair<String, String> {

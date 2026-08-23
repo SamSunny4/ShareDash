@@ -184,13 +184,13 @@ class MainActivity : ComponentActivity() {
             openUsbTetheringSettings()
         }
         bleCommandServer.onStartHotspotRequest = {
-            hotspotManager.start5GHzHotspot { ssid, password ->
-                bleCommandServer.sendHotspotStartedResponse(ssid, password, "192.168.43.1")
+            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
+                bleCommandServer.sendHotspotStartedResponse(ssid, password, gateway)
                 val resp = org.json.JSONObject().apply {
                     put("status", "hotspot_started")
                     put("ssid", ssid)
                     put("password", password)
-                    put("gateway", "192.168.43.1")
+                    put("gateway", gateway)
                 }
                 rfcommServer.broadcastJson(resp)
                 bleManager.startAdvertising()
@@ -209,13 +209,13 @@ class MainActivity : ComponentActivity() {
             openUsbTetheringSettings()
         }
         rfcommServer.onStartHotspotRequest = {
-            hotspotManager.start5GHzHotspot { ssid, password ->
-                bleCommandServer.sendHotspotStartedResponse(ssid, password, "192.168.43.1")
+            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
+                bleCommandServer.sendHotspotStartedResponse(ssid, password, gateway)
                 val resp = org.json.JSONObject().apply {
                     put("status", "hotspot_started")
                     put("ssid", ssid)
                     put("password", password)
-                    put("gateway", "192.168.43.1")
+                    put("gateway", gateway)
                 }
                 rfcommServer.broadcastJson(resp)
                 bleManager.startAdvertising()
@@ -253,13 +253,13 @@ class MainActivity : ComponentActivity() {
             connectToWifiNetwork(ssid, password)
         }
         httpServer?.onStartHotspotRequest = { callback ->
-            hotspotManager.start5GHzHotspot { ssid, password ->
-                callback(ssid, password, "192.168.43.1")
+            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
+                callback(ssid, password, gateway)
                 val resp = org.json.JSONObject().apply {
                     put("status", "hotspot_started")
                     put("ssid", ssid)
                     put("password", password)
-                    put("gateway", "192.168.43.1")
+                    put("gateway", gateway)
                 }
                 rfcommServer.broadcastJson(resp)
                 bleManager.startAdvertising()
@@ -290,6 +290,15 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             try {
                 registerReceiver(btReceiver, btFilter)
+            } catch (_: Exception) {}
+        }
+
+        val wifiConnectFilter = android.content.IntentFilter("com.sharedash.app.WIFI_CONNECT")
+        try {
+            ContextCompat.registerReceiver(this, wifiConnectReceiver, wifiConnectFilter, ContextCompat.RECEIVER_EXPORTED)
+        } catch (_: Exception) {
+            try {
+                registerReceiver(wifiConnectReceiver, wifiConnectFilter)
             } catch (_: Exception) {}
         }
 
@@ -596,7 +605,7 @@ class MainActivity : ComponentActivity() {
                             },
                             hotspotState = hotspotState,
                             onStartHotspot = {
-                                hotspotManager.start5GHzHotspot { ssid, pass ->
+                                hotspotManager.start5GHzHotspot { _, _, _ ->
                                     udpManager.startDiscovery(lifecycleScope)
                                 }
                             },
@@ -935,6 +944,13 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this, "Ready to share ${uris.size} files. Select nearby device above.", Toast.LENGTH_SHORT).show()
                 }
             }
+            "com.sharedash.app.WIFI_CONNECT" -> {
+                val ssid = intent.getStringExtra("ssid") ?: ""
+                val password = intent.getStringExtra("password") ?: ""
+                if (ssid.isNotBlank()) {
+                    connectToWifiNetwork(ssid, password)
+                }
+            }
         }
     }
 
@@ -976,6 +992,19 @@ class MainActivity : ComponentActivity() {
                 checkUsbState()
                 if (_isUsbTetheringActive.value) {
                     onUsbConnectedCallback?.invoke()
+                }
+            }
+        }
+    }
+
+    private val wifiConnectReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == "com.sharedash.app.WIFI_CONNECT") {
+                val ssid = intent.getStringExtra("ssid") ?: ""
+                val password = intent.getStringExtra("password") ?: ""
+                if (ssid.isNotBlank()) {
+                    android.util.Log.i("MainActivity", "Received WIFI_CONNECT broadcast: SSID=$ssid")
+                    connectToWifiNetwork(ssid, password)
                 }
             }
         }
@@ -1123,6 +1152,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(btReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(wifiConnectReceiver) } catch (_: Exception) {}
         try { hotspotManager.stopHotspot() } catch (_: Exception) {}
         httpServer?.stop()
         bleCommandServer.stop()

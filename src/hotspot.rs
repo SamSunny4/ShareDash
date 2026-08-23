@@ -80,6 +80,119 @@ pub async fn detect_pc_wifi_caps() -> WifiCapsInfo {
     }
 }
 
+/// Check if the PC has an active internet connection profile.
+///
+/// On Windows, `NetworkOperatorTetheringManager` requires an active Internet Connection Profile (ICS)
+/// to start a Mobile Hotspot. Without an internet profile, Windows Hotspot fails immediately.
+pub async fn check_pc_internet_connection() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let ps_script = r#"
+            try {
+                $profile = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetInternetConnectionProfile()
+                if ($profile) {
+                    $level = $profile.GetNetworkConnectivityLevel()
+                    if ($level -eq [Windows.Networking.Connectivity.NetworkConnectivityLevel]::InternetAccess) {
+                        Write-Output "INTERNET_OK"
+                    } else {
+                        Write-Output "NO_INTERNET"
+                    }
+                } else {
+                    Write-Output "NO_INTERNET"
+                }
+            } catch {
+                Write-Output "NO_INTERNET"
+            }
+        "#;
+
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains("INTERNET_OK") {
+                return true;
+            }
+        }
+    }
+
+    // Fast TCP connectivity probe as fallback (DNS root servers)
+    let probe_targets = ["1.1.1.1:53", "8.8.8.8:53"];
+    for target in probe_targets {
+        if let Ok(Ok(_)) = tokio::time::timeout(
+            Duration::from_millis(500),
+            tokio::net::TcpStream::connect(target),
+        ).await {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if the PC is capable of creating a 5GHz band Mobile Hotspot right now.
+pub async fn check_pc_5ghz_hotspot_available(has_internet: bool) -> bool {
+    if !has_internet {
+        // Windows Mobile Hotspot requires an active internet connection to share
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Query Wi-Fi drivers and hosted network support
+        if let Ok(output) = tokio::process::Command::new("netsh")
+            .args(["wlan", "show", "drivers"])
+            .output()
+            .await
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let supports_5g = text.contains("802.11ac") || text.contains("802.11ax") || text.contains("802.11be") || text.contains("5 GHz");
+            return supports_5g;
+        }
+    }
+
+    false
+}
+
+/// Select the optimal device to host the hotspot based on PC internet connectivity,
+/// 5GHz capability, and hardware PHY specs.
+pub async fn select_optimal_hotspot_host(
+    pc_caps: &WifiCapsInfo,
+    phone_caps: &WifiCapsInfo,
+) -> (HotspotHostChoice, String) {
+    let has_internet = check_pc_internet_connection().await;
+    if !has_internet {
+        return (
+            HotspotHostChoice::Phone,
+            "PC has no active internet connection (Windows Mobile Hotspot requires internet sharing). Phone will host 5GHz Hotspot.".to_string(),
+        );
+    }
+
+    let pc_can_5g_hotspot = check_pc_5ghz_hotspot_available(has_internet).await;
+    if !pc_can_5g_hotspot {
+        return (
+            HotspotHostChoice::Phone,
+            "PC 5GHz hotspot is unavailable on the current network interface. Phone will host 5GHz Hotspot.".to_string(),
+        );
+    }
+
+    let pc_score = pc_caps.max_phy_rate_mbps + if pc_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
+    let phone_score = phone_caps.max_phy_rate_mbps + if phone_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
+
+    if pc_score >= phone_score {
+        (
+            HotspotHostChoice::Pc,
+            "PC Wi-Fi selected as Primary 5GHz Hotspot Host (Internet active & superior PHY rate)".to_string(),
+        )
+    } else {
+        (
+            HotspotHostChoice::Phone,
+            "Phone Wi-Fi selected as Primary 5GHz Hotspot Host (Superior PHY rate/bands)".to_string(),
+        )
+    }
+}
+
 /// Automatically select the device with superior Wi-Fi hardware to host the hotspot.
 pub fn select_best_hotspot_host(pc_caps: &WifiCapsInfo, phone_caps: &WifiCapsInfo) -> HotspotHostChoice {
     let pc_score = pc_caps.max_phy_rate_mbps + if pc_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) { 500 } else { 0 };
@@ -419,7 +532,33 @@ pub fn generate_hotspot_credentials() -> (String, String) {
 pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool> {
     #[cfg(target_os = "windows")]
     {
-        // Create a WLAN profile XML for the phone hotspot
+        // Create a WLAN profile XML for the phone hotspot (supports WPA2PSK and Open)
+        let security_section = if password.is_empty() {
+            r#"<security>
+                <authEncryption>
+                    <authentication>open</authentication>
+                    <encryption>none</encryption>
+                    <useOneX>false</useOneX>
+                </authEncryption>
+            </security>"#.to_string()
+        } else {
+            format!(
+                r#"<security>
+                <authEncryption>
+                    <authentication>WPA2PSK</authentication>
+                    <encryption>AES</encryption>
+                    <useOneX>false</useOneX>
+                </authEncryption>
+                <sharedKey>
+                    <keyType>passPhrase</keyType>
+                    <protected>false</protected>
+                    <keyMaterial>{password}</keyMaterial>
+                </sharedKey>
+            </security>"#,
+                password = password
+            )
+        };
+
         let profile_xml = format!(
             r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
@@ -432,22 +571,11 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
     <connectionType>ESS</connectionType>
     <connectionMode>manual</connectionMode>
     <MSM>
-        <security>
-            <authEncryption>
-                <authentication>WPA2PSK</authentication>
-                <encryption>AES</encryption>
-                <useOneX>false</useOneX>
-            </authEncryption>
-            <sharedKey>
-                <keyType>passPhrase</keyType>
-                <protected>false</protected>
-                <keyMaterial>{password}</keyMaterial>
-            </sharedKey>
-        </security>
+        {security}
     </MSM>
 </WLANProfile>"#,
             ssid = ssid,
-            password = password
+            security = security_section
         );
 
         // Write the profile XML to a temp file
@@ -476,26 +604,32 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
             }
         }
 
-        // Connect to the network
-        let connect_result = tokio::process::Command::new("netsh")
-            .args(["wlan", "connect", &format!("name={}", ssid)])
-            .output()
-            .await;
-
         // Clean up temp file
         let _ = tokio::fs::remove_file(&profile_path).await;
 
-        match connect_result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                tracing::info!("WLAN connect: {}", stdout.trim());
-                Ok(stdout.contains("successfully") || output.status.success())
+        // Connect to the network (with retry loop for Windows WLAN association)
+        for attempt in 0..3 {
+            let connect_result = tokio::process::Command::new("netsh")
+                .args(["wlan", "connect", &format!("name={}", ssid)])
+                .output()
+                .await;
+
+            match connect_result {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    tracing::info!("WLAN connect attempt {}: {}", attempt + 1, stdout.trim());
+                    if stdout.contains("successfully") || output.status.success() {
+                        return Ok(true);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to connect to phone hotspot: {}", e);
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to connect to phone hotspot: {}", e);
-                Ok(false)
-            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
+
+        Ok(false)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -504,20 +638,37 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
     }
 }
 
-/// Wait for the PC to obtain an IP on the phone hotspot subnet (192.168.43.x or 192.168.49.x).
-pub async fn wait_for_phone_hotspot_interface(timeout: Duration) -> Option<String> {
+/// Wait for the PC to obtain an IP on the phone hotspot subnet.
+pub async fn wait_for_phone_hotspot_interface(timeout: Duration, expected_gateway: Option<&str>) -> Option<String> {
     let start = std::time::Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(600))
+        .build()
+        .unwrap_or_default();
+
     while start.elapsed() < timeout {
+        // 1. If an expected gateway IP was returned by the phone, check if it's reachable
+        if let Some(gw) = expected_gateway {
+            let url = format!("http://{}:54321/api/v1/info", gw);
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    return Some(gw.to_string());
+                }
+            }
+        }
+
+        // 2. Detect gateway from local network interfaces
         if let Some(gateway) = detect_phone_hotspot_gateway().await {
             return Some(gateway);
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        tokio::time::sleep(Duration::from_millis(800)).await;
     }
     None
 }
 
-/// Detect if the PC is connected to a phone hotspot by looking for 192.168.43.x or 192.168.49.x interfaces.
-/// Returns the phone's gateway IP (typically 192.168.43.1 or 192.168.49.1).
+/// Detect if the PC is connected to a phone hotspot by looking for candidate gateway interfaces.
+/// Returns the phone's gateway IP (typically 192.168.43.1, 192.168.49.1, 172.20.10.1, etc.).
 pub async fn detect_phone_hotspot_gateway() -> Option<String> {
     if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
         for (_, ip) in interfaces {
@@ -527,6 +678,12 @@ pub async fn detect_phone_hotspot_gateway() -> Option<String> {
             }
             if ip_str.starts_with("192.168.49.") && ip_str != "192.168.49.1" {
                 return Some("192.168.49.1".to_string());
+            }
+            if ip_str.starts_with("172.20.10.") && ip_str != "172.20.10.1" {
+                return Some("172.20.10.1".to_string());
+            }
+            if ip_str.starts_with("192.168.50.") && ip_str != "192.168.50.1" {
+                return Some("192.168.50.1".to_string());
             }
         }
     }

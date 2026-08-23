@@ -480,6 +480,80 @@ impl BleDiscovery {
         None
     }
 
+    /// Request the phone to start its 5GHz Hotspot and return (ssid, password, gateway)
+    pub async fn request_phone_start_hotspot(&self) -> Option<(String, String, String)> {
+        let adapter = self.get_adapter()?;
+        let sharedash_uuid = BleUuid::parse_str(SHAREDASH_BLE_SERVICE_UUID).ok()?;
+        let command_uuid = BleUuid::parse_str(COMMAND_CHAR_UUID).ok()?;
+        let response_uuid = BleUuid::parse_str(RESPONSE_CHAR_UUID).ok()?;
+        let cmd_json = serde_json::json!({"cmd": "start_hotspot"}).to_string();
+
+        if let Ok(peripherals) = adapter.peripherals().await {
+            for peripheral in peripherals {
+                if let Ok(Some(props)) = peripheral.properties().await {
+                    let has_sd = props.services.iter().any(|s| *s == sharedash_uuid)
+                        || props.service_data.contains_key(&sharedash_uuid)
+                        || props.local_name.as_ref().map(|n| n.contains("ShareDash") || n.contains("Pixel") || n.contains("Galaxy") || n.contains("Android") || n.contains("Phone") || n.contains("Sam")).unwrap_or(false);
+                    if has_sd {
+                        for _ in 0..3 {
+                            let is_conn = peripheral.is_connected().await.unwrap_or(false);
+                            if is_conn || peripheral.connect().await.is_ok() {
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                if peripheral.discover_services().await.is_ok() {
+                                    let mut cmd_char = None;
+                                    let mut resp_char = None;
+                                    for ch in peripheral.characteristics() {
+                                        if ch.uuid == command_uuid {
+                                            cmd_char = Some(ch);
+                                        } else if ch.uuid == response_uuid {
+                                            resp_char = Some(ch);
+                                        }
+                                    }
+
+                                    if let (Some(ref cmd_ch), Some(ref resp_ch)) = (&cmd_char, &resp_char) {
+                                        let write_ok = peripheral.write(cmd_ch, cmd_json.as_bytes(), WriteType::WithResponse).await.is_ok()
+                                            || peripheral.write(cmd_ch, cmd_json.as_bytes(), WriteType::WithoutResponse).await.is_ok();
+                                        if write_ok {
+                                            // Wait for phone to disconnect client Wi-Fi and bring up 5GHz SoftAP
+                                            for _ in 0..25 {
+                                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                                if let Ok(val) = peripheral.read(resp_ch).await {
+                                                    let response_str = String::from_utf8_lossy(&val).to_string();
+                                                    if response_str.contains("hotspot_started") {
+                                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response_str) {
+                                                            let ssid = json.get("ssid").and_then(|v| v.as_str()).unwrap_or("ShareDash-5G").to_string();
+                                                            let pass = json.get("password").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                            let gw = json.get("gateway").and_then(|v| v.as_str()).unwrap_or("192.168.43.1").to_string();
+                                                            let _ = peripheral.disconnect().await;
+                                                            return Some((ssid, pass, gw));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = peripheral.disconnect().await;
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Send Wi-Fi connect credentials command to phone over BLE GATT
+    pub async fn send_wifi_connect_cmd(&self, ssid: &str, password: &str) -> bool {
+        let cmd = serde_json::json!({
+            "cmd": "wifi_connect",
+            "ssid": ssid,
+            "password": password
+        }).to_string();
+        self.send_gatt_command(&cmd).await
+    }
+
     /// Ping the phone over Bluetooth and return the response
     pub async fn ping_phone(&self) -> Option<String> {
         let cmd = serde_json::json!({"cmd": "ping"}).to_string();
