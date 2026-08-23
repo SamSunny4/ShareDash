@@ -81,7 +81,7 @@ fun SmartBridgeStrip(
             }
 
             Text(
-                text = if (isUsbConnected) "🚀 Turbo Active" else "⚡ Turbo Boost",
+                text = if (isUsbConnected) "Turbo Active" else "Turbo Boost",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isUsbConnected) WifiGreen else InFlightYellow,
@@ -170,7 +170,7 @@ fun TransportRecommendationCard(
             modifier = Modifier.fillMaxWidth()
         ) {
             RecommendationRow(
-                rank = "🥇",
+                rank = "#1",
                 title = "USB 3.2 Fast-Path",
                 speed = "3.2 Gbps",
                 desc = if (isUsbConnected) "Active & Aggregated" else "Plug in USB-C cable for max wire speed",
@@ -180,7 +180,7 @@ fun TransportRecommendationCard(
             )
 
             RecommendationRow(
-                rank = "🥈",
+                rank = "#2",
                 title = "Wi-Fi 6 Direct P2P",
                 speed = "5GHz · ~1.2 Gbps",
                 desc = "Direct device-to-device wireless tunnel",
@@ -189,7 +189,7 @@ fun TransportRecommendationCard(
             )
 
             RecommendationRow(
-                rank = "🥉",
+                rank = "#3",
                 title = "Local Subnet Wi-Fi",
                 speed = "650 Mbps",
                 desc = "Standard LAN router routing",

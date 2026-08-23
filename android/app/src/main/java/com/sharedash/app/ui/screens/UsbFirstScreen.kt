@@ -236,7 +236,7 @@ fun UsbFirstScreen(
                 // Dynamic Status & Guidance
                 if (isUsbTetheringActive) {
                     Text(
-                        text = "⚡ USB Tethering Link Active!",
+                        text = "USB Tethering Link Active!",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = NeoGreen,
@@ -251,7 +251,7 @@ fun UsbFirstScreen(
                     )
                 } else if (isUsbCablePlugged) {
                     Text(
-                        text = "⚡ USB Cable Detected!",
+                        text = "USB Cable Detected!",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,

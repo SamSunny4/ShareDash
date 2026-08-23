@@ -296,7 +296,7 @@ fun DiscoveryScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "⚡ Switch to USB Mode",
+                            text = "Switch to USB Mode",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
@@ -481,7 +481,7 @@ fun DiscoveryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "📡 Scanning over Wi-Fi, Bluetooth & USB...",
+                        text = "Scanning over Wi-Fi, Bluetooth & USB...",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         fontWeight = FontWeight.Medium

@@ -71,7 +71,7 @@ class HotspotManager(private val context: Context) {
         }
 
         _hotspotState.value = HotspotState.Starting
-        Log.i(TAG, "🚀 Initiating 5GHz Wi-Fi Direct Autonomous Group (DIRECT-SD)...")
+        Log.i(TAG, "Initiating 5GHz Wi-Fi Direct Autonomous Group (DIRECT-SD)...")
 
         start5GHzP2pGroup(onSuccess)
     }
@@ -131,7 +131,7 @@ class HotspotManager(private val context: Context) {
                             val actualSsid = group?.networkName?.takeIf { it.isNotBlank() } ?: ssidName
                             val actualPass = group?.passphrase?.takeIf { it.isNotBlank() } ?: passphrase
                             val gatewayIp = "192.168.49.1"
-                            Log.i(TAG, "🎉 5GHz Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
+                            Log.i(TAG, "5GHz Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
                             _hotspotState.value = HotspotState.Active(
                                 ssid = actualSsid,
                                 password = actualPass,
@@ -181,7 +181,7 @@ class HotspotManager(private val context: Context) {
                             val actualSsid = group?.networkName?.takeIf { it.isNotBlank() } ?: ssidName
                             val actualPass = group?.passphrase?.takeIf { it.isNotBlank() } ?: passphrase
                             val gatewayIp = "192.168.49.1"
-                            Log.i(TAG, "🎉 Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
+                            Log.i(TAG, "Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
                             _hotspotState.value = HotspotState.Active(
                                 ssid = actualSsid,
                                 password = actualPass,

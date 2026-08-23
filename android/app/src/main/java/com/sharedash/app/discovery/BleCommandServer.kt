@@ -83,22 +83,22 @@ class BleCommandServer(private val context: Context) {
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     device?.let { connectedDevices.remove(it) }
-                    Log.i(TAG, "🔌 GATT client disconnected: $name ($status)")
+                    Log.i(TAG, "GATT client disconnected: $name ($status)")
                 }
             }
         }
 
         override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.i(TAG, "✅ GATT Service 0x5344 added successfully: ${service?.uuid}")
+                Log.i(TAG, "GATT Service 0x5344 added successfully: ${service?.uuid}")
             } else {
-                Log.e(TAG, "❌ Failed to add GATT Service: status=$status")
+                Log.e(TAG, "Failed to add GATT Service: status=$status")
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onMtuChanged(device: BluetoothDevice?, mtu: Int) {
-            Log.i(TAG, "⚡ MTU changed for ${device?.address} to $mtu bytes")
+            Log.i(TAG, "MTU changed for ${device?.address} to $mtu bytes")
         }
 
         @SuppressLint("MissingPermission")
@@ -268,7 +268,7 @@ class BleCommandServer(private val context: Context) {
             service.addCharacteristic(responseChar)
 
             val added = gattServer?.addService(service) ?: false
-            Log.i(TAG, "🚀 GATT Command Server initialized, addService result=$added")
+            Log.i(TAG, "GATT Command Server initialized, addService result=$added")
         } catch (e: SecurityException) {
             Log.w(TAG, "SecurityException in GATT server start: ${e.message}")
         } catch (e: Exception) {
@@ -308,7 +308,7 @@ class BleCommandServer(private val context: Context) {
                 val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 val isWifiOn = wifiManager?.isWifiEnabled ?: false
                 if (ssid.isNotBlank()) {
-                    Log.i(TAG, "📶 Wi-Fi connect request: SSID='$ssid', phone wifi_enabled=$isWifiOn")
+                    Log.i(TAG, "Wi-Fi connect request: SSID='$ssid', phone wifi_enabled=$isWifiOn")
                     onWifiConnectRequest?.invoke(ssid, password)
                     sendResponse(device, JSONObject().apply {
                         put("status", "wifi_connecting")
@@ -324,7 +324,7 @@ class BleCommandServer(private val context: Context) {
             }
 
             "usb_tether_on" -> {
-                Log.i(TAG, "🔌 USB tethering request")
+                Log.i(TAG, "USB tethering request")
                 onUsbTetherRequest?.invoke()
                 sendResponse(device, JSONObject().apply {
                     put("status", "usb_tether_opening")
@@ -332,7 +332,7 @@ class BleCommandServer(private val context: Context) {
             }
 
             "start_hotspot" -> {
-                Log.i(TAG, "📡 Hotspot start request")
+                Log.i(TAG, "Hotspot start request")
                 onStartHotspotRequest?.invoke()
                 sendResponse(device, JSONObject().apply {
                     put("status", "hotspot_starting")

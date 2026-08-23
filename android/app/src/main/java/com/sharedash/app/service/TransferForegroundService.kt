@@ -81,7 +81,7 @@ class TransferForegroundService : Service() {
             wifiLock = wifiManager?.createWifiLock(lockMode, "ShareDash::TransferWifiLock")?.apply {
                 acquire()
             }
-            Log.i(TAG, "🔒 WakeLock & High-Perf WifiLock acquired for background transfer")
+            Log.i(TAG, "WakeLock & High-Perf WifiLock acquired for background transfer")
         } catch (e: Exception) {
             Log.w(TAG, "Failed acquiring locks: ${e.message}")
         }
@@ -95,7 +95,7 @@ class TransferForegroundService : Service() {
             wifiLock?.let {
                 if (it.isHeld) it.release()
             }
-            Log.i(TAG, "🔓 WakeLock & WifiLock released")
+            Log.i(TAG, "WakeLock & WifiLock released")
         } catch (e: Exception) {
             Log.w(TAG, "Error releasing locks: ${e.message}")
         }
@@ -135,7 +135,7 @@ class TransferForegroundService : Service() {
 
         val notification = NotificationCompat.Builder(this, ShareDashApplication.CHANNEL_TRANSFERS)
             .setContentTitle("ShareDash — $title")
-            .setContentText("✔ File transfer completed successfully!")
+            .setContentText("File transfer completed successfully")
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)

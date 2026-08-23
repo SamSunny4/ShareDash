@@ -76,7 +76,7 @@ class AndroidHttpServer(
                 wifiLock = wifiManager?.createWifiLock(lockMode, "ShareDash::HttpServerWifiLock")?.apply {
                     acquire()
                 }
-                Log.i(TAG, "🔒 Acquired Low-Latency High-Perf WifiLock & WakeLock for high-speed reception")
+                Log.i(TAG, "Acquired Low-Latency High-Perf WifiLock & WakeLock for high-speed reception")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed acquiring high-perf locks: ${e.message}")
@@ -90,7 +90,7 @@ class AndroidHttpServer(
                 wakeLock = null
                 wifiLock?.let { if (it.isHeld) it.release() }
                 wifiLock = null
-                Log.i(TAG, "🔓 Released High-Perf WifiLock & WakeLock")
+                Log.i(TAG, "Released High-Perf WifiLock & WakeLock")
             } catch (e: Exception) {
                 Log.w(TAG, "Error releasing high-perf locks: ${e.message}")
             }
@@ -111,7 +111,7 @@ class AndroidHttpServer(
                     reuseAddress = true
                     bind(InetSocketAddress("0.0.0.0", port))
                 }
-                Log.i(TAG, "🚀 AndroidHttpServer listening on 0.0.0.0:$port")
+                Log.i(TAG, "AndroidHttpServer listening on 0.0.0.0:$port")
 
                 while (isActive) {
                     try {
@@ -527,7 +527,7 @@ class AndroidHttpServer(
             } catch (_: Exception) {}
             activeChunkTransfers.remove(sessionKey)
             releaseHighPerfLocksIfIdle()
-            Log.i(TAG, "🎉 Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")
+            Log.i(TAG, "Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")
             onFileReceived(session.fileName, session.targetFile.length())
         }
 
@@ -663,7 +663,7 @@ class AndroidHttpServer(
                 }
                 part1File.delete()
                 part2File.delete()
-                Log.i(TAG, "🎉 Multipath merge complete: $baseName (${finalTarget.length()} bytes)")
+                Log.i(TAG, "Multipath merge complete: $baseName (${finalTarget.length()} bytes)")
                 onFileReceived(baseName, finalTarget.length())
             } catch (e: Exception) {
                 Log.e(TAG, "Failed merging multipath parts for $baseName: ${e.message}")

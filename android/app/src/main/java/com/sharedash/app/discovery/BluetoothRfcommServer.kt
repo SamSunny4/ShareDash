@@ -90,7 +90,7 @@ class BluetoothRfcommServer(private val context: Context) {
                     }
 
                     isListening = true
-                    Log.i(TAG, "🚀 Bluetooth RFCOMM Server listening on UUID $RFCOMM_UUID")
+                    Log.i(TAG, "Bluetooth RFCOMM Server listening on UUID $RFCOMM_UUID")
 
                     while (isActive && isListening) {
                         try {
@@ -100,7 +100,7 @@ class BluetoothRfcommServer(private val context: Context) {
                             } catch (_: SecurityException) {
                                 "Unknown"
                             }
-                            Log.i(TAG, "🔗 Bluetooth RFCOMM client connected: $remoteName")
+                            Log.i(TAG, "Bluetooth RFCOMM client connected: $remoteName")
                             synchronized(activeSockets) { activeSockets.add(socket) }
                             launch(Dispatchers.IO) {
                                 handleClientSocket(socket)
@@ -134,7 +134,7 @@ class BluetoothRfcommServer(private val context: Context) {
                 val line = reader.readLine() ?: break
                 if (line.isBlank()) continue
 
-                Log.d(TAG, "📨 RFCOMM Msg: $line")
+                Log.d(TAG, "RFCOMM Msg: $line")
                 try {
                     val json = JSONObject(line)
                     val cmd = json.optString("cmd", "")
