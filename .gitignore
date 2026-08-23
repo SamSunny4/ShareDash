@@ -1,27 +1,39 @@
 # Rust build artifacts
 /target/
+Cargo.lock
 
-# Runtime/local app data
+# Runtime & Local Database
 /sharedash_data/
-dist/sharedash_data/
+**/sharedash_data/
+*.db
+*.db-shm
+*.db-wal
 
-# Temporary files
+# Temporary & Test Files
 /tmp/
 *.log
 *.bin
+*.bin.sha256
+*.sha256
 __pycache__/
 *.pyc
+*.pyo
 
-# Android/Gradle artifacts
+# Android & Gradle artifacts
 /android/.gradle/
+/android/.kotlin/
 /android/local.properties
 /android/**/build/
 /android/**/.cxx/
 /android/captures/
+.gradle/
+.idea/
+*.iml
 
-# OS/editor noise
+# OS / Editor noise
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
+.vscode/
 

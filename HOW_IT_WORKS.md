@@ -432,8 +432,20 @@ e:/ShareDash/
   ├── README.md                     # Project overview and quick start guide
   ├── run_windows_app.bat           # One-click desktop launcher
   ├── launch_windows_app.ps1        # PowerShell desktop launcher
-  ├── benchmark_suite.py            # Automated benchmark evaluation suite
-  ├── evaluate_multipath.py         # Multipath throughput calculator
+  │
+  ├── dist/                         # Distribution Artifacts
+  │   ├── sharedash.exe             # Compiled Windows Desktop Binary
+  │   ├── sharedash.apk             # Compiled Android Companion APK
+  │   └── README.md                 # Distribution guide & installation
+  │
+  ├── scripts/                      # Diagnostic & Benchmarking Tools
+  │   ├── benchmark_suite.py        # Automated ADB/HTTP live benchmark suite
+  │   ├── generate_test_file.py     # Deterministic 1GB test file generator
+  │   ├── evaluate_multipath.py     # Multipath streaming throughput evaluator
+  │   ├── evaluate_multipath_model.py # Analytical chunk & bandwidth optimizer
+  │   ├── full_matrix_optimizer.py  # Matrix simulation across diverse hardware
+  │   ├── run_benchmarks_live.py    # ADB port forwarding & live probe tool
+  │   └── README.md                 # Scripts documentation
   │
   ├── src/                          # Windows Rust Core Engine
   │   ├── main.rs                   # Entry point, CLI flags, persistent UUID
@@ -457,7 +469,7 @@ e:/ShareDash/
   │   │       ├── server/           # AndroidHttpServer (streaming file receiver)
   │   │       ├── service/          # Foreground transfer service
   │   │       ├── storage/          # Android sparse file writer & SHA-256 verifier
-  │   │       └── ui/               # RadarView, Speedometer, PieceGrid, BridgeCards
+  │   │       └── ui/               # UsbFirstScreen, RadarView, Speedometer, PieceGrid, BridgeCards
   │   └── build.gradle.kts          # Gradle build script
   │
   ├── sharedash-ui/                 # Windows 11 Fluent Acrylic Web Dashboard
@@ -469,7 +481,8 @@ e:/ShareDash/
       ├── protocol_test.rs          # Frame serialization & CRC32 checks
       ├── multipath_benchmark.rs    # Concurrent channel aggregation tests
       ├── failover_test.rs          # Mid-transfer cable disconnect failovers
-      └── corruption_test.rs        # Bit-flip detection & re-fetch verification
+      ├── corruption_test.rs        # Bit-flip detection & re-fetch verification
+      └── test_tether_detection.rs  # Strict USB/RNDIS network adapter isolation tests
 ```
 
 ---

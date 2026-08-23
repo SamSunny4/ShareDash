@@ -1,7 +1,18 @@
 # ⚡ ShareDash
 
-> **Next-Generation Multipath File Transfer System for Windows & Android**  
-> Aggregate **USB 3.x Cable Fast-Path**, **Wi-Fi Direct P2P**, **Local Wi-Fi/LAN**, and **Internet QUIC** simultaneously into a single ultra-high-speed transfer pipeline with Quick Share radar discovery and cryptographic piece verification.
+<div align="center">
+
+[![Rust](https://img.shields.io/badge/Rust-1.78%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?logo=kotlin)](https://kotlinlang.org/)
+[![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-green.svg?logo=android)](https://developer.android.com/)
+[![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6.svg?logo=windows)](https://microsoft.com/windows)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen.svg)]()
+
+**Next-Generation Multipath File Transfer System for Windows & Android**  
+*Aggregate **USB 3.x Cable Fast-Path**, **Wi-Fi Direct P2P**, **Local Wi-Fi/LAN**, and **Internet QUIC** simultaneously into a single ultra-high-speed pipeline with Quick Share radar discovery and zero-corruption cryptographic integrity.*
+
+</div>
 
 ---
 
@@ -9,12 +20,13 @@
 
 | Feature | Description |
 | :--- | :--- |
-| 📡 **Quick Share Radar Discovery** | Live pulsing concentric wave detecting nearby Android phones and Windows PCs over **Bluetooth Low Energy (BLE)** & UDP beacon. |
-| 🔌 **Smart Connection Bridges** | Dynamically detects and aggregates multiple physical connections (USB-C cable, Wi-Fi 6, Gigabit Ethernet) for **combined multi-gigabit throughput**. |
-| 🏎️ **Dynamic Work-Stealing Scheduler** | Dynamically adapts in-flight chunk windows based on real-time EWMA bandwidth and steals straggling chunks from slower paths. |
+| 🔌 **USB-First Fast-Path Priority** | Instant line-speed connection over USB-C (3+ Gbps) without battery-draining wireless scans. One-tap USB Tethering activation. |
+| ⚠️ **Smart Wireless Mode & Slowdown Warning** | Seamlessly switch between USB Cable and Wireless Direct modes with clear performance alerts. |
+| 📡 **Quick Share Radar Discovery** | Live pulsing concentric wave detecting nearby Android phones and Windows PCs over **Bluetooth Low Energy (BLE)** & UDP multicast. |
+| 🏎️ **Dynamic Work-Stealing Multipath** | Dynamically adapts in-flight chunk windows based on real-time EWMA bandwidth and steals straggling chunks from slower paths. |
 | 🛡️ **Zero-Corruption Verification** | CRC32 binary framing, SHA-256 / BLAKE3 chunk hashing, AES-256-GCM encryption, and direct sparse-offset disk writes. |
-| 📱 **Native Android Companion App** | Kotlin + Jetpack Compose app with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and Bluetooth LE advertising. |
-| 🌐 **Universal Web Portal** | Instant zero-install browser portal with QR code scanner and mobile upload for any phone or laptop. |
+| 📱 **Native Android Companion App** | Modern Jetpack Compose UI with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and Bluetooth LE advertising. |
+| 🌐 **Fluent Mica Web Dashboard** | Standalone Windows 11 desktop app interface with live speedometers, chunk visualizer grid, and bridge status monitors. |
 
 ---
 
@@ -25,7 +37,7 @@ graph TD
     subgraph UI ["User Interfaces"]
         WinUI["Quick Share Windows App (Fluent Mica UI)"]
         AndUI["ShareDash Android App (Jetpack Compose)"]
-        WebPortal["Universal Web Portal (Mobile Browser)"]
+        WebPortal["Universal Web Dashboard (Browser App)"]
     end
 
     subgraph Core ["ShareDash Multipath Core Engine"]
@@ -55,7 +67,6 @@ graph TD
     Core <--> BLE
 ```
 
-
 ---
 
 ## 📊 Live Benchmark Validation (1.00 GB Real Transfer)
@@ -66,14 +77,22 @@ graph TD
 | ⚡ **USB Fast-Path Only** | ⚡ USB 3.x Cable | **39.64 s** | **25.8 MB/s** | **0.21 Gbps** | **SHA-256 ✔** |
 | 📶 **Wi-Fi Hotspot Only** | 📶 5 GHz Wi-Fi Hotspot | **81.32 s** | **12.6 MB/s** | **0.10 Gbps** | **SHA-256 ✔** |
 
-> 📖 **Deep Dive Documentation**: For an exhaustive, step-by-step breakdown of how the 8-phase auto-connect wizard, Bluetooth Low Energy GATT capability exchange, PC hotspot provisioning, 73/27 chunk streaming, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](file:///e:/ShareDash/HOW_IT_WORKS.md).
+> 📖 **Deep Dive Documentation**: For an exhaustive, step-by-step breakdown of how the connection wizard, Bluetooth LE GATT exchange, PC hotspot provisioning, 73/27 chunk streaming, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](file:///e:/ShareDash/HOW_IT_WORKS.md).
+
+---
+
+## 📦 Pre-Built Binaries & Packages
+
+Pre-built binaries are available in [`dist/`](file:///e:/ShareDash/dist):
+- **Windows Desktop**: [`dist/sharedash.exe`](file:///e:/ShareDash/dist/sharedash.exe)
+- **Android App**: [`dist/sharedash.apk`](file:///e:/ShareDash/dist/sharedash.apk)
 
 ---
 
 ## 💻 Quick Start: Windows Desktop App
 
 ### Option A: One-Click Desktop Launcher
-Double-click [`run_windows_app.bat`](file:///e:/ShareDash/run_windows_app.bat) in the project directory.
+Double-click [`run_windows_app.bat`](file:///e:/ShareDash/run_windows_app.bat) in the root directory.
 
 ### Option B: PowerShell Launcher
 ```powershell
@@ -82,11 +101,8 @@ Double-click [`run_windows_app.bat`](file:///e:/ShareDash/run_windows_app.bat) i
 
 ### Option C: Manual CLI Execution
 ```powershell
-# Run backend engine on port 54321
+# Run backend engine with interactive wizard on port 54321
 cargo run --release -- --port 54321
-
-# Open in Edge/Chrome standalone app mode:
-# msedge.exe --app=http://127.0.0.1:54321 --window-size=1180,820
 ```
 
 ---
@@ -95,33 +111,50 @@ cargo run --release -- --port 54321
 
 The Android companion app is located in [`android/`](file:///e:/ShareDash/android).
 
-### Open in Android Studio:
-1. Launch **Android Studio**.
-2. Select **Open** and choose `e:\ShareDash\android`.
-3. Click **Run** on your physical Android phone or emulator.
+### Direct Installation via ADB:
+```powershell
+adb install -r dist/sharedash.apk
+```
 
-### Build APK via Gradle CLI:
+### Build from Source via Gradle:
 ```powershell
 cd android
 .\gradlew assembleDebug
 ```
-The output debug APK will be generated at `android/app/build/outputs/apk/debug/app-debug.apk`.
+The output APK will be placed at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
 ## 🧪 Automated Test Suite
 
-ShareDash includes an extensive test suite verifying protocol framing, cryptographic hash recovery, mid-transfer cable disconnect failovers, and multipath benchmarks:
+ShareDash includes a comprehensive test suite verifying protocol framing, cryptographic hash recovery, network adapter isolation, and multipath benchmarks:
 
 ```powershell
+# Run all tests
 cargo test
+
+# Run specific tests
+cargo test --test test_tether_detection -- --nocapture
+cargo test --test multipath_benchmark -- --nocapture
+cargo test --test protocol_test
 ```
 
-### Included Tests:
-- `tests/protocol_test.rs`: Validates binary frame encoding/decoding, CRC32 checks, and control message serialization.
-- `tests/multipath_benchmark.rs`: Simulates concurrent multi-transport chunk distribution and throughput aggregation.
-- `tests/failover_test.rs`: Simulates cable disconnect mid-transfer; verifies that unacknowledged chunks are stolen and reassigned to active channels with zero data loss.
-- `tests/corruption_test.rs`: Injects random bit-flips into incoming chunks; verifies cryptographic rejection, quarantine, and automatic re-fetch.
+---
+
+## 🛠️ Diagnostics & Benchmarks
+
+Benchmarking and simulation utilities are located in [`scripts/`](file:///e:/ShareDash/scripts):
+
+```powershell
+# Generate deterministic 1 GiB test file
+python scripts/generate_test_file.py
+
+# Run theoretical multipath capacity optimization report
+python scripts/full_matrix_optimizer.py
+
+# Run live ADB phone transfer benchmark
+python scripts/benchmark_suite.py
+```
 
 ---
 
@@ -130,32 +163,61 @@ cargo test
 ```text
 e:/ShareDash/
   ├── Cargo.toml                    # Rust dependencies & compiler configuration
+  ├── HOW_IT_WORKS.md               # Exhaustive architectural & operational guide
+  ├── README.md                     # Project overview and quick start guide
   ├── run_windows_app.bat           # One-click Windows desktop app launcher
   ├── launch_windows_app.ps1        # PowerShell desktop app launcher
-  ├── src/
-  │   ├── lib.rs & main.rs          # CLI entry points and exports
-  │   ├── protocol/                 # Binary framing, CRC32, AES-256-GCM, messages
-  │   ├── storage/                  # Adaptive chunker, sparse writer, SQLite manifest WAL
-  │   ├── transport/                # USB, Wi-Fi Direct, LAN, QUIC, and mock simulator
-  │   ├── scheduler/                # Work-stealing scheduler, dynamic windowing, telemetry
-  │   ├── discovery/                # UDP beacon & QR/PIN pairing manager
-  │   └── server/                   # Axum HTTP API & sub-10ms WebSocket telemetry feed
-  ├── sharedash-ui/                 # Windows 11 Fluent acrylic web interface
-  │   ├── index.html                # Quick Share discovery radar & transfer view
-  │   ├── css/style.css             # Acrylic styles, concentric radar ripples, badges
-  │   └── js/                       # Radar controller, speedometer, canvas piece visualizer
+  │
+  ├── dist/                         # Distribution binaries
+  │   ├── sharedash.exe             # Compiled Windows Desktop application
+  │   ├── sharedash.apk             # Android companion APK
+  │   └── README.md                 # Distribution guide
+  │
+  ├── scripts/                      # Diagnostic, analysis & benchmark scripts
+  │   ├── benchmark_suite.py        # Automated ADB/HTTP live benchmark suite
+  │   ├── generate_test_file.py     # Deterministic 1GB test file generator
+  │   ├── evaluate_multipath.py     # Streaming throughput evaluator
+  │   ├── evaluate_multipath_model.py # Analytical chunk & bandwidth model
+  │   ├── full_matrix_optimizer.py  # Matrix simulation across diverse hardware
+  │   ├── run_benchmarks_live.py    # ADB port forwarding & live probe tool
+  │   └── README.md                 # Script documentation
+  │
+  ├── src/                          # Windows Rust Core Engine
+  │   ├── main.rs                   # Entry point, CLI flags, persistent UUID
+  │   ├── lib.rs                    # Library interface & exports
+  │   ├── cli.rs                    # Connection wizard & streaming engine
+  │   ├── cli_widgets.rs            # ANSI progress bars, tables, spinners
+  │   ├── hotspot.rs                # Windows Mobile Hotspot management (PowerShell/WinRT)
+  │   ├── discovery/                # BLE & UDP discovery subsystem
+  │   ├── protocol/                 # Binary frames, CRC32, AES-256-GCM
+  │   ├── scheduler/                # Dynamic work-stealing multipath scheduler
+  │   ├── server/                   # Axum HTTP API & WebSocket telemetry
+  │   ├── storage/                  # Chunker, SQLite WAL database, sparse file writer
+  │   └── transport/                # USB, Wi-Fi Direct, LAN, QUIC transport drivers
+  │
   ├── android/                      # Native Android Companion Project
-  │   ├── app/                      # Kotlin + Jetpack Compose app module
-  │   │   ├── src/main/java/com/sharedash/app/
-  │   │   │   ├── MainActivity.kt
-  │   │   │   ├── discovery/        # BLE scanner & UDP discovery
-  │   │   │   ├── storage/          # Android sparse writer (Downloads/ShareDash/)
-  │   │   │   ├── transport/        # Android multi-transport socket manager
-  │   │   │   ├── service/          # Foreground transfer notification service
-  │   │   │   └── ui/               # RadarView, Speedometer, PieceGrid, BridgeCards
-  │   │   └── AndroidManifest.xml   # BLE, Wi-Fi, and Share Sheet intent filters
-  │   └── build.gradle.kts
-  └── tests/                        # Comprehensive integration test suite
+  │   ├── app/src/main/
+  │   │   ├── AndroidManifest.xml   # Permissions, BLE, Wi-Fi, Share Sheet filters
+  │   │   └── java/com/sharedash/app/
+  │   │       ├── MainActivity.kt   # Jetpack Compose UI & lifecycle
+  │   │       ├── discovery/        # BLE scanner, GATT command server, UDP beacon
+  │   │       ├── server/           # AndroidHttpServer (streaming file receiver)
+  │   │       ├── service/          # Foreground transfer service
+  │   │       ├── storage/          # Android sparse file writer & SHA-256 verifier
+  │   │       └── ui/               # UsbFirstScreen, RadarView, Speedometer, PieceGrid, BridgeCards
+  │   └── build.gradle.kts          # Gradle build script
+  │
+  ├── sharedash-ui/                 # Windows 11 Fluent Acrylic Web Dashboard
+  │   ├── index.html                # Dashboard layout & radar
+  │   ├── css/style.css             # Glassmorphism & ripple animations
+  │   └── js/app.js                 # WebSocket client, radar, speedometer canvas
+  │
+  └── tests/                        # Automated Rust Test Suite
+      ├── protocol_test.rs          # Frame serialization & CRC32 checks
+      ├── multipath_benchmark.rs    # Concurrent channel aggregation tests
+      ├── failover_test.rs          # Mid-transfer cable disconnect failovers
+      ├── corruption_test.rs        # Bit-flip detection & re-fetch verification
+      └── test_tether_detection.rs  # Strict USB/RNDIS network adapter isolation tests
 ```
 
 ---

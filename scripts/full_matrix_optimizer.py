@@ -1,11 +1,11 @@
+import os
+import sys
 import json
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from evaluate_multipath_model import calculate_transfer_profile
 
 def generate_full_evaluation_report():
-    # Model parameters for standard high-performance phone (USB 3.x / USB 2.0 and Wi-Fi 6E/5GHz)
-    # Scenario 1: USB 3.x Cable (3.2 Gbps) + 5GHz Wi-Fi (866 Mbps)
-    # Scenario 2: USB 2.0 Cable (480 Mbps) + 5GHz Wi-Fi (866 Mbps)
-    
     scenarios = [
         {"name": "USB 3.2 Cable (3.2 Gbps) + 5GHz Wi-Fi 6 (1200 Mbps)", "usb_mbps": 3200.0, "wifi_mbps": 1200.0},
         {"name": "USB 3.0 Cable (2.5 Gbps Real-world) + 5GHz Hotspot (866 Mbps)", "usb_mbps": 2500.0, "wifi_mbps": 866.0},
