@@ -693,7 +693,7 @@ fun TransferScreen(
                 // USB Channel Card
                 val usbStats = telemetry.transports.find { it.kind == TransportKind.USB }
                 val usbSpeedText = if (usbStats != null && usbStats.currentMbps > 0) {
-                    "%.1f MB/s · 70%".format(usbStats.currentMbps)
+                    "%.1f MB/s (70%%)".format(usbStats.currentMbps)
                 } else if (hasUsb) {
                     "Fast-Path Ready"
                 } else {
@@ -745,7 +745,7 @@ fun TransferScreen(
                 // Wi-Fi Channel Card
                 val wifiStats = telemetry.transports.find { it.kind != TransportKind.USB }
                 val wifiSpeedText = if (wifiStats != null && wifiStats.currentMbps > 0) {
-                    "%.1f MB/s · 30%".format(wifiStats.currentMbps)
+                    "%.1f MB/s (30%%)".format(wifiStats.currentMbps)
                 } else {
                     "5GHz Active"
                 }

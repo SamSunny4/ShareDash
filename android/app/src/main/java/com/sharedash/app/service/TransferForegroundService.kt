@@ -25,6 +25,7 @@ class TransferForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceRunning = true
         acquireLocks()
     }
 
@@ -102,6 +103,7 @@ class TransferForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        isServiceRunning = false
         super.onDestroy()
         releaseLocks()
     }
@@ -154,21 +156,51 @@ class TransferForegroundService : Service() {
         const val EXTRA_PROGRESS = "extra_progress"
         const val EXTRA_SPEED = "extra_speed"
 
+        @Volatile
+        var isServiceRunning: Boolean = false
+        private var lastNotifyTimeMs: Long = 0L
+
         fun updateProgress(context: Context, title: String, progress: Int, speedText: String) {
-            val intent = Intent(context, TransferForegroundService::class.java).apply {
-                action = ACTION_UPDATE_PROGRESS
-                putExtra(EXTRA_TITLE, title)
-                putExtra(EXTRA_PROGRESS, progress)
-                putExtra(EXTRA_SPEED, speedText)
-            }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
+            val now = System.currentTimeMillis()
+            if (now - lastNotifyTimeMs < 300L && progress < 100) return
+            lastNotifyTimeMs = now
+
+            if (isServiceRunning) {
+                try {
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    val pendingIntent = PendingIntent.getActivity(
+                        context,
+                        0,
+                        Intent(context, MainActivity::class.java),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                    val notification = NotificationCompat.Builder(context, ShareDashApplication.CHANNEL_TRANSFERS)
+                        .setContentTitle("ShareDash — $title")
+                        .setContentText(speedText)
+                        .setSmallIcon(android.R.drawable.stat_sys_download)
+                        .setProgress(100, progress.coerceIn(0, 100), progress == 0)
+                        .setOngoing(true)
+                        .setOnlyAlertOnce(true)
+                        .setContentIntent(pendingIntent)
+                        .build()
+                    nm?.notify(NOTIFICATION_ID, notification)
+                } catch (_: Exception) {}
+            } else {
+                val intent = Intent(context, TransferForegroundService::class.java).apply {
+                    action = ACTION_UPDATE_PROGRESS
+                    putExtra(EXTRA_TITLE, title)
+                    putExtra(EXTRA_PROGRESS, progress)
+                    putExtra(EXTRA_SPEED, speedText)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not start service: ${e.message}")
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not start service: ${e.message}")
+                }
             }
         }
 
@@ -178,7 +210,25 @@ class TransferForegroundService : Service() {
                 putExtra(EXTRA_TITLE, title)
             }
             try {
-                context.startService(intent)
+                if (isServiceRunning) {
+                    context.startService(intent)
+                } else {
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    val pendingIntent = PendingIntent.getActivity(
+                        context,
+                        0,
+                        Intent(context, MainActivity::class.java),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                    val notification = NotificationCompat.Builder(context, ShareDashApplication.CHANNEL_TRANSFERS)
+                        .setContentTitle("ShareDash — $title")
+                        .setContentText("File transfer completed successfully")
+                        .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                        .setAutoCancel(true)
+                        .setContentIntent(pendingIntent)
+                        .build()
+                    nm?.notify(NOTIFICATION_ID + 1, notification)
+                }
             } catch (_: Exception) {}
         }
     }

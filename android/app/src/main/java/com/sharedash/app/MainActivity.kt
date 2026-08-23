@@ -242,14 +242,19 @@ class MainActivity : ComponentActivity() {
                 onFileReceivedCallback?.invoke(fileName, bytes)
             }
         )
+        var lastNotificationTimeMs = 0L
         httpServer?.onTransferProgress = { fileName, bytesRecv, totalBytes, speedMbps ->
-            val pct = if (totalBytes > 0) ((bytesRecv * 100) / totalBytes).toInt() else 0
-            val speedText = "%.1f MB/s · %d%% (%d MB / %d MB)".format(
-                speedMbps, pct, bytesRecv / (1024 * 1024), totalBytes / (1024 * 1024)
-            )
-            com.sharedash.app.service.TransferForegroundService.updateProgress(
-                this@MainActivity, fileName, pct, speedText
-            )
+            val now = System.currentTimeMillis()
+            if (now - lastNotificationTimeMs >= 300L || (totalBytes > 0 && bytesRecv >= totalBytes)) {
+                lastNotificationTimeMs = now
+                val pct = if (totalBytes > 0) ((bytesRecv * 100) / totalBytes).toInt() else 0
+                val speedText = "%.1f MB/s · %d%% (%d MB / %d MB)".format(
+                    speedMbps, pct, bytesRecv / (1024 * 1024), totalBytes / (1024 * 1024)
+                )
+                com.sharedash.app.service.TransferForegroundService.updateProgress(
+                    this@MainActivity, fileName, pct, speedText
+                )
+            }
             onTransferProgressCallback?.invoke(fileName, bytesRecv, totalBytes, speedMbps)
         }
         httpServer?.onWifiConnectRequest = { ssid, password ->
@@ -385,67 +390,72 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                var lastRxUiMs = 0L
                 onTransferProgressCallback = { fileName, bytesRecv, totalBytes, speedMbps ->
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        val pct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
-                        val isDone = bytesRecv >= totalBytes && totalBytes > 0
-                        val completedChunks = (pct * 64).toInt()
+                    val now = System.currentTimeMillis()
+                    val isDone = bytesRecv >= totalBytes && totalBytes > 0
+                    if (now - lastRxUiMs >= 80L || isDone) {
+                        lastRxUiMs = now
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            val pct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+                            val completedChunks = (pct * 64).toInt()
 
-                        val isUsb = isUsbCablePluggedState || isUsbTetheringActiveState
-                        val chunkList = (0 until 64).map { idx ->
-                            val state = when {
-                                idx < completedChunks -> com.sharedash.app.model.ChunkState.COMPLETED
-                                idx == completedChunks -> com.sharedash.app.model.ChunkState.IN_FLIGHT
-                                else -> com.sharedash.app.model.ChunkState.PENDING
+                            val isUsb = isUsbCablePluggedState || isUsbTetheringActiveState
+                            val chunkList = (0 until 64).map { idx ->
+                                val state = when {
+                                    idx < completedChunks -> com.sharedash.app.model.ChunkState.COMPLETED
+                                    idx == completedChunks -> com.sharedash.app.model.ChunkState.IN_FLIGHT
+                                    else -> com.sharedash.app.model.ChunkState.PENDING
+                                }
+                                val transportBadge = if (isUsb) {
+                                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                                } else {
+                                    "5GHz Wi-Fi"
+                                }
+                                com.sharedash.app.model.ChunkVisualItem(chunkId = idx, state = state, transportName = transportBadge)
                             }
-                            val transportBadge = if (isUsb) {
-                                if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
-                            } else {
-                                "5GHz Wi-Fi"
-                            }
-                            com.sharedash.app.model.ChunkVisualItem(chunkId = idx, state = state, transportName = transportBadge)
-                        }
 
-                        val transportsList = listOf(
-                            com.sharedash.app.model.TransportStats(
-                                name = "USB Fast-Path",
-                                kind = com.sharedash.app.model.TransportKind.USB,
-                                currentMbps = if (isUsb) speedMbps * 0.7 else 0.0,
-                                rttMs = 0.4,
-                                completedChunks = (completedChunks * 0.7).toLong(),
-                                isActive = isUsb
-                            ),
-                            com.sharedash.app.model.TransportStats(
-                                name = "5GHz Wi-Fi",
-                                kind = com.sharedash.app.model.TransportKind.WIFI_DIRECT,
-                                currentMbps = if (isUsb) speedMbps * 0.3 else speedMbps,
-                                rttMs = 2.0,
-                                completedChunks = (completedChunks * 0.3).toLong(),
-                                isActive = true
+                            val transportsList = listOf(
+                                com.sharedash.app.model.TransportStats(
+                                    name = "USB Fast-Path",
+                                    kind = com.sharedash.app.model.TransportKind.USB,
+                                    currentMbps = if (isUsb) speedMbps * 0.7 else 0.0,
+                                    rttMs = 0.4,
+                                    completedChunks = (completedChunks * 0.7).toLong(),
+                                    isActive = isUsb
+                                ),
+                                com.sharedash.app.model.TransportStats(
+                                    name = "5GHz Wi-Fi",
+                                    kind = com.sharedash.app.model.TransportKind.WIFI_DIRECT,
+                                    currentMbps = if (isUsb) speedMbps * 0.3 else speedMbps,
+                                    rttMs = 2.0,
+                                    completedChunks = (completedChunks * 0.3).toLong(),
+                                    isActive = true
+                                )
                             )
-                        )
 
-                        val eta = if (speedMbps > 0 && totalBytes > bytesRecv) {
-                            (((totalBytes - bytesRecv) * 8.0 / 1_000_000.0) / speedMbps).toLong()
-                        } else {
-                            0L
+                            val eta = if (speedMbps > 0 && totalBytes > bytesRecv) {
+                                (((totalBytes - bytesRecv) * 8.0 / 1_000_000.0) / speedMbps).toLong()
+                            } else {
+                                0L
+                            }
+
+                            val existingTransferId = activeTelemetry?.transferId ?: UUID.randomUUID()
+
+                            activeTelemetry = SchedulerTelemetry(
+                                transferId = existingTransferId,
+                                title = fileName,
+                                status = if (isDone) "COMPLETED" else "IN_PROGRESS",
+                                aggregateMbps = speedMbps,
+                                totalBytes = totalBytes,
+                                completedBytes = bytesRecv,
+                                progressPct = pct,
+                                etaSeconds = eta,
+                                transports = transportsList,
+                                chunkStates = chunkList
+                            )
+                            currentScreen = "transfer"
                         }
-
-                        val existingTransferId = activeTelemetry?.transferId ?: UUID.randomUUID()
-
-                        activeTelemetry = SchedulerTelemetry(
-                            transferId = existingTransferId,
-                            title = fileName,
-                            status = if (isDone) "COMPLETED" else "IN_PROGRESS",
-                            aggregateMbps = speedMbps,
-                            totalBytes = totalBytes,
-                            completedBytes = bytesRecv,
-                            progressPct = pct,
-                            etaSeconds = eta,
-                            transports = transportsList,
-                            chunkStates = chunkList
-                        )
-                        currentScreen = "transfer"
                     }
                 }
 
@@ -900,6 +910,7 @@ class MainActivity : ComponentActivity() {
 
             var transferredBytes = 0L
             val startTime = System.currentTimeMillis()
+            var lastSendUiMs = 0L
             var success = true
 
             for (uri in uris) {
@@ -968,7 +979,11 @@ class MainActivity : ComponentActivity() {
                                 ),
                                 chunkStates = visualChunks
                             )
-                            withContext(Dispatchers.Main) { onUpdate(telem) }
+                            val nowMs = System.currentTimeMillis()
+                            if (nowMs - lastSendUiMs >= 80L || transferredBytes >= effectiveTotalBytes) {
+                                lastSendUiMs = nowMs
+                                withContext(Dispatchers.Main) { onUpdate(telem) }
+                            }
                         }
                         input.close()
                     }
