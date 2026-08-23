@@ -190,98 +190,156 @@ impl TerminalCli {
         // Query Phone Wi-Fi Capabilities over USB
         let phone_caps = self.query_phone_wifi_caps_http(&usb_ip, usb_port).await;
         let pc_caps = hotspot::detect_pc_wifi_caps().await;
+        let mut pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
 
         println!("  Hardware Overview:");
-        print_tree_item("PC Wi-Fi", &format!("{} (PHY: {} Mbps)", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps), false);
+        print_tree_item("PC Wi-Fi", &format!("{} (PHY: {} Mbps) [{}]", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps, if pc_wifi_on { "ON" } else { "OFF" }), false);
         if let Some(ref p_caps) = phone_caps {
             print_tree_item("Phone Wi-Fi", &format!("{} (PHY: {} Mbps)", p_caps.wifi_standard, p_caps.max_phy_rate_mbps), true);
         } else {
             print_tree_item("Phone Wi-Fi", "Wi-Fi 6 (802.11ax) (PHY: 1200 Mbps)", true);
         }
 
-        // ── Phase 2: Select Best Hotspot Hardware ───────────────────
-        print_phase_header(3, "Optimal Hotspot Host Selection");
-        let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
-        let (best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, phone_caps_ref).await;
-
-        println!("  {}", host_reason);
-        match best_host {
-            hotspot::HotspotHostChoice::Pc => {
-                print_ok("PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
-            }
-            hotspot::HotspotHostChoice::Phone => {
-                print_ok("Phone Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
+        // If PC Wi-Fi is OFF, prompt user to enable it
+        if !pc_wifi_on {
+            println!();
+            println!("  ⚠️  {YELLOW}{BOLD}PC Wi-Fi is currently turned OFF.{RESET}");
+            println!("     To enable 5GHz wireless aggregation (~150+ MB/s), PC Wi-Fi must be enabled.");
+            println!("     {CYAN}[1] Turn ON Wi-Fi / Open Windows Wi-Fi Settings{RESET}   {GRAY}[2] Continue in USB-Only Mode (~100+ MB/s){RESET}");
+            let choice = prompt_choice("Select option [1-2] (default 1): ", 1, 2).await;
+            if choice == 1 {
+                hotspot::open_windows_wifi_settings();
+                hotspot::ensure_pc_wifi_adapter_enabled().await;
+                let enabled = with_spinner("Waiting for PC Wi-Fi to be enabled in Windows...", async {
+                    for _ in 0..20 {
+                        if hotspot::check_pc_wifi_adapter_enabled().await {
+                            return true;
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    false
+                }).await;
+                if enabled {
+                    print_ok("PC Wi-Fi is now ON and active!");
+                    pc_wifi_on = true;
+                } else {
+                    print_warn("PC Wi-Fi is still OFF. Continuing with Turbo USB...");
+                }
+            } else {
+                println!("  ⚡ Continuing in High-Speed USB-Only Mode.");
             }
         }
 
-        // ── Phase 3: Create 5GHz Hotspot & Share Credentials over USB ──
-        print_phase_header(4, "Creating 5GHz Hotspot & Sharing over USB");
-        let (ssid, password) = hotspot::generate_hotspot_credentials();
         let mut wifi_ready = false;
         let mut wifi_ip: Option<String> = None;
 
-        if best_host == hotspot::HotspotHostChoice::Pc {
-            println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
-            let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
-            match hotspot_res {
-                Ok(info) => {
-                    print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
+        if pc_wifi_on {
+            // ── Phase 2: Select Best Hotspot Hardware ───────────────────
+            print_phase_header(3, "Optimal Hotspot Host Selection");
+            let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
+            let (best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, phone_caps_ref).await;
 
-                    // Pacing: Short delay for Windows 5GHz Wi-Fi radio & DHCP server
-                    with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                    }).await;
-
-                    println!("  Sending hotspot credentials to phone through USB...");
-                    let sent = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
-                    if sent {
-                        print_ok("Phone received credentials via USB and connecting to 5GHz Hotspot...");
-                        let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
-                            for _ in 0..30 {
-                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
-                                    return Some(ip);
-                                }
-                                tokio::time::sleep(Duration::from_millis(300)).await;
-                            }
-                            None
-                        }).await;
-
-                        if let Some(ip) = client_ip {
-                            print_ok(&format!("Phone connected to 5GHz Hotspot! IP: {}", ip));
-                            wifi_ip = Some(ip);
-                            wifi_ready = true;
-                        } else {
-                            print_warn("Phone did not associate to 5GHz Wi-Fi within timeout. Continuing with Turbo USB...");
-                        }
-                    } else {
-                        print_warn("Could not auto-connect phone via USB HTTP. Please connect manually.");
-                    }
+            println!("  {}", host_reason);
+            match best_host {
+                hotspot::HotspotHostChoice::Pc => {
+                    print_ok("PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
                 }
-                Err(e) => {
-                    print_warn(&format!("PC Hotspot creation: {}. Trying phone hotspot...", e));
-                    if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
-                        print_ok(&format!("Phone Hotspot started via USB: {}", p_ssid));
-                        println!("  Connecting PC to phone hotspot...");
-                        let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                        wifi_ip = Some(p_gw);
-                        wifi_ready = true;
-                    }
+                hotspot::HotspotHostChoice::Phone => {
+                    print_ok("Phone Wi-Fi hardware selected as Primary 5GHz Hotspot Host (Quick Share Direct)");
                 }
             }
-        } else {
-            // Phone is chosen as best host
-            println!("  Requesting Phone to start 5GHz Hotspot over USB...");
-            if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
-                print_ok(&format!("Phone Hotspot Started: SSID='{}'", p_ssid));
-                println!("  Connecting PC to phone hotspot...");
-                let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                wifi_ip = Some(p_gw);
-                wifi_ready = true;
+
+            // ── Phase 3: Create 5GHz Hotspot & Share Credentials over USB ──
+            print_phase_header(4, "Creating 5GHz Hotspot & Sharing over USB");
+            let (ssid, password) = hotspot::generate_hotspot_credentials();
+
+            if best_host == hotspot::HotspotHostChoice::Pc {
+                println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
+                let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
+                match hotspot_res {
+                    Ok(info) => {
+                        print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
+
+                        with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
+                            tokio::time::sleep(Duration::from_millis(1000)).await;
+                        }).await;
+
+                        println!("  Sending hotspot credentials to phone through USB...");
+                        let sent = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
+                        if sent {
+                            print_ok("Phone received credentials via USB and connecting to 5GHz Hotspot...");
+                            let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
+                                for _ in 0..30 {
+                                    if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                        return Some(ip);
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(300)).await;
+                                }
+                                None
+                            }).await;
+
+                            if let Some(ip) = client_ip {
+                                if self.http_probe(&ip, 54321).await {
+                                    let synack = self.pair_handshake_target(&ip, 54321).await;
+                                    if synack {
+                                        print_ok(&format!("Phone connected & paired on 5GHz Hotspot! IP: {}", ip));
+                                        wifi_ip = Some(ip);
+                                        wifi_ready = true;
+                                    }
+                                }
+                            } else {
+                                print_warn("Phone did not associate to 5GHz Wi-Fi. Continuing with Turbo USB...");
+                            }
+                        } else {
+                            print_warn("Could not send credentials to phone via USB.");
+                        }
+                    }
+                    Err(e) => {
+                        print_warn(&format!("PC Hotspot creation: {}. Trying phone hotspot...", e));
+                        if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
+                            print_ok(&format!("Phone Hotspot started via USB: {}", p_ssid));
+                            println!("  Connecting PC to phone hotspot...");
+                            let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
+                            let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot...", async {
+                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(12), Some(&p_gw)).await
+                            }).await;
+                            let target = detected_ip.unwrap_or(p_gw);
+                            if self.http_probe(&target, 54321).await {
+                                let synack = self.pair_handshake_target(&target, 54321).await;
+                                if synack {
+                                    print_ok(&format!("Direct 5GHz Wi-Fi link verified: {}:54321", target));
+                                    wifi_ip = Some(target);
+                                    wifi_ready = true;
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
-                print_warn("Phone hotspot start failed over USB. Continuing with PC hotspot fallback...");
-                if let Ok(info) = hotspot::create_hotspot(&ssid, &password, true).await {
-                    let _ = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
-                    wifi_ready = true;
+                // Phone is chosen as best host
+                println!("  Requesting Phone to start 5GHz Wi-Fi Direct / Hotspot over USB...");
+                if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
+                    print_ok(&format!("Phone 5GHz AP Active: SSID='{}'", p_ssid));
+                    println!("  Connecting PC to phone 5GHz hotspot...");
+                    let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
+                    let detected_ip = with_spinner("Waiting for PC to bind to 5GHz network...", async {
+                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(12), Some(&p_gw)).await
+                    }).await;
+                    let target = detected_ip.unwrap_or(p_gw);
+                    if self.http_probe(&target, 54321).await {
+                        let synack = self.pair_handshake_target(&target, 54321).await;
+                        if synack {
+                            print_ok(&format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target));
+                            wifi_ip = Some(target);
+                            wifi_ready = true;
+                        } else {
+                            print_warn(&format!("Wi-Fi handshake failed at {}:54321. Wi-Fi disabled.", target));
+                        }
+                    } else {
+                        print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
+                    }
+                } else {
+                    print_warn("Phone hotspot start failed over USB. Continuing in USB-Only Mode.");
                 }
             }
         }
@@ -309,6 +367,28 @@ impl TerminalCli {
     ///  WIRELESS FALLBACK WIZARD (No USB: BLE Scan + Wi-Fi Direct / 5GHz Hotspot)
     /// ═══════════════════════════════════════════════════════════════
     async fn run_wireless_direct_wizard(&self) {
+        // Ensure PC Wi-Fi is ON before wireless scan
+        if !hotspot::check_pc_wifi_adapter_enabled().await {
+            println!("  ⚠️  {YELLOW}{BOLD}PC Wi-Fi is currently turned OFF.{RESET}");
+            println!("     Wireless transfer requires PC Wi-Fi to be enabled.");
+            hotspot::open_windows_wifi_settings();
+            hotspot::ensure_pc_wifi_adapter_enabled().await;
+            let enabled = with_spinner("Waiting for PC Wi-Fi to be turned ON...", async {
+                for _ in 0..20 {
+                    if hotspot::check_pc_wifi_adapter_enabled().await {
+                        return true;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                false
+            }).await;
+            if enabled {
+                print_ok("PC Wi-Fi is now ON!");
+            } else {
+                print_fail("PC Wi-Fi is disabled. Wireless mode cannot connect.");
+            }
+        }
+
         print_phase_header(1, "Wireless Bluetooth & Wi-Fi Scan (No USB Connected)");
         println!("  Scanning for nearby ShareDash devices via Bluetooth & Wi-Fi...");
 
@@ -402,11 +482,10 @@ impl TerminalCli {
 
         // ── Phase 3: 5GHz Hotspot Creation & Credential Sharing ───────
         print_phase_header(3, "5GHz Hotspot Provisioning & Auto-Connect");
-        let mut wifi_ready = false;
         let mut wifi_ip: Option<String> = None;
 
         if best_host == hotspot::HotspotHostChoice::Phone {
-            println!("  📡 Requesting phone to create maximum-config 5GHz Hotspot (turning off phone Wi-Fi to free 5GHz band)...");
+            println!("  📡 Requesting phone to create maximum-config 5GHz Hotspot / Wi-Fi Direct...");
 
             let creds = with_spinner("Waiting for phone 5GHz Hotspot initialization over Bluetooth...", async {
                 self.state.ble_discovery.request_phone_start_hotspot().await
@@ -431,16 +510,13 @@ impl TerminalCli {
                 if self.http_probe(&target_ip, 54321).await {
                     print_ok(&format!("Direct Wi-Fi link verified: {}:54321", target_ip));
                     wifi_ip = Some(target_ip);
-                    wifi_ready = true;
                 } else {
-                    print_warn(&format!("Probing candidate gateway {} on port 54321...", target_ip));
-                    wifi_ip = Some(target_ip);
-                    wifi_ready = true;
+                    print_fail(&format!("Could not reach phone at {}:54321 over Wi-Fi", target_ip));
+                    wifi_ip = None;
                 }
             } else {
                 print_warn("Phone did not return hotspot credentials over BLE. Checking existing network paths...");
-                // Fallback: check candidate IPs
-                let mut candidate_ips: Vec<String> = vec!["192.168.43.1".to_string(), "192.168.49.1".to_string()];
+                let mut candidate_ips: Vec<String> = vec!["192.168.49.1".to_string(), "192.168.43.1".to_string()];
                 for peer in self.state.discovery.get_active_peers() {
                     let ip = peer.remote_addr.ip().to_string();
                     if ip != "127.0.0.1" && !candidate_ips.contains(&ip) {
@@ -450,7 +526,6 @@ impl TerminalCli {
                 for ip in &candidate_ips {
                     if self.http_probe(ip, 54321).await {
                         wifi_ip = Some(ip.clone());
-                        wifi_ready = true;
                         break;
                     }
                 }
@@ -485,7 +560,6 @@ impl TerminalCli {
                         if let Some(ip) = client_ip {
                             print_ok(&format!("Phone connected to 5GHz Hotspot! IP: {}", ip));
                             wifi_ip = Some(ip);
-                            wifi_ready = true;
                         } else {
                             print_warn("Phone did not associate to 5GHz Wi-Fi within timeout.");
                         }
@@ -499,7 +573,6 @@ impl TerminalCli {
                         print_ok(&format!("Phone Hotspot Started: SSID='{}'", p_ssid));
                         let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                         wifi_ip = Some(p_gw);
-                        wifi_ready = true;
                     }
                 }
             }
@@ -507,29 +580,31 @@ impl TerminalCli {
 
         // ── Phase 4: 3-Way Handshake ─────────────────────────────────
         print_phase_header(4, "Wi-Fi 3-Way Handshake (Direct Channel)");
-        let target_wifi_ip = wifi_ip.clone().unwrap_or_else(|| "192.168.43.1".to_string());
-        let syn_ok = self.http_probe(&target_wifi_ip, 54321).await;
-        print_step_result(&format!("SYN  → {}:54321", target_wifi_ip), syn_ok);
+        let mut wifi_ready = false;
+        if let Some(target_wifi_ip) = wifi_ip.as_ref() {
+            let syn_ok = self.http_probe(target_wifi_ip, 54321).await;
+            print_step_result(&format!("SYN  → {}:54321", target_wifi_ip), syn_ok);
 
-        if syn_ok {
-            let synack_ok = self.pair_handshake(&target_wifi_ip).await;
-            print_step_result(&format!("SYN-ACK ← {}", selected_device.name), synack_ok);
+            if syn_ok {
+                let synack_ok = self.pair_handshake(target_wifi_ip).await;
+                print_step_result(&format!("SYN-ACK ← {}", selected_device.name), synack_ok);
 
-            if synack_ok {
-                print_step_result("ACK  → Pair Confirmed", true);
-                println!("  🔒 Wi-Fi Direct / Hotspot Channel {GREEN}READY{RESET} (AES-256-GCM)");
-                wifi_ready = true;
-            }
-        } else if wifi_ready {
-            let synack_ok = self.pair_handshake(&target_wifi_ip).await;
-            if synack_ok {
-                print_ok("Pair handshake completed successfully!");
-                wifi_ready = true;
+                if synack_ok {
+                    print_step_result("ACK  → Pair Confirmed", true);
+                    println!("  🔒 Wi-Fi Direct / Hotspot Channel {GREEN}READY{RESET} (AES-256-GCM)");
+                    wifi_ready = true;
+                } else {
+                    wifi_ready = false;
+                    wifi_ip = None;
+                }
             } else {
                 print_fail(&format!("Could not reach phone at {}:54321", target_wifi_ip));
+                wifi_ready = false;
+                wifi_ip = None;
             }
         } else {
-            print_fail(&format!("Could not reach phone at {}:54321", target_wifi_ip));
+            print_fail("Wi-Fi Direct channel not established.");
+            wifi_ready = false;
         }
 
         self.send_file_multipath_loop(wifi_ready, wifi_ip, false, String::new(), 54325, false).await;

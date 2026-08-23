@@ -568,12 +568,42 @@ pub fn generate_hotspot_credentials() -> (String, String) {
     (format!("ShareDash-5G-{}", suffix), password)
 }
 
+/// Open Windows Wi-Fi Settings directly for the user.
+pub fn open_windows_wifi_settings() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", "ms-settings:network-wifi"])
+            .spawn();
+    }
+}
+
 /// Check if the PC's Wi-Fi adapter is enabled and turned on.
 pub async fn check_pc_wifi_adapter_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
+        // 1. Check via netsh interface show interface (fastest and doesn't require admin)
+        if let Ok(output) = tokio::process::Command::new("netsh")
+            .args(["interface", "show", "interface"])
+            .output()
+            .await
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let lower = line.to_lowercase();
+                if lower.contains("wi-fi") || lower.contains("wireless") || lower.contains("wlan") {
+                    if lower.contains("enabled") {
+                        return true;
+                    } else if lower.contains("disabled") {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // 2. Check via PowerShell Get-NetAdapter
         let ps_script = r#"
-            $adapter = Get-NetAdapter | Where-Object { ($_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek') -and ($_.Status -ne 'Disabled') }
+            $adapter = Get-NetAdapter | Where-Object { ($_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek' -or $_.Name -match 'Wi-Fi') -and ($_.Status -ne 'Disabled') }
             if ($adapter) {
                 Write-Output "WIFI_ON"
             } else {
@@ -600,7 +630,7 @@ pub async fn ensure_pc_wifi_adapter_enabled() -> bool {
             tracing::info!("PC Wi-Fi adapter is disabled. Enabling Wi-Fi adapter...");
             let ps_script = r#"
                 try {
-                    Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek' } | Enable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue
+                    Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wi-Fi|Wireless|802.11|Intel|Qualcomm|Realtek|MediaTek' -or $_.Name -match 'Wi-Fi' } | Enable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue
                 } catch {}
             "#;
             let _ = tokio::process::Command::new("powershell")
