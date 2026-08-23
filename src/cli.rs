@@ -1039,23 +1039,37 @@ impl TerminalCli {
             }
         });
 
-        let mut handles = Vec::new();
+        let std_file = match std::fs::File::open(&file_path) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("{RED}Error opening file {:?}: {}{RESET}", file_path, e);
+                return;
+            }
+        };
+        let mmap = match unsafe { memmap2::Mmap::map(&std_file) } {
+            Ok(m) => Arc::new(m),
+            Err(e) => {
+                println!("{RED}Error memory mapping file: {}{RESET}", e);
+                return;
+            }
+        };
 
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let dispatcher = Arc::new(parking_lot::Mutex::new(
             DynamicWorkDispatcher::new(file_size),
         ));
         let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut handles = Vec::new();
 
-        // Spawn 4 concurrent pipelined in-flight streaming workers per transport for line speed
-        let workers_per_transport = 4;
+        // High-performance workers: 6 for USB (high queue depth), 4 for Wi-Fi
         for (state, ip, port, name, _) in &channel_states {
-            for _ in 0..workers_per_transport {
+            let worker_count = if name.contains("USB") { 6 } else { 4 };
+            for _ in 0..worker_count {
                 let h = tokio::spawn(run_transport_chunk_worker(
                     ip.clone(),
                     *port,
                     name.clone(),
-                    file_path.to_path_buf(),
+                    mmap.clone(),
                     file_name.to_string(),
                     file_size,
                     transfer_id.clone(),
@@ -1661,7 +1675,7 @@ async fn run_transport_chunk_worker(
     ip: String,
     port: u16,
     transport_name: String,
-    file_path: PathBuf,
+    mmap: Arc<memmap2::Mmap>,
     file_name: String,
     file_size: u64,
     transfer_id: String,
@@ -1673,23 +1687,13 @@ async fn run_transport_chunk_worker(
         .tcp_nodelay(true)
         .http1_only()
         .pool_idle_timeout(Some(Duration::from_secs(60)))
-        .pool_max_idle_per_host(16)
+        .pool_max_idle_per_host(32)
         .timeout(Duration::from_secs(60))
         .build()
         .unwrap_or_default();
 
     let url_chunk = format!("http://{}:{}/api/v1/transfers/chunk", ip, port);
     let total_chunks = dispatcher.lock().chunks.len() as u32;
-
-    let mut file = match tokio::fs::File::open(&file_path).await {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::error!("Failed opening file {:?}: {}", file_path, e);
-            return;
-        }
-    };
-
-    use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
     while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
         if dispatcher.lock().is_done() {
@@ -1704,31 +1708,28 @@ async fn run_transport_chunk_worker(
         let chunk = match chunk {
             Some(c) => c,
             None => {
-                tokio::time::sleep(Duration::from_millis(15)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
                 continue;
             }
         };
 
-        // Read chunk data at exact byte offset
-        if let Err(e) = file.seek(std::io::SeekFrom::Start(chunk.offset)).await {
-            tracing::warn!("Seek error at offset {}: {}", chunk.offset, e);
+        let start_idx = chunk.offset as usize;
+        let end_idx = (chunk.offset + chunk.length) as usize;
+        if end_idx > mmap.len() {
             dispatcher.lock().return_for_retry(chunk.chunk_id);
             continue;
         }
 
-        let mut buf = vec![0u8; chunk.length as usize];
-        if let Err(e) = file.read_exact(&mut buf).await {
-            tracing::warn!("Read error for chunk #{}: {}", chunk.chunk_id, e);
-            dispatcher.lock().return_for_retry(chunk.chunk_id);
-            continue;
-        }
+        let slice = &mmap[start_idx..end_idx];
 
-        // Use CRC32 instead of SHA-256 for fast integrity check (~20x faster)
+        // Hardware-accelerated CRC32 directly over memory slice (CPU register speed > 15 GB/s)
         let chunk_crc = {
             let mut hasher = crc32fast::Hasher::new();
-            hasher.update(&buf);
+            hasher.update(slice);
             format!("{:08x}", hasher.finalize())
         };
+
+        let chunk_body = bytes::Bytes::copy_from_slice(slice);
 
         let t0 = Instant::now();
 
@@ -1743,7 +1744,7 @@ async fn run_transport_chunk_worker(
             .header("x-chunk-crc32", &chunk_crc)
             .header("x-total-chunks", total_chunks.to_string())
             .header("Content-Type", "application/octet-stream")
-            .body(buf);
+            .body(chunk_body);
 
         match req.send().await {
             Ok(resp) if resp.status().is_success() => {

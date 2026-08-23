@@ -132,11 +132,11 @@ class AndroidHttpServer(
     private fun handleClientConnection(socket: Socket) {
         try {
             socket.tcpNoDelay = true
-            socket.receiveBufferSize = 2 * 1024 * 1024
-            socket.sendBufferSize = 512 * 1024
+            socket.receiveBufferSize = 4 * 1024 * 1024
+            socket.sendBufferSize = 1024 * 1024
             socket.soTimeout = 30000
 
-            val input = BufferedInputStream(socket.getInputStream(), 512 * 1024)
+            val input = BufferedInputStream(socket.getInputStream(), 1024 * 1024)
             val output = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
 
             while (true) {
@@ -465,9 +465,9 @@ class AndroidHttpServer(
             ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
         }
 
-        // Direct stream from socket to FileChannel in 512KB increments with in-flight CRC32 (zero heap garbage)
+        // Direct stream from socket to FileChannel in 1MB increments with in-flight CRC32 (zero heap garbage)
         val crcHasher = if (expectedCrc32.isNotBlank()) java.util.zip.CRC32() else null
-        val buf = ByteArray(512 * 1024)
+        val buf = ByteArray(1024 * 1024)
         var remaining = contentLength
         var currentOffset = chunkOffset
 
