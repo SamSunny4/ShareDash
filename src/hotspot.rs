@@ -648,8 +648,15 @@ pub async fn detect_wifi_adapter_subnet_gateway() -> Option<String> {
     None
 }
 
+fn string_to_hex(s: &str) -> String {
+    s.as_bytes().iter().map(|b| format!("{:02X}", b)).collect()
+}
+
 #[cfg(target_os = "windows")]
 async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, profile_path: &std::path::Path) -> bool {
+    let hex_ssid = string_to_hex(ssid);
+    let is_wpa3 = auth_type.contains("WPA3");
+
     let security_section = if password.is_empty() {
         r#"<security>
             <authEncryption>
@@ -658,11 +665,28 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
                 <useOneX>false</useOneX>
             </authEncryption>
         </security>"#.to_string()
+    } else if is_wpa3 {
+        format!(
+            r#"<security>
+            <authEncryption>
+                <authentication>WPA3SAE</authentication>
+                <encryption>AES</encryption>
+                <useOneX>false</useOneX>
+                <transitionMode xmlns="http://www.microsoft.com/networking/WLAN/profile/v4">true</transitionMode>
+            </authEncryption>
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>{password}</keyMaterial>
+            </sharedKey>
+        </security>"#,
+            password = password
+        )
     } else {
         format!(
             r#"<security>
             <authEncryption>
-                <authentication>{auth_type}</authentication>
+                <authentication>WPA2PSK</authentication>
                 <encryption>AES</encryption>
                 <useOneX>false</useOneX>
             </authEncryption>
@@ -672,7 +696,6 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
                 <keyMaterial>{password}</keyMaterial>
             </sharedKey>
         </security>"#,
-            auth_type = auth_type,
             password = password
         )
     };
@@ -683,16 +706,19 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
     <name>{ssid}</name>
     <SSIDConfig>
         <SSID>
+            <hex>{hex_ssid}</hex>
             <name>{ssid}</name>
         </SSID>
+        <nonBroadcast>true</nonBroadcast>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
-    <connectionMode>auto</connectionMode>
+    <connectionMode>manual</connectionMode>
     <MSM>
         {security}
     </MSM>
 </WLANProfile>"#,
         ssid = ssid,
+        hex_ssid = hex_ssid,
         security = security_section
     );
 
@@ -708,8 +734,16 @@ async fn apply_and_connect_profile(ssid: &str, password: &str, auth_type: &str, 
         .output()
         .await;
 
+    // Disconnect current Wi-Fi to force immediate scan & association for target network
+    let _ = tokio::process::Command::new("netsh")
+        .args(["wlan", "disconnect", "interface=Wi-Fi"])
+        .output()
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
     let connect_result = tokio::process::Command::new("netsh")
-        .args(["wlan", "connect", &format!("name={}", ssid)])
+        .args(["wlan", "connect", &format!("name={}", ssid), &format!("ssid={}", ssid), "interface=Wi-Fi"])
         .output()
         .await;
 
@@ -731,13 +765,20 @@ pub async fn connect_to_phone_hotspot(ssid: &str, password: &str) -> Result<bool
         let temp_dir = std::env::temp_dir();
         let profile_path = temp_dir.join("sharedash_phone_hotspot.xml");
 
-        // Try WPA2PSK first
-        let mut ok = apply_and_connect_profile(ssid, password, "WPA2PSK", &profile_path).await;
+        // Wi-Fi Direct APs (DIRECT-...) strictly use WPA2-PSK AES.
+        // LocalOnlyHotspot (AndroidShare_...) on Android 11-15 uses WPA3-SAE transition mode.
+        let (primary_auth, secondary_auth) = if ssid.starts_with("DIRECT-") {
+            ("WPA2PSK", "WPA3SAE")
+        } else {
+            ("WPA3SAE", "WPA2PSK")
+        };
 
-        // If not connected and password is provided, try WPA3SAE (for Android 12+ WPA3 hotspots)
+        let mut ok = apply_and_connect_profile(ssid, password, primary_auth, &profile_path).await;
+
+        // If not connected, try secondary authentication profile
         if !ok && !password.is_empty() {
-            tracing::info!("Trying WPA3SAE profile for {}", ssid);
-            ok = apply_and_connect_profile(ssid, password, "WPA3SAE", &profile_path).await;
+            tracing::info!("Trying {} fallback profile for {}", secondary_auth, ssid);
+            ok = apply_and_connect_profile(ssid, password, secondary_auth, &profile_path).await;
         }
 
         let _ = tokio::fs::remove_file(&profile_path).await;
@@ -757,69 +798,71 @@ pub async fn wait_for_phone_hotspot_interface(
     expected_gateway: Option<&str>,
 ) -> Option<String> {
     let start = std::time::Instant::now();
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(350))
-        .build()
-        .unwrap_or_default();
-
-    let mut candidate_gws = Vec::new();
-    if let Some(gw) = expected_gateway {
-        candidate_gws.push(gw.to_string());
-    }
-    if !candidate_gws.contains(&"192.168.43.1".to_string()) {
-        candidate_gws.push("192.168.43.1".to_string());
-    }
-    if !candidate_gws.contains(&"192.168.49.1".to_string()) {
-        candidate_gws.push("192.168.49.1".to_string());
-    }
+    let target_gw = expected_gateway.unwrap_or("192.168.49.1");
 
     let mut attempt = 0;
     while start.elapsed() < timeout {
         attempt += 1;
 
-        // 1. Check if the Wi-Fi adapter acquired an IP on the hotspot subnet
-        if let Some(wifi_gw) = detect_wifi_adapter_subnet_gateway().await {
-            if !candidate_gws.contains(&wifi_gw) {
-                candidate_gws.insert(0, wifi_gw);
-            }
-        }
+        // 1. Check if the Wi-Fi adapter has connected and acquired an IP on the Wi-Fi interface
+        #[cfg(target_os = "windows")]
+        {
+            let ps_script = r#"
+                $v = Get-NetIPAddress -InterfaceAlias 'Wi-Fi*' -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notmatch '^(169\.254|127\.|10\.100)' } | Select-Object -First 1
+                if ($v) { $v.IPAddress }
+            "#;
 
-        // 2. Retry connect if still connecting (every 3s)
-        if attempt % 10 == 0 {
-            #[cfg(target_os = "windows")]
+            if let Ok(output) = tokio::process::Command::new("powershell")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+                .output()
+                .await
             {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let wifi_ip = stdout.trim();
+
+                // Only consider it connected if the Wi-Fi adapter has an IP in the Wi-Fi Direct subnet (192.168.49.x, etc.)
+                if !wifi_ip.is_empty() && !wifi_ip.starts_with("169.254.") && !wifi_ip.starts_with("10.100.") {
+                    let is_target_subnet = if target_gw.starts_with("192.168.49.") {
+                        wifi_ip.starts_with("192.168.49.")
+                    } else if target_gw.starts_with("192.168.43.") {
+                        wifi_ip.starts_with("192.168.43.")
+                    } else {
+                        let target_prefix: String = target_gw.split('.').take(3).collect::<Vec<_>>().join(".");
+                        wifi_ip.starts_with(&target_prefix)
+                    };
+
+                    if is_target_subnet {
+                        if let Ok(local_ip_addr) = wifi_ip.parse::<std::net::IpAddr>() {
+                            let bound_client = reqwest::Client::builder()
+                                .local_address(local_ip_addr)
+                                .timeout(Duration::from_millis(600))
+                                .build()
+                                .unwrap_or_default();
+
+                            let url = format!("http://{}:54321/api/v1/info", target_gw);
+                            if let Ok(resp) = bound_client.get(&url).send().await {
+                                if resp.status().is_success() {
+                                    tracing::info!("Verified Wi-Fi Direct link via Wi-Fi adapter ({}) -> {}", wifi_ip, target_gw);
+                                    return Some(target_gw.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Retry connect if still connecting (every 1.5s)
+            if attempt % 3 == 0 {
                 let _ = tokio::process::Command::new("netsh")
-                    .args(["wlan", "connect", &format!("name={}", target_ssid)])
+                    .args(["wlan", "connect", &format!("name={}", target_ssid), &format!("ssid={}", target_ssid), "interface=Wi-Fi"])
                     .output()
                     .await;
             }
         }
 
-        // 3. Probe all candidate gateways in parallel
-        let mut tasks = Vec::new();
-        for gw in &candidate_gws {
-            let c = client.clone();
-            let gw_clone = gw.clone();
-            tasks.push(async move {
-                let url = format!("http://{}:54321/api/v1/info", gw_clone);
-                if let Ok(resp) = c.get(&url).send().await {
-                    if resp.status().is_success() {
-                        return Some(gw_clone);
-                    }
-                }
-                None
-            });
-        }
-
-        let results = futures::future::join_all(tasks).await;
-        for res in results {
-            if let Some(gw) = res {
-                return Some(gw);
-            }
-        }
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
+
     None
 }
 

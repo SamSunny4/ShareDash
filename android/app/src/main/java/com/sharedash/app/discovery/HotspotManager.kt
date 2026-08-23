@@ -71,80 +71,26 @@ class HotspotManager(private val context: Context) {
         }
 
         _hotspotState.value = HotspotState.Starting
-        Log.i(TAG, "🚀 Initiating Standard 5GHz SoftAP / Hotspot (Android LocalOnlyHotspot)...")
+        Log.i(TAG, "🚀 Initiating 5GHz Wi-Fi Direct Autonomous Group (DIRECT-SD)...")
 
-        // 1. Primary: Standard Android LocalOnlyHotspot (Standard 802.11 AP that Windows connects to reliably)
-        startLocalOnlyHotspot(onSuccess)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startLocalOnlyHotspot(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
-        if (wifiManager == null) {
-            _hotspotState.value = HotspotState.Error("Wi-Fi Hardware not available")
-            return
-        }
-
-        // Disconnect client Wi-Fi to free radio channels
-        try {
-            wifiManager.disconnect()
-        } catch (_: Exception) {}
-
-        try {
-            wifiManager.startLocalOnlyHotspot(
-                object : WifiManager.LocalOnlyHotspotCallback() {
-                    override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation?) {
-                        super.onStarted(reservation)
-                        hotspotReservation = reservation
-                        val (ssid, pass) = extractCredentials(reservation)
-                        val gatewayIp = getHotspotGatewayIp()
-
-                        _hotspotState.value = HotspotState.Active(
-                            ssid = ssid,
-                            password = pass,
-                            ipAddress = gatewayIp,
-                            band = "5 GHz High-Speed Hotspot"
-                        )
-                        Log.i(TAG, "Hotspot ACTIVE: SSID='$ssid', Password='$pass', IP=$gatewayIp")
-                        onSuccess?.invoke(ssid, pass, gatewayIp)
-                    }
-
-                    override fun onStopped() {
-                        super.onStopped()
-                        hotspotReservation = null
-                        _hotspotState.value = HotspotState.Idle
-                        Log.i(TAG, "Hotspot stopped")
-                    }
-
-                    override fun onFailed(reason: Int) {
-                        super.onFailed(reason)
-                        Log.e(TAG, "startLocalOnlyHotspot failed with reason code: $reason. Trying P2P fallback...")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && p2pManager != null && p2pChannel != null) {
-                            start5GHzP2pGroup(onSuccess)
-                        } else {
-                            _hotspotState.value = HotspotState.Error("Hotspot unavailable (code $reason).")
-                        }
-                    }
-                },
-                null
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start local hotspot: ${e.message}. Trying P2P fallback...")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && p2pManager != null && p2pChannel != null) {
-                start5GHzP2pGroup(onSuccess)
-            } else {
-                _hotspotState.value = HotspotState.Error("Hotspot error: ${e.message}")
-            }
-        }
+        start5GHzP2pGroup(onSuccess)
     }
 
     @SuppressLint("MissingPermission")
     private fun start5GHzP2pGroup(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
-        val channel = p2pChannel ?: run {
-            startLocalOnlyHotspot(onSuccess)
+        val mgr = p2pManager ?: run {
+            _hotspotState.value = HotspotState.Error("Wi-Fi P2P Hardware not available")
             return
         }
-        val mgr = p2pManager ?: run {
-            startLocalOnlyHotspot(onSuccess)
+        if (p2pChannel == null) {
+            try {
+                p2pChannel = mgr.initialize(context.applicationContext, context.mainLooper, null)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize WifiP2pManager: ${e.message}")
+            }
+        }
+        val channel = p2pChannel ?: run {
+            _hotspotState.value = HotspotState.Error("Wi-Fi P2P Channel initialization failed")
             return
         }
 
@@ -181,44 +127,123 @@ class HotspotManager(private val context: Context) {
                 mgr.createGroup(channel, config, object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
                         isP2pGroupActive = true
-                        val gatewayIp = "192.168.49.1"
-                        Log.i(TAG, "🎉 5GHz Wi-Fi Direct Group CREATED! SSID='$ssidName', Passphrase='$passphrase', Gateway=$gatewayIp")
-                        _hotspotState.value = HotspotState.Active(
-                            ssid = ssidName,
-                            password = passphrase,
-                            ipAddress = gatewayIp,
-                            band = "5 GHz Direct (Wi-Fi 6 P2P)"
-                        )
-                        onSuccess?.invoke(ssidName, passphrase, gatewayIp)
+                        mgr.requestGroupInfo(channel) { group: WifiP2pGroup? ->
+                            val actualSsid = group?.networkName?.takeIf { it.isNotBlank() } ?: ssidName
+                            val actualPass = group?.passphrase?.takeIf { it.isNotBlank() } ?: passphrase
+                            val gatewayIp = "192.168.49.1"
+                            Log.i(TAG, "🎉 5GHz Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
+                            _hotspotState.value = HotspotState.Active(
+                                ssid = actualSsid,
+                                password = actualPass,
+                                ipAddress = gatewayIp,
+                                band = "5 GHz Direct (Wi-Fi 6 P2P)"
+                            )
+                            onSuccess?.invoke(actualSsid, actualPass, gatewayIp)
+                        }
                     }
 
                     override fun onFailure(reason: Int) {
-                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason).")
-                        _hotspotState.value = HotspotState.Error("5GHz Wi-Fi Direct failed.")
+                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason). Retrying with Auto-Band P2P...")
+                        createAutoP2pGroup(mgr, channel, onSuccess)
                     }
                 })
                 return
             } catch (e: Exception) {
-                Log.w(TAG, "Exception creating 5GHz P2P group: ${e.message}.")
+                Log.w(TAG, "Exception creating 5GHz P2P group: ${e.message}. Retrying with Auto-Band P2P...")
+                createAutoP2pGroup(mgr, channel, onSuccess)
+                return
             }
+        }
+        createAutoP2pGroup(mgr, channel, onSuccess)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createAutoP2pGroup(
+        mgr: WifiP2pManager,
+        channel: WifiP2pManager.Channel,
+        onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)?
+    ) {
+        try {
+            val suffix = (1000..9999).random()
+            val ssidName = "DIRECT-SD-$suffix"
+            val passphrase = generateRandomPassphrase(10)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val config = WifiP2pConfig.Builder()
+                    .setNetworkName(ssidName)
+                    .setPassphrase(passphrase)
+                    .build()
+
+                mgr.createGroup(channel, config, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        isP2pGroupActive = true
+                        mgr.requestGroupInfo(channel) { group: WifiP2pGroup? ->
+                            val actualSsid = group?.networkName?.takeIf { it.isNotBlank() } ?: ssidName
+                            val actualPass = group?.passphrase?.takeIf { it.isNotBlank() } ?: passphrase
+                            val gatewayIp = "192.168.49.1"
+                            Log.i(TAG, "🎉 Wi-Fi Direct Group CREATED! SSID='$actualSsid', Passphrase='$actualPass', Gateway=$gatewayIp")
+                            _hotspotState.value = HotspotState.Active(
+                                ssid = actualSsid,
+                                password = actualPass,
+                                ipAddress = gatewayIp,
+                                band = "Wi-Fi Direct P2P"
+                            )
+                            onSuccess?.invoke(actualSsid, actualPass, gatewayIp)
+                        }
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        Log.e(TAG, "Wi-Fi Direct createGroup failed (code $reason)")
+                        _hotspotState.value = HotspotState.Error("Wi-Fi Direct unavailable (code $reason)")
+                    }
+                })
+            } else {
+                mgr.createGroup(channel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        isP2pGroupActive = true
+                        mgr.requestGroupInfo(channel) { group: WifiP2pGroup? ->
+                            val actualSsid = group?.networkName ?: "DIRECT-SD"
+                            val actualPass = group?.passphrase ?: ""
+                            val gatewayIp = "192.168.49.1"
+                            _hotspotState.value = HotspotState.Active(
+                                ssid = actualSsid,
+                                password = actualPass,
+                                ipAddress = gatewayIp,
+                                band = "Wi-Fi Direct P2P"
+                            )
+                            onSuccess?.invoke(actualSsid, actualPass, gatewayIp)
+                        }
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        Log.e(TAG, "Legacy Wi-Fi Direct createGroup failed (code $reason)")
+                        _hotspotState.value = HotspotState.Error("Wi-Fi Direct failed (code $reason)")
+                    }
+                })
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting Auto P2P: ${e.message}")
+            _hotspotState.value = HotspotState.Error("P2P error: ${e.message}")
         }
     }
 
     /**
-     * Dynamically detect the gateway IP of the active AP/tethering network interface.
+     * Dynamically detect the gateway IP of the active Wi-Fi AP interface (strictly wireless).
      */
     fun getHotspotGatewayIp(): String {
         try {
-            val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return "192.168.49.1"
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return "192.168.43.1"
             val ifaceList = interfaces.toList()
-            // 1. Look specifically for AP / Tethering / Hotspot interfaces
+            // 1. Look specifically for wireless AP / SoftAP / P2P interfaces (exclude USB/RNDIS)
             for (iface in ifaceList) {
                 val name = iface.name.lowercase()
-                if (name.contains("p2p") || name.contains("ap") || name.contains("wlan1") || name.contains("swlan") || name.contains("softap") || name.contains("rndis") || name.contains("tether")) {
+                val isUsb = name.contains("rndis") || name.contains("tether") || name.contains("usb") || name.contains("rmnet")
+                val isWirelessAp = (name.contains("p2p") || name.contains("ap") || name.contains("wlan1") || name.contains("swlan") || name.contains("softap")) && !isUsb
+                if (isWirelessAp) {
                     for (addr in iface.inetAddresses) {
                         if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                             val host = addr.hostAddress
-                            if (host != null && !host.startsWith("127.")) {
+                            if (host != null && !host.startsWith("127.") && !host.startsWith("10.100.")) {
                                 return host
                             }
                         }
@@ -226,13 +251,14 @@ class HotspotManager(private val context: Context) {
                 }
             }
 
-            // 2. Check for standard subnet IP patterns
+            // 2. Check for standard wireless subnet IP patterns (192.168.43.x, 192.168.49.x, 172.20.10.x)
             for (iface in ifaceList) {
-                if (iface.isLoopback || !iface.isUp) continue
+                val name = iface.name.lowercase()
+                if (iface.isLoopback || !iface.isUp || name.contains("rndis") || name.contains("tether") || name.contains("usb")) continue
                 for (addr in iface.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                         val host = addr.hostAddress
-                        if (host != null && (host.startsWith("192.168.49.") || host.startsWith("192.168.43.") || host.startsWith("172.20.10."))) {
+                        if (host != null && (host.startsWith("192.168.43.") || host.startsWith("192.168.49.") || host.startsWith("172.20.10."))) {
                             return host
                         }
                     }
