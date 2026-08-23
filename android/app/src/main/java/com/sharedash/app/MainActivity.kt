@@ -45,12 +45,16 @@ import com.sharedash.app.service.TransferForegroundService
 import com.sharedash.app.transport.AndroidTransportManager
 import com.sharedash.app.ui.components.ConnectingDialog
 import com.sharedash.app.ui.components.UsbPromptDialog
+import com.sharedash.app.ui.components.WirelessWarningDialog
 import com.sharedash.app.ui.screens.ConnectedScreen
 import com.sharedash.app.ui.screens.DiscoveryScreen
 import com.sharedash.app.ui.screens.PairingScreen
 import com.sharedash.app.ui.screens.TransferScreen
+import com.sharedash.app.ui.screens.UsbFirstScreen
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import com.sharedash.app.ui.theme.ShareDashTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -72,7 +76,42 @@ class MainActivity : ComponentActivity() {
     private var httpServer: com.sharedash.app.server.AndroidHttpServer? = null
     private val transportManager = AndroidTransportManager()
 
+    private val _isUsbCablePlugged = MutableStateFlow(false)
+    val isUsbCablePlugged: StateFlow<Boolean> = _isUsbCablePlugged
+
+    private val _isUsbTetheringActive = MutableStateFlow(false)
+    val isUsbTetheringActive: StateFlow<Boolean> = _isUsbTetheringActive
+
     private val selectedUris = mutableListOf<Uri>()
+
+    fun checkUsbState() {
+        try {
+            val batteryIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val plugged = batteryIntent?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+            val isPlugged = plugged == android.os.BatteryManager.BATTERY_PLUGGED_USB || plugged == android.os.BatteryManager.BATTERY_PLUGGED_AC
+            _isUsbCablePlugged.value = isPlugged
+
+            val ips = udpManager.getLocalIpAddresses()
+            val isTether = ips.any { it.startsWith("192.168.42.") } || hasUsbNetworkInterface()
+            _isUsbTetheringActive.value = isTether
+        } catch (_: Exception) {}
+    }
+
+    private fun hasUsbNetworkInterface(): Boolean {
+        return try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                val name = iface.name.lowercase()
+                if (iface.isUp && (name.contains("rndis") || name.contains("usb") || name.contains("ncm") || name.contains("geth"))) {
+                    return true
+                }
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun hasBluetoothConnectPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -230,10 +269,12 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
         checkAndRequestPermissions()
+        checkUsbState()
 
         val usbFilter = android.content.IntentFilter().apply {
             addAction("android.hardware.usb.action.USB_DEVICE_ATTACHED")
             addAction("android.hardware.usb.action.USB_STATE")
+            addAction(Intent.ACTION_BATTERY_CHANGED)
         }
         try {
             ContextCompat.registerReceiver(this, usbReceiver, usbFilter, ContextCompat.RECEIVER_EXPORTED)
@@ -254,13 +295,17 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ShareDashTheme {
-                var currentScreen by remember { mutableStateOf("discovery") }
+                var currentScreen by remember { mutableStateOf("usb_first") }
                 var activeTarget by remember { mutableStateOf<DiscoveredPeer?>(null) }
                 var activeTelemetry by remember { mutableStateOf<SchedulerTelemetry?>(null) }
                 var isPairingDialogOpen by remember { mutableStateOf(false) }
                 var isUsbPromptDialogOpen by remember { mutableStateOf(false) }
+                var isWirelessWarningDialogOpen by remember { mutableStateOf(false) }
                 var pairingStep by remember { mutableIntStateOf(2) }
                 var pairingPin by remember { mutableStateOf("000000") }
+
+                val isUsbCablePluggedState by isUsbCablePlugged.collectAsState()
+                val isUsbTetheringActiveState by isUsbTetheringActive.collectAsState()
 
                 val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator() }
 
@@ -282,6 +327,7 @@ class MainActivity : ComponentActivity() {
                                 isCompatible = true
                             )
                             isPairingDialogOpen = false
+                            isWirelessWarningDialogOpen = false
                             currentScreen = "connected"
                             Toast.makeText(this@MainActivity, "⚡ USB 3.2 Fast-Path Connected! Ready to transfer.", Toast.LENGTH_SHORT).show()
                         }
@@ -402,156 +448,171 @@ class MainActivity : ComponentActivity() {
                 val isBluetoothOn = isBluetoothEnabledSafely()
 
                 when (currentScreen) {
-                    "discovery", "connected" -> {
-                        if (activeTarget != null) {
-                            ConnectedScreen(
-                                connectedPeer = activeTarget!!,
-                                isUsbConnected = activeTarget?.supportedBridges?.any { it.contains("USB", true) } == true,
-                                onPickFiles = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onPickFolder = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onOpenUsbSettings = {
-                                    isUsbPromptDialogOpen = true
-                                },
-                                onDisconnect = {
-                                    activeTarget?.let { peer ->
-                                        lifecycleScope.launch {
-                                            pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
-                                        }
-                                    }
-                                    activeTarget = null
-                                    currentScreen = "discovery"
-                                    selectedUris.clear()
+                    "usb_first" -> {
+                        UsbFirstScreen(
+                            isUsbCablePlugged = isUsbCablePluggedState,
+                            isUsbTetheringActive = isUsbTetheringActiveState,
+                            onEnableUsbTethering = {
+                                openUsbTetheringSettings()
+                            },
+                            onContinueWithoutUsb = {
+                                isWirelessWarningDialogOpen = true
+                            },
+                            onOpenDownloadsFolder = {
+                                try {
+                                    val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                                    startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(this@MainActivity, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
                                 }
-                            )
-                        } else {
-                            DiscoveryScreen(
-                                discoveredPeers = combinedPeers,
-                                connectedPeer = null,
-                                isUsbConnected = false,
-                                isWifiEnabled = isWifiOn,
-                                isBluetoothEnabled = isBluetoothOn,
-                                onDeviceSelected = { peer ->
-                                    if (!peer.isCompatible) {
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            "⚠️ Incompatible App Version: ${peer.friendlyName} is running v${peer.appVersion}. Please update both apps.",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    } else {
-                                        val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
-                                            val myIps = udpManager.getLocalIpAddresses()
-                                            when {
-                                                myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1" // PC 5GHz Hotspot Gateway
-                                                myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"   // USB Tethering Gateway
-                                                myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"   // Phone Hotspot
-                                                myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"   // Wi-Fi Direct
-                                                else -> ""
-                                            }
-                                        } else {
-                                            peer.ipAddress
-                                        }
+                            }
+                        )
 
-                                        if (effectiveIp.isEmpty()) {
-                                            Toast.makeText(this@MainActivity, "No network path to ${peer.friendlyName}. Turn on Hotspot & connect PC to it.", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            activeTarget = peer.copy(ipAddress = effectiveIp)
-                                            val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
-                                            pairingPin = pin
-                                            pairingStep = 1 // Step 1: SYN (Sending connection request to PC)
-                                            isPairingDialogOpen = true
-                                            val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
-                                            lifecycleScope.launch {
-                                                val sent = pairingCoordinator.sendPairRequest(effectiveIp, peer.port, pin, android.os.Build.MODEL, myIp)
-                                                if (sent) {
-                                                    pairingCoordinator.startPairingPoller(
-                                                        scope = this,
-                                                        targetIp = effectiveIp,
-                                                        targetPort = peer.port,
-                                                        onIncoming = { _, _ -> },
-                                                        onAccepted = { name ->
-                                                            pairingStep = 3 // Step 3: ACK
-                                                            lifecycleScope.launch {
-                                                                delay(500)
-                                                                isPairingDialogOpen = false
-                                                                Toast.makeText(this@MainActivity, "🔒 Securely Connected to $name (AES-256-GCM)", Toast.LENGTH_SHORT).show()
-                                                                val isUsbActive = peer.supportedBridges.any { it.contains("USB", true) }
-                                                                if (!isUsbActive) {
-                                                                    isUsbPromptDialogOpen = true
-                                                                }
-                                                            }
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                        if (isWirelessWarningDialogOpen) {
+                            WirelessWarningDialog(
+                                onConfirmWireless = {
+                                    isWirelessWarningDialogOpen = false
+                                    currentScreen = "discovery"
+                                    startDiscovery()
+                                    Toast.makeText(this@MainActivity, "📶 Wireless Mode: Searching nearby PCs via Wi-Fi & BT", Toast.LENGTH_SHORT).show()
                                 },
-                                onDisconnect = {
-                                    activeTarget?.let { peer ->
-                                        lifecycleScope.launch {
-                                            pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
-                                        }
-                                    }
-                                    activeTarget = null
-                                    selectedUris.clear()
+                                onUseUsb = {
+                                    isWirelessWarningDialogOpen = false
+                                    openUsbTetheringSettings()
                                 },
-                                onPickFiles = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onPickFolder = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onOpenPairing = { currentScreen = "pairing" },
-                                onOpenDownloadsFolder = {
-                                    try {
-                                        val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
-                                        startActivity(intent)
-                                    } catch (_: Exception) {
-                                        Toast.makeText(this, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                onEnableWifi = {
-                                    try {
-                                        startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
-                                    } catch (_: Exception) {}
-                                },
-                                onEnableBluetooth = {
-                                    try {
-                                        val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                                        enableBtLauncher.launch(enableBtIntent)
-                                    } catch (_: Exception) {
-                                        try {
-                                            startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
-                                        } catch (_: Exception) {}
-                                    }
-                                },
-                                onOpenUsbSettings = {
-                                    isUsbPromptDialogOpen = true
-                                },
-                                hotspotState = hotspotState,
-                                onStartHotspot = {
-                                    hotspotManager.start5GHzHotspot { ssid, pass ->
-                                        udpManager.startDiscovery(lifecycleScope)
-                                    }
-                                },
-                                onStopHotspot = {
-                                    hotspotManager.stopHotspot()
-                                },
-                                onOpenHotspotSettings = {
-                                    try {
-                                        startActivity(Intent("android.settings.TETHER_SETTINGS"))
-                                    } catch (_: Exception) {
-                                        try {
-                                            startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
-                                        } catch (_: Exception) {}
-                                    }
+                                onDismiss = {
+                                    isWirelessWarningDialogOpen = false
                                 }
                             )
                         }
+                    }
+                    "discovery" -> {
+                        DiscoveryScreen(
+                            discoveredPeers = combinedPeers,
+                            connectedPeer = null,
+                            isUsbConnected = false,
+                            isWifiEnabled = isWifiOn,
+                            isBluetoothEnabled = isBluetoothOn,
+                            onReturnToUsbMode = {
+                                currentScreen = "usb_first"
+                            },
+                            onDeviceSelected = { peer ->
+                                if (!peer.isCompatible) {
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "⚠️ Incompatible App Version: ${peer.friendlyName} is running v${peer.appVersion}. Please update both apps.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } else {
+                                    val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
+                                        val myIps = udpManager.getLocalIpAddresses()
+                                        when {
+                                            myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1" // PC 5GHz Hotspot Gateway
+                                            myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"   // USB Tethering Gateway
+                                            myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"   // Phone Hotspot
+                                            myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"   // Wi-Fi Direct
+                                            else -> ""
+                                        }
+                                    } else {
+                                        peer.ipAddress
+                                    }
+
+                                    if (effectiveIp.isEmpty()) {
+                                        Toast.makeText(this@MainActivity, "No network path to ${peer.friendlyName}. Turn on Hotspot & connect PC to it.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        activeTarget = peer.copy(ipAddress = effectiveIp)
+                                        val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
+                                        pairingPin = pin
+                                        pairingStep = 1 // Step 1: SYN (Sending connection request to PC)
+                                        isPairingDialogOpen = true
+                                        val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
+                                        lifecycleScope.launch {
+                                            val sent = pairingCoordinator.sendPairRequest(effectiveIp, peer.port, pin, android.os.Build.MODEL, myIp)
+                                            if (sent) {
+                                                pairingCoordinator.startPairingPoller(
+                                                    scope = this,
+                                                    targetIp = effectiveIp,
+                                                    targetPort = peer.port,
+                                                    onIncoming = { _, _ -> },
+                                                    onAccepted = { name ->
+                                                        pairingStep = 3 // Step 3: ACK
+                                                        lifecycleScope.launch {
+                                                            delay(500)
+                                                            isPairingDialogOpen = false
+                                                            Toast.makeText(this@MainActivity, "🔒 Securely Connected to $name (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                                                            val isUsbActive = peer.supportedBridges.any { it.contains("USB", true) }
+                                                            if (!isUsbActive) {
+                                                                isUsbPromptDialogOpen = true
+                                                            }
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            onDisconnect = {
+                                activeTarget?.let { peer ->
+                                    lifecycleScope.launch {
+                                        pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
+                                    }
+                                }
+                                activeTarget = null
+                                selectedUris.clear()
+                            },
+                            onPickFiles = {
+                                filePickerLauncher.launch("*/*")
+                            },
+                            onPickFolder = {
+                                filePickerLauncher.launch("*/*")
+                            },
+                            onOpenPairing = { currentScreen = "pairing" },
+                            onOpenDownloadsFolder = {
+                                try {
+                                    val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                                    startActivity(intent)
+                                } catch (_: Exception) {
+                                    Toast.makeText(this, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            onEnableWifi = {
+                                try {
+                                    startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+                                } catch (_: Exception) {}
+                            },
+                            onEnableBluetooth = {
+                                try {
+                                    val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                    enableBtLauncher.launch(enableBtIntent)
+                                } catch (_: Exception) {
+                                    try {
+                                        startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            onOpenUsbSettings = {
+                                isUsbPromptDialogOpen = true
+                            },
+                            hotspotState = hotspotState,
+                            onStartHotspot = {
+                                hotspotManager.start5GHzHotspot { ssid, pass ->
+                                    udpManager.startDiscovery(lifecycleScope)
+                                }
+                            },
+                            onStopHotspot = {
+                                hotspotManager.stopHotspot()
+                            },
+                            onOpenHotspotSettings = {
+                                try {
+                                    startActivity(Intent("android.settings.TETHER_SETTINGS"))
+                                } catch (_: Exception) {
+                                    try {
+                                        startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        )
 
                         if (isPairingDialogOpen) {
                             ConnectingDialog(
@@ -601,6 +662,35 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    "connected" -> {
+                        if (activeTarget != null) {
+                            ConnectedScreen(
+                                connectedPeer = activeTarget!!,
+                                isUsbConnected = activeTarget?.supportedBridges?.any { it.contains("USB", true) } == true,
+                                onPickFiles = {
+                                    filePickerLauncher.launch("*/*")
+                                },
+                                onPickFolder = {
+                                    filePickerLauncher.launch("*/*")
+                                },
+                                onOpenUsbSettings = {
+                                    isUsbPromptDialogOpen = true
+                                },
+                                onDisconnect = {
+                                    activeTarget?.let { peer ->
+                                        lifecycleScope.launch {
+                                            pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
+                                        }
+                                    }
+                                    activeTarget = null
+                                    currentScreen = "usb_first"
+                                    selectedUris.clear()
+                                }
+                            )
+                        } else {
+                            currentScreen = "usb_first"
+                        }
+                    }
                     "transfer" -> {
                         activeTelemetry?.let { telem ->
                             TransferScreen(
@@ -608,11 +698,11 @@ class MainActivity : ComponentActivity() {
                                 telemetry = telem,
                                 onCancel = {
                                     transportManager.closeAll()
-                                    currentScreen = "discovery"
+                                    currentScreen = "usb_first"
                                 },
                                 onFinish = {
                                     selectedUris.clear()
-                                    currentScreen = "discovery"
+                                    currentScreen = "usb_first"
                                 }
                             )
                         }
@@ -872,8 +962,6 @@ class MainActivity : ComponentActivity() {
 
         if (ungranted.isNotEmpty()) {
             permissionLauncher.launch(ungranted.toTypedArray())
-        } else {
-            startDiscovery()
         }
     }
 
@@ -881,9 +969,12 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
             val action = intent?.action
             if (action == "android.hardware.usb.action.USB_DEVICE_ATTACHED" ||
-                action == "android.hardware.usb.action.USB_STATE") {
-                val connected = intent.extras?.getBoolean("connected") ?: true
-                if (connected) {
+                action == "android.hardware.usb.action.USB_STATE" ||
+                action == Intent.ACTION_BATTERY_CHANGED) {
+                val connected = intent?.extras?.getBoolean("connected") ?: (intent?.extras?.getBoolean("configured") ?: true)
+                _isUsbCablePlugged.value = connected
+                checkUsbState()
+                if (_isUsbTetheringActive.value) {
                     onUsbConnectedCallback?.invoke()
                 }
             }
@@ -1022,8 +1113,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-announce discovery and update local IP advertising whenever returning to foreground (e.g. after toggling Hotspot/Wi-Fi)
-        startDiscovery()
+        checkUsbState()
+        if (_isUsbTetheringActive.value) {
+            onUsbConnectedCallback?.invoke()
+        }
     }
 
     override fun onDestroy() {

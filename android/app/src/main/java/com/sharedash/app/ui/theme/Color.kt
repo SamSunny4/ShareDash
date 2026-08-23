@@ -22,6 +22,7 @@ val NeoBlue = Color(0xFF3B82F6)
 val NeoCyan = Color(0xFF06B6D4)
 val NeoGreen = Color(0xFF10B981)
 val NeoAmber = Color(0xFFF59E0B)
+val NeoYellow = Color(0xFFF59E0B)
 val NeoPurple = Color(0xFF8B5CF6)
 val NeoRed = Color(0xFFEF4444)
 

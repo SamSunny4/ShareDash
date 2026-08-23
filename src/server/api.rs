@@ -291,23 +291,6 @@ fn check_adb_devices_blocking() -> (bool, Option<String>) {
         }
     }
 
-    // 2. Query Windows for active USB tethering network interfaces (NDIS / RNDIS / USB Ethernet)
-    #[cfg(target_os = "windows")]
-    {
-        let ps_cmd = "Get-NetAdapter | Where-Object { ($_.InterfaceDescription -match 'NDIS|RNDIS|USB Ethernet|Tethering' -or $_.Name -match 'USB') -and $_.Status -eq 'Up' } | Select-Object -ExpandProperty Name";
-        if let Ok(output) = std::process::Command::new("powershell").args(["-NoProfile", "-Command", ps_cmd]).output() {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() {
-                        return (true, Some(format!("USB Tethering ({})", trimmed)));
-                    }
-                }
-            }
-        }
-    }
-
     (false, None)
 }
 

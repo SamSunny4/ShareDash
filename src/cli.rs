@@ -149,6 +149,10 @@ impl TerminalCli {
         if usb_connected || rndis_ip.is_some() {
             self.run_usb_first_wizard(usb_connected, usb_serial, rndis_ip).await;
         } else {
+            println!();
+            println!("  ⚠️  {YELLOW}{BOLD}Continuing without USB (Wireless Mode){RESET}");
+            println!("  {YELLOW}Warning: Wireless transfer speeds (Wi-Fi Direct / BT) might slow down significantly compared to USB 3.x line speed.{RESET}");
+            println!();
             self.run_wireless_direct_wizard().await;
         }
     }
@@ -316,14 +320,29 @@ impl TerminalCli {
     ///  WIRELESS FALLBACK WIZARD (No USB: BLE Scan + Wi-Fi Direct)
     /// ═══════════════════════════════════════════════════════════════
     async fn run_wireless_direct_wizard(&self) {
-        print_phase_header(1, "Wireless Bluetooth Scan (No USB Connected)");
-        println!("  Scanning for nearby ShareDash devices via BLE...");
+        print_phase_header(1, "Wireless Bluetooth & Wi-Fi Scan (No USB Connected)");
+        println!("  Scanning for nearby ShareDash devices via Bluetooth & Wi-Fi...");
 
-        let devices = self.phase1_ble_scan().await;
+        let mut devices = self.phase1_ble_scan().await;
+
+        // If BLE returned no devices, also check for peers discovered via UDP / Wi-Fi
+        if devices.is_empty() {
+            let active_udp = self.state.discovery.get_active_peers();
+            for p in active_udp {
+                if !devices.iter().any(|d| d.name == p.friendly_name) {
+                    devices.push(BleDevice {
+                        name: p.friendly_name.clone(),
+                        address: p.remote_addr.ip().to_string(),
+                        rssi: -40,
+                        peripheral_id: p.device_id.clone(),
+                    });
+                }
+            }
+        }
 
         if devices.is_empty() {
-            print_fail("No ShareDash devices found via Bluetooth.");
-            println!("  {YELLOW}Make sure Bluetooth is turned ON on both PC and Phone.{RESET}");
+            print_fail("No ShareDash devices found via Bluetooth or Wi-Fi.");
+            println!("  {YELLOW}Make sure Bluetooth or Wi-Fi is turned ON on both PC and Phone.{RESET}");
             println!("  {GRAY}Falling back to manual scan...{RESET}");
             self.handle_scan().await;
             self.manual_send_flow().await;

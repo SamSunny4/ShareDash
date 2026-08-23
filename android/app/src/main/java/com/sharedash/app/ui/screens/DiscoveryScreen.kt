@@ -86,6 +86,7 @@ fun DiscoveryScreen(
     onStopHotspot: () -> Unit = {},
     onEnableBluetooth: () -> Unit = {},
     onEnableWifi: () -> Unit = {},
+    onReturnToUsbMode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val transition = rememberInfiniteTransition(label = "radarPulse")
@@ -295,13 +296,13 @@ fun DiscoveryScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "⚡ USB Turbo Line Speed",
+                            text = "⚡ Switch to USB Mode",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Plug USB cable to PC for 3+ Gbps transfer",
+                            text = "Plug USB cable for 10x faster 3+ Gbps transfer",
                             fontSize = 11.sp,
                             color = TextMuted
                         )
@@ -309,12 +310,12 @@ fun DiscoveryScreen(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 NeoButton(
-                    onClick = onOpenUsbSettings,
+                    onClick = onReturnToUsbMode,
                     cornerRadius = 12.dp,
                     accentColor = NeoGreen
                 ) {
                     Text(
-                        text = "Setup",
+                        text = "USB Mode",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,

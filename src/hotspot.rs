@@ -535,100 +535,89 @@ pub async fn detect_phone_hotspot_gateway() -> Option<String> {
 
 /// Detect a phone connected via USB tethering (RNDIS/NCM) without requiring USB debugging.
 ///
-/// Automatically discovers gateways from Windows route tables, active network interfaces,
-/// and ARP caches across all dynamic subnets (10.x.x.x, 192.168.x.x, 172.x.x.x).
-/// Returns (phone_ip, device_name) if found.
+/// Strictly inspects active USB/RNDIS network interfaces on the host OS to prevent false positives
+/// from standard Wi-Fi LAN or Ethernet connections. Returns (phone_ip, device_name) if found.
 pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
     let mut candidate_ips: Vec<String> = Vec::new();
     let mut local_ips: Vec<String> = Vec::new();
+    let mut usb_detected = false;
 
-    // 1. Collect local IPs and inspect all network interfaces
-    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
-        for (name, ip) in &interfaces {
-            let ip_str = ip.to_string();
-            local_ips.push(ip_str.clone());
-
-            let name_lower = name.to_lowercase();
-            let is_usb_iface = name_lower.contains("rndis")
-                || name_lower.contains("ndis")
-                || name_lower.contains("usb")
-                || name_lower.contains("tether")
-                || name_lower.contains("cdc")
-                || name_lower.contains("ncm")
-                || name_lower.contains("samsung")
-                || name_lower.contains("remote")
-                || name_lower.contains("ethernet");
-
-            if let std::net::IpAddr::V4(v4) = ip {
-                if !v4.is_loopback() {
-                    let octets = v4.octets();
-                    let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-
-                    // Add common gateway hosts
-                    candidate_ips.push(format!("{}.1", prefix));
-                    candidate_ips.push(format!("{}.129", prefix));
-                    candidate_ips.push(format!("{}.63", prefix));
-                    candidate_ips.push(format!("{}.254", prefix));
-                    candidate_ips.push(format!("{}.100", prefix));
-
-                    if is_usb_iface {
-                        candidate_ips.insert(0, format!("{}.1", prefix));
-                        candidate_ips.insert(0, format!("{}.63", prefix));
-                        candidate_ips.insert(0, format!("{}.129", prefix));
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Windows specific: Parse default gateways from `route print 0.0.0.0`
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = tokio::process::Command::new("route")
-            .args(["print", "0.0.0.0"])
-            .output()
-            .await
-        {
-            let text = String::from_utf8_lossy(&output.stdout);
-            for line in text.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 5 && parts[0] == "0.0.0.0" && parts[1] == "0.0.0.0" {
-                    let gw = parts[2];
-                    if gw != "0.0.0.0" && !gw.starts_with("127.") && !candidate_ips.contains(&gw.to_string()) {
-                        candidate_ips.insert(0, gw.to_string());
-                    }
-                }
-            }
-        }
+        // Query active network adapters on Windows specifically for USB/RNDIS/NCM adapters
+        let ps_cmd = r#"Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { $desc = $_.InterfaceDescription; $name = $_.Name; $idx = $_.InterfaceIndex; $isUsb = ($desc -match 'Remote NDIS|RNDIS|Samsung Mobile USB|CDC NCM|Apple Mobile Device|USB Ethernet|USB NDIS|USB 10/100|Tethering') -or ($name -match 'USB|RNDIS|NCM|Tether' -and $desc -notmatch 'Virtual|Wi-Fi|Wireless|Bluetooth|Hyper-V|WSL|TAP'); $isExcluded = $desc -match 'Wi-Fi|Wireless|802.11|VirtualBox|VMware|Hyper-V|WSL|Bluetooth|Loopback|TAP'; if ($isUsb -and -not $isExcluded) { $ip = (Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1).IPAddress; $gw = (Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1).NextHop; Write-Output "$idx|$name|$desc|$ip|$gw" } }"#;
 
-        // Check ARP table for dynamic neighbors on tethering / private subnets
-        if let Ok(output) = tokio::process::Command::new("arp")
-            .arg("-a")
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_cmd])
             .output()
             .await
         {
-            let text = String::from_utf8_lossy(&output.stdout);
-            for line in text.lines() {
-                let trimmed = line.trim();
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if let Some(ip) = parts.first() {
-                    if (ip.starts_with("10.") || ip.starts_with("192.168.") || ip.starts_with("172."))
-                        && !ip.ends_with(".255")
-                        && !candidate_ips.contains(&ip.to_string())
-                    {
-                        candidate_ips.push(ip.to_string());
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let parts: Vec<&str> = trimmed.split('|').collect();
+                    if parts.len() >= 5 {
+                        let ip = parts[3].trim();
+                        let gw = parts[4].trim();
+                        if !ip.is_empty() {
+                            local_ips.push(ip.to_string());
+                            usb_detected = true;
+                            if let Ok(v4) = ip.parse::<std::net::Ipv4Addr>() {
+                                let octets = v4.octets();
+                                let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                                candidate_ips.push(format!("{}.1", prefix));
+                                candidate_ips.push(format!("{}.129", prefix));
+                                candidate_ips.push(format!("{}.63", prefix));
+                                candidate_ips.push(format!("{}.254", prefix));
+                            }
+                        }
+                        if !gw.is_empty() && gw != "0.0.0.0" {
+                            candidate_ips.insert(0, gw.to_string());
+                            usb_detected = true;
+                        }
                     }
                 }
             }
         }
     }
 
-    // 3. Add standard well-known defaults
-    let defaults = ["192.168.42.129", "192.168.42.1", "192.168.43.1", "192.168.44.1", "172.20.10.1"];
-    for d in defaults {
-        if !candidate_ips.contains(&d.to_string()) {
-            candidate_ips.push(d.to_string());
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+            for (name, ip) in &interfaces {
+                let name_lower = name.to_lowercase();
+                let is_usb = (name_lower.starts_with("usb")
+                    || name_lower.starts_with("rndis")
+                    || name_lower.starts_with("ncm")
+                    || name_lower.contains("usb"))
+                    && !name_lower.contains("wlan")
+                    && !name_lower.contains("wifi")
+                    && !name_lower.contains("vir");
+
+                if is_usb {
+                    if let std::net::IpAddr::V4(v4) = ip {
+                        if !v4.is_loopback() {
+                            local_ips.push(ip.to_string());
+                            usb_detected = true;
+                            let octets = v4.octets();
+                            let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                            candidate_ips.push(format!("{}.1", prefix));
+                            candidate_ips.push(format!("{}.129", prefix));
+                            candidate_ips.push(format!("{}.254", prefix));
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // STRICT CHECK: If no USB network adapter was detected, do NOT probe any general Wi-Fi / ARP IPs!
+    if !usb_detected || candidate_ips.is_empty() {
+        return None;
     }
 
     // Deduplicate and filter out local machine IPs
@@ -644,7 +633,7 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
         .build()
         .unwrap_or_default();
 
-    // 4. Concurrently probe all candidate IPs
+    // Concurrently probe candidate IPs strictly on the USB subnet
     let mut tasks = Vec::new();
     for ip in unique_candidates {
         let client_ref = client.clone();
