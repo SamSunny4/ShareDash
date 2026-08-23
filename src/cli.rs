@@ -227,9 +227,9 @@ impl TerminalCli {
                 Ok(info) => {
                     print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
 
-                    // Pacing: Wait for Windows 5GHz Wi-Fi radio & DHCP server to start broadcasting SSID
+                    // Pacing: Short delay for Windows 5GHz Wi-Fi radio & DHCP server
                     with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                        tokio::time::sleep(Duration::from_secs(4)).await;
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                     }).await;
 
                     println!("  Sending hotspot credentials to phone through USB...");
@@ -237,23 +237,11 @@ impl TerminalCli {
                     if sent {
                         print_ok("Phone received credentials via USB and connecting to 5GHz Hotspot...");
                         let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
-                            for _ in 0..20 {
-                                tokio::time::sleep(Duration::from_millis(800)).await;
-
-                                // 1. Check ARP table
-                                if let Some(ip) = hotspot::find_hotspot_client_arp().await {
-                                    if self.http_probe(&ip, 54321).await {
-                                        return Some(ip);
-                                    }
+                            for _ in 0..30 {
+                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                    return Some(ip);
                                 }
-
-                                // 2. Probe candidate range in 192.168.137.x
-                                for last_octet in 2..=15 {
-                                    let cand_ip = format!("192.168.137.{}", last_octet);
-                                    if self.http_probe(&cand_ip, 54321).await {
-                                        return Some(cand_ip);
-                                    }
-                                }
+                                tokio::time::sleep(Duration::from_millis(300)).await;
                             }
                             None
                         }).await;
@@ -477,7 +465,7 @@ impl TerminalCli {
                     print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
 
                     with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                        tokio::time::sleep(Duration::from_secs(4)).await;
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
                     }).await;
 
                     println!("  Sending hotspot credentials to phone via Bluetooth GATT...");
@@ -485,19 +473,11 @@ impl TerminalCli {
                     if sent {
                         print_ok("Phone received credentials via BLE and connecting to 5GHz Hotspot...");
                         let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
-                            for _ in 0..20 {
-                                tokio::time::sleep(Duration::from_millis(800)).await;
-                                if let Some(ip) = hotspot::find_hotspot_client_arp().await {
-                                    if self.http_probe(&ip, 54321).await {
-                                        return Some(ip);
-                                    }
+                            for _ in 0..30 {
+                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                    return Some(ip);
                                 }
-                                for last_octet in 2..=15 {
-                                    let cand_ip = format!("192.168.137.{}", last_octet);
-                                    if self.http_probe(&cand_ip, 54321).await {
-                                        return Some(cand_ip);
-                                    }
-                                }
+                                tokio::time::sleep(Duration::from_millis(300)).await;
                             }
                             None
                         }).await;
@@ -909,10 +889,32 @@ impl TerminalCli {
         init_transfer_progress(channel_states.len());
 
         let ui_handle = tokio::spawn(async move {
+            let mut last_sample_time = Instant::now();
+            let mut last_bytes: Vec<u64> = vec![0; channel_states_ui.len()];
+
             while !stop_ui_clone.load(std::sync::atomic::Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(80)).await;
-                let current_channels: Vec<ChannelProgress> =
-                    channel_states_ui.iter().map(|c| c.lock().clone()).collect();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let now = Instant::now();
+                let dt = now.duration_since(last_sample_time).as_secs_f64().max(0.001);
+
+                let mut current_channels: Vec<ChannelProgress> = Vec::with_capacity(channel_states_ui.len());
+                for (idx, c) in channel_states_ui.iter().enumerate() {
+                    let mut guard = c.lock();
+                    let bytes = guard.bytes_sent;
+                    let delta_bytes = bytes.saturating_sub(last_bytes[idx]);
+                    last_bytes[idx] = bytes;
+
+                    let instant_channel_speed_mb_s = (delta_bytes as f64 / (1024.0 * 1024.0)) / dt;
+                    guard.speed_mb_s = if guard.speed_mb_s == 0.0 {
+                        instant_channel_speed_mb_s
+                    } else {
+                        0.70 * guard.speed_mb_s + 0.30 * instant_channel_speed_mb_s
+                    };
+                    guard.speed_gbps = (guard.speed_mb_s * 8.0) / 1000.0;
+                    current_channels.push(guard.clone());
+                }
+                last_sample_time = now;
+
                 let total_sent: u64 = current_channels.iter().map(|c| c.bytes_sent).sum();
                 let pct = if total_size > 0 {
                     (total_sent as f64 / total_size as f64).min(1.0)
@@ -932,15 +934,19 @@ impl TerminalCli {
 
         let mut handles = Vec::new();
 
-        // Adaptive high-throughput chunk size based on file size (1MB - 8MB)
+        // Adaptive high-throughput chunk size based on file size (2MB - 64MB)
         let chunk_size: u64 = if file_size < 20 * 1024 * 1024 {
-            1024 * 1024 // 1 MB for files < 20 MB
-        } else if file_size < 200 * 1024 * 1024 {
-            2 * 1024 * 1024 // 2 MB for 20-200 MB
-        } else if file_size < 1024 * 1024 * 1024 {
-            4 * 1024 * 1024 // 4 MB for 200 MB - 1 GB
+            2 * 1024 * 1024 // 2 MB for files < 20 MB
+        } else if file_size < 100 * 1024 * 1024 {
+            4 * 1024 * 1024 // 4 MB for 20 - 100 MB
+        } else if file_size < 500 * 1024 * 1024 {
+            8 * 1024 * 1024 // 8 MB for 100 - 500 MB
+        } else if file_size < 2 * 1024 * 1024 * 1024 {
+            16 * 1024 * 1024 // 16 MB for 500 MB - 2 GB
+        } else if file_size < 8 * 1024 * 1024 * 1024 {
+            32 * 1024 * 1024 // 32 MB for 2 GB - 8 GB
         } else {
-            8 * 1024 * 1024 // 8 MB for > 1 GB
+            64 * 1024 * 1024 // 64 MB for > 8 GB
         };
 
         let transfer_id = uuid::Uuid::new_v4().to_string();
@@ -1005,15 +1011,18 @@ impl TerminalCli {
             1
         };
 
+        let usb_speed_mb_s = usb_ch.map(|c| (c.bytes_sent as f64 / (1024.0 * 1024.0)) / elapsed);
+        let wifi_speed_mb_s = wifi_ch.map(|c| (c.bytes_sent as f64 / (1024.0 * 1024.0)) / elapsed);
+
         let result = TransferResult {
             file_name: file_name.to_string(),
             size_mb: file_size_mb,
             time_secs: elapsed,
             avg_speed_mb_s: speed_mb_s,
             avg_speed_gbps: speed_gbps,
-            usb_speed_mb_s: usb_ch.map(|c| c.speed_mb_s),
+            usb_speed_mb_s,
             usb_pct: usb_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
-            wifi_speed_mb_s: wifi_ch.map(|c| c.speed_mb_s),
+            wifi_speed_mb_s,
             wifi_pct: wifi_ch.map(|c| (c.bytes_sent as f64 / file_size.max(1) as f64) * 100.0),
             chunk_size_bytes: chunk_size as usize,
             total_chunks,

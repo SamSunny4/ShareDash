@@ -497,6 +497,48 @@ pub async fn find_hotspot_client_arp() -> Option<String> {
     }
 }
 
+/// Fast parallel scan for connected hotspot client in 192.168.137.x subnet (< 300ms).
+pub async fn fast_scan_hotspot_clients(port: u16) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(300))
+        .build()
+        .unwrap_or_default();
+
+    // 1. Check ARP table first
+    if let Some(arp_ip) = find_hotspot_client_arp().await {
+        let url = format!("http://{}:{}/api/v1/info", arp_ip, port);
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                return Some(arp_ip);
+            }
+        }
+    }
+
+    // 2. Parallel scan candidates .2 through .25 concurrently in 300ms
+    let mut tasks = Vec::new();
+    for last_octet in 2..=25 {
+        let cand_ip = format!("192.168.137.{}", last_octet);
+        let c = client.clone();
+        tasks.push(async move {
+            let url = format!("http://{}:{}/api/v1/info", cand_ip, port);
+            if let Ok(resp) = c.get(&url).send().await {
+                if resp.status().is_success() {
+                    return Some(cand_ip);
+                }
+            }
+            None
+        });
+    }
+
+    let results = futures::future::join_all(tasks).await;
+    for res in results {
+        if let Some(ip) = res {
+            return Some(ip);
+        }
+    }
+    None
+}
+
 /// Generate a random ShareDash hotspot SSID and password.
 pub fn generate_hotspot_credentials() -> (String, String) {
     let suffix: String = (0..4)
