@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Binary
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Windows Binary
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path release-win
+          Copy-Item target/release/sharedash.exe release-win/
+          Copy-Item README.md release-win/
+          Copy-Item LICENSE release-win/
+          Compress-Archive -Path release-win/* -DestinationPath sharedash-windows-x86_64.zip
+          Get-FileHash sharedash-windows-x86_64.zip -Algorithm SHA256 | Out-File -Encoding UTF8 sharedash-windows-x86_64.zip.sha256
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            sharedash-windows-x86_64.zip
+            sharedash-windows-x86_64.zip.sha256
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build Release / Debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Package Android Artifact
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk ShareDash.apk
+          sha256sum ShareDash.apk > ShareDash.apk.sha256
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: |
+            ShareDash.apk
+            ShareDash.apk.sha256
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets/
+
+      - name: Download Android Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release
+          path: release-assets/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

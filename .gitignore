@@ -1,6 +1,5 @@
 # Rust build artifacts
 /target/
-Cargo.lock
 
 # Runtime & Local Database
 /sharedash_data/
@@ -18,6 +17,10 @@ Cargo.lock
 __pycache__/
 *.pyc
 *.pyo
+*.tmp
+
+# Wi-Fi Profile exports (netsh exports generated during local testing)
+Wi-Fi-*.xml
 
 # Android & Gradle artifacts
 /android/.gradle/
@@ -29,6 +32,8 @@ __pycache__/
 .gradle/
 .idea/
 *.iml
+*.ap_
+*.dex
 
 # OS / Editor noise
 .DS_Store
@@ -36,4 +41,4 @@ Thumbs.db
 *.swp
 *.swo
 .vscode/
-
+*.bak

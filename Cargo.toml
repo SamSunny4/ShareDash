@@ -3,8 +3,14 @@ name = "sharedash"
 version = "0.1.0"
 edition = "2021"
 default-run = "sharedash"
-description = "High-Performance Multipath Local + Internet File Transfer System"
-authors = ["ShareDash Team"]
+description = "High-Performance Multipath Offline P2P File Transfer Engine for Windows & Android"
+authors = ["SamSunny4 <https://github.com/SamSunny4>", "ShareDash Contributors"]
+license = "MIT"
+repository = "https://github.com/SamSunny4/ShareDash"
+homepage = "https://github.com/SamSunny4/ShareDash"
+readme = "README.md"
+keywords = ["file-transfer", "multipath", "p2p", "offline", "high-performance"]
+categories = ["network-programming", "command-line-utilities"]
 
 [dependencies]
 tokio = { version = "1.40", features = ["full"] }

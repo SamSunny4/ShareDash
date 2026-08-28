@@ -1,0 +1,38 @@
+name: 💡 Feature Request
+description: Suggest an idea or architectural improvement for ShareDash
+title: "[FEATURE]: "
+labels: ["enhancement", "proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We are thrilled to hear your ideas for making ShareDash even faster, more versatile, and easier to use!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem? Please describe.
+      description: A clear and concise description of what the problem or limitation is (e.g. "I'm always frustrated when...").
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: A detailed description of what you want to happen, including proposed UI, CLI flags, or protocol behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe alternatives you've considered
+      description: Any alternative solutions, protocols, or workarounds you have evaluated.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be interested in submitting a Pull Request for this feature!

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/SamSunny4/ShareDash/discussions
+    about: Ask questions, share ideas, and discuss with the ShareDash community!
+  - name: 🛡️ Security Vulnerability
+    url: https://github.com/SamSunny4/ShareDash/security/policy
+    about: Privately report a security vulnerability.
