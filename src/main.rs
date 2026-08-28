@@ -13,10 +13,6 @@ struct Args {
     #[arg(short, long, default_value_t = 54321)]
     port: u16,
 
-    /// Directory containing the dashboard UI files
-    #[arg(long, default_value = "./sharedash-ui")]
-    ui_dir: PathBuf,
-
     /// Friendly device name
     #[arg(long, default_value = "ShareDash Desktop")]
     name: String,
@@ -24,10 +20,6 @@ struct Args {
     /// SQLite Manifest Database path
     #[arg(long, default_value = "./sharedash_data/manifest.db")]
     db_path: PathBuf,
-
-    /// Open browser dashboard on startup (default: false, runs fully in terminal)
-    #[arg(long, default_value_t = false)]
-    web: bool,
 }
 
 #[tokio::main]
@@ -64,37 +56,10 @@ async fn main() -> anyhow::Result<()> {
 
     let server = Server::new(
         args.port,
-        args.ui_dir,
         device_id,
         args.name,
         args.db_path,
     );
-
-    if args.web {
-        let port = args.port;
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let url = format!("http://127.0.0.1:{}", port);
-            #[cfg(target_os = "windows")]
-            {
-                let _ = std::process::Command::new("cmd")
-                    .args(["/C", "start", &url])
-                    .spawn();
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let _ = std::process::Command::new("open")
-                    .arg(&url)
-                    .spawn();
-            }
-            #[cfg(target_os = "linux")]
-            {
-                let _ = std::process::Command::new("xdg-open")
-                    .arg(&url)
-                    .spawn();
-            }
-        });
-    }
 
     server.run().await?;
     Ok(())

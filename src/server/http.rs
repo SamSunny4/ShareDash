@@ -8,9 +8,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
-use axum::http::{header, StatusCode, Uri};
-use axum::response::IntoResponse;
-use rust_embed::RustEmbed;
 
 use crate::discovery::{BleDiscovery, PairingManager, PeerDiscovery};
 use crate::scheduler::metrics::SchedulerTelemetry;
@@ -23,50 +20,8 @@ use crate::server::api::{
 use crate::server::ws_telemetry::ws_telemetry_handler;
 use crate::storage::manifest_db::ManifestDb;
 
-#[derive(RustEmbed)]
-#[folder = "sharedash-ui/"]
-struct UiAssets;
-
-async fn static_file_handler(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/');
-    let file_path = if path.is_empty() { "index.html" } else { path };
-
-    match UiAssets::get(file_path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
-            (
-                [
-                    (header::CONTENT_TYPE, mime.as_ref()),
-                    (header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
-                    (header::PRAGMA, "no-cache"),
-                    (header::EXPIRES, "0"),
-                ],
-                content.data,
-            ).into_response()
-        }
-        None => {
-            if let Some(index) = UiAssets::get("index.html") {
-                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                (
-                    [
-                        (header::CONTENT_TYPE, mime.as_ref()),
-                        (header::CACHE_CONTROL, "no-cache, no-store, must-revalidate"),
-                        (header::PRAGMA, "no-cache"),
-                        (header::EXPIRES, "0"),
-                    ],
-                    index.data,
-                ).into_response()
-            } else {
-                (StatusCode::NOT_FOUND, "404 Not Found - ShareDash UI assets not found").into_response()
-            }
-        }
-    }
-}
-
 pub struct Server {
     port: u16,
-    #[allow(dead_code)]
-    ui_dir: PathBuf,
     device_id: String,
     device_name: String,
     db_path: PathBuf,
@@ -75,14 +30,12 @@ pub struct Server {
 impl Server {
     pub fn new(
         port: u16,
-        ui_dir: PathBuf,
         device_id: String,
         device_name: String,
         db_path: PathBuf,
     ) -> Self {
         Self {
             port,
-            ui_dir,
             device_id,
             device_name,
             db_path,
@@ -160,8 +113,6 @@ impl Server {
                 "/ws/telemetry",
                 get(move |ws| ws_telemetry_handler(ws, ws_telemetry_tx.subscribe())),
             )
-            // Static UI Frontend Files (Embedded)
-            .fallback(static_file_handler)
             .layer(cors)
             .with_state(state.clone());
 

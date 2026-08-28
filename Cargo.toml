@@ -35,11 +35,8 @@ local-ip-address = "0.6"
 clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
-tempfile = "3.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 btleplug = "0.11"
-rust-embed = "8.5"
-mime_guess = "2.0"
 memmap2 = "0.9"
 
 [dev-dependencies]
