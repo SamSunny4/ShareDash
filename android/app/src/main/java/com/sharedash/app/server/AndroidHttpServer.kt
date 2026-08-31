@@ -48,7 +48,10 @@ class AndroidHttpServer(
         val raf: java.io.RandomAccessFile,
         val channel: java.nio.channels.FileChannel = raf.channel,
         val receivedChunks: java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
-        val startTime: Long = System.currentTimeMillis()
+        val startTime: Long = System.currentTimeMillis(),
+        val totalBytesStreamed: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(0L),
+        val lastProgressReportTime: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis()),
+        val lastReportedBytes: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(0L)
     )
 
     private val activeChunkTransfers = java.util.concurrent.ConcurrentHashMap<String, ActiveChunkTransfer>()
@@ -524,6 +527,19 @@ class AndroidHttpServer(
                 session.channel.write(byteBuffer, currentOffset)
                 currentOffset += read
                 remaining -= read
+
+                val currentStreamed = session.totalBytesStreamed.addAndGet(read.toLong())
+                val now = System.currentTimeMillis()
+                val lastTime = session.lastProgressReportTime.get()
+                if (now - lastTime >= 35L) {
+                    if (session.lastProgressReportTime.compareAndSet(lastTime, now)) {
+                        val deltaSec = (now - lastTime).coerceAtLeast(1) / 1000.0
+                        val deltaBytes = currentStreamed - session.lastReportedBytes.getAndSet(currentStreamed)
+                        val speedMbps = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec
+                        val totalTarget = if (session.totalBytes > 0) session.totalBytes else currentStreamed
+                        onTransferProgress(session.fileName, currentStreamed, totalTarget, speedMbps)
+                    }
+                }
             }
             session.receivedChunks.add(chunkId)
         } catch (e: Exception) {
@@ -556,7 +572,7 @@ class AndroidHttpServer(
         val total = session.totalChunks
 
         val elapsedSec = (System.currentTimeMillis() - session.startTime).coerceAtLeast(1) / 1000.0
-        val totalBytesWritten = completedCount.toLong() * (contentLength.toLong().coerceAtLeast(1L))
+        val totalBytesWritten = session.totalBytesStreamed.get().coerceAtLeast(completedCount.toLong() * contentLength.toLong().coerceAtLeast(1L))
         val speedMbps = ((totalBytesWritten * 8.0) / 1_000_000.0) / elapsedSec
         onTransferProgress(session.fileName, totalBytesWritten, session.totalBytes, speedMbps)
 
@@ -650,7 +666,7 @@ class AndroidHttpServer(
 
                 val now = System.currentTimeMillis()
                 val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
-                if (now - lastSpeedCalcTime >= 80L || remaining <= 0) {
+                if (now - lastSpeedCalcTime >= 35L || remaining <= 0) {
                     val deltaSec = (now - lastSpeedCalcTime).coerceAtLeast(1) / 1000.0
                     val deltaBytes = totalWritten - lastSpeedCalcBytes
                     val instantSpeed = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec
@@ -693,7 +709,7 @@ class AndroidHttpServer(
 
                 val now = System.currentTimeMillis()
                 val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
-                if (now - lastSpeedCalcTime >= 80L || remaining <= 0) {
+                if (now - lastSpeedCalcTime >= 35L || remaining <= 0) {
                     val deltaSec = (now - lastSpeedCalcTime).coerceAtLeast(1) / 1000.0
                     val deltaBytes = totalWritten - lastSpeedCalcBytes
                     val instantSpeed = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec

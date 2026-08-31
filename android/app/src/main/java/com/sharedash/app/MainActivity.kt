@@ -410,7 +410,7 @@ class MainActivity : ComponentActivity() {
                 onTransferProgressCallback = { fileName, bytesRecv, totalBytes, speedMbps ->
                     val now = System.currentTimeMillis()
                     val isDone = bytesRecv >= totalBytes && totalBytes > 0
-                    if (now - lastRxUiMs >= 80L || isDone) {
+                    if (now - lastRxUiMs >= 30L || isDone) {
                         lastRxUiMs = now
                         lifecycleScope.launch(Dispatchers.Main) {
                             val pct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
@@ -461,7 +461,7 @@ class MainActivity : ComponentActivity() {
                             activeTelemetry = SchedulerTelemetry(
                                 transferId = existingTransferId,
                                 title = fileName,
-                                status = if (isDone) "COMPLETED" else "IN_PROGRESS",
+                                status = if (isDone) "VERIFYING" else "IN_PROGRESS",
                                 aggregateMbps = speedMbps,
                                 totalBytes = totalBytes,
                                 completedBytes = bytesRecv,
@@ -529,32 +529,40 @@ class MainActivity : ComponentActivity() {
                 }
 
                 onFilesPickedCallback = { uris ->
-                    activeTarget?.let { peer ->
-                        if (uris.isNotEmpty()) {
-                            val firstFileName = queryFileName(uris[0]) ?: "file.bin"
-                            val totalFiles = uris.size
-                            val initialTelem = SchedulerTelemetry(
-                                transferId = UUID.randomUUID(),
-                                title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
-                                status = "ACTIVE",
-                                aggregateMbps = 0.0,
-                                totalBytes = 0L,
-                                completedBytes = 0L,
-                                progressPct = 0f,
-                                etaSeconds = 0L,
-                                transports = listOf(
-                                    TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 2.0, 0, true),
-                                    TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, 0, true)
-                                ),
-                                chunkStates = (0 until 64).map { idx ->
-                                    ChunkVisualItem(chunkId = idx, state = ChunkState.PENDING, transportName = "5GHz Wi-Fi")
-                                }
-                            )
-                            activeTelemetry = initialTelem
-                            currentScreen = "transfer"
-                            executeRealTransfer(peer, uris) { telem ->
-                                activeTelemetry = telem
+                    if (uris.isNotEmpty()) {
+                        val peer = activeTarget ?: combinedPeers.firstOrNull() ?: DiscoveredPeer(
+                            deviceId = "peer-pc",
+                            friendlyName = "Connected PC",
+                            osName = "Windows",
+                            ipAddress = "127.0.0.1",
+                            port = 54321,
+                            supportedBridges = listOf("USB 3.2 Cable Fast-Path", "5GHz Wi-Fi"),
+                            isCompatible = true
+                        )
+                        activeTarget = peer
+                        val firstFileName = queryFileName(uris[0]) ?: "file.bin"
+                        val totalFiles = uris.size
+                        val initialTelem = SchedulerTelemetry(
+                            transferId = UUID.randomUUID(),
+                            title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
+                            status = "ACTIVE",
+                            aggregateMbps = 0.0,
+                            totalBytes = 0L,
+                            completedBytes = 0L,
+                            progressPct = 0f,
+                            etaSeconds = 0L,
+                            transports = listOf(
+                                TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 2.0, 0, true),
+                                TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, 0, true)
+                            ),
+                            chunkStates = (0 until 64).map { idx ->
+                                ChunkVisualItem(chunkId = idx, state = ChunkState.PENDING, transportName = "5GHz Wi-Fi")
                             }
+                        )
+                        activeTelemetry = initialTelem
+                        currentScreen = "transfer"
+                        executeRealTransfer(peer, uris) { telem ->
+                            activeTelemetry = telem
                         }
                     }
                 }
@@ -853,6 +861,10 @@ class MainActivity : ComponentActivity() {
                                     selectedUris.clear()
                                     activeTelemetry = null
                                     currentScreen = if (activeTarget != null) "connected" else "usb_first"
+                                },
+                                onSendAnother = {
+                                    selectedUris.clear()
+                                    filePickerLauncher.launch("*/*")
                                 }
                             )
                         }
