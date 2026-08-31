@@ -231,5 +231,14 @@ class TransferForegroundService : Service() {
                 }
             } catch (_: Exception) {}
         }
+
+        fun stopService(context: Context) {
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                nm?.cancel(NOTIFICATION_ID)
+                val intent = Intent(context, TransferForegroundService::class.java)
+                context.stopService(intent)
+            } catch (_: Exception) {}
+        }
     }
 }

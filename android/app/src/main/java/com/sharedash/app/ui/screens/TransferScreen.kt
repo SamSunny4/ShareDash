@@ -1,7 +1,9 @@
 package com.sharedash.app.ui.screens
 
 import android.content.Intent
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,29 +25,24 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Usb
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,9 +59,7 @@ import com.sharedash.app.ui.theme.NeoCyan
 import com.sharedash.app.ui.theme.NeoDarkShadow
 import com.sharedash.app.ui.theme.NeoGreen
 import com.sharedash.app.ui.theme.NeoInset
-import com.sharedash.app.ui.theme.NeoLightShadow
 import com.sharedash.app.ui.theme.NeoRed
-import com.sharedash.app.ui.theme.NeoYellow
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary
@@ -91,12 +84,9 @@ fun TransferScreen(
 
     // Determine USB vs Wi-Fi distribution ratio
     val usbTransport = telemetry.transports.find { it.kind == TransportKind.USB }
-    val wifiTransport = telemetry.transports.find { it.kind != TransportKind.USB }
-
     val completedChunks = telemetry.chunkStates.filter { it.state == ChunkState.COMPLETED }
     val totalChunksCount = telemetry.chunkStates.size.coerceAtLeast(1)
     val usbCompletedCount = completedChunks.count { it.transportName?.contains("usb", ignoreCase = true) == true }
-    val wifiCompletedCount = completedChunks.count { it.transportName?.contains("usb", ignoreCase = true) != true }
 
     val hasUsb = usbTransport?.isActive == true || usbCompletedCount > 0
     val usbRatio = when {
@@ -106,27 +96,37 @@ fun TransferScreen(
     }
     val wifiRatio = (normalizedProgress - usbRatio).coerceAtLeast(0f)
 
-    val animatedUsbProgress by animateFloatAsState(targetValue = usbRatio, label = "usbProgress")
-    val animatedWifiProgress by animateFloatAsState(targetValue = wifiRatio, label = "wifiProgress")
-    val animatedTotalProgress by animateFloatAsState(targetValue = normalizedProgress, label = "totalProgress")
+    // Smooth continuous linear interpolation (80ms) to prevent pausing, spring bounce, or stutter
+    val animatedUsbProgress by animateFloatAsState(
+        targetValue = usbRatio,
+        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+        label = "usbProgress"
+    )
+    val animatedWifiProgress by animateFloatAsState(
+        targetValue = wifiRatio,
+        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+        label = "wifiProgress"
+    )
+    val animatedTotalProgress by animateFloatAsState(
+        targetValue = normalizedProgress,
+        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
+        label = "totalProgress"
+    )
 
     val speedMbS = telemetry.aggregateMbps / 8.0
-    val formattedSpeed = if (speedMbS >= 1.0) "%.1f MB/s".format(speedMbS) else "%.0f KB/s".format(speedMbS * 1024.0)
+    val formattedSpeed = if (speedMbS >= 1.0) "%.2f MB/s".format(speedMbS) else "%.1f KB/s".format(speedMbS * 1024.0)
     val sentMb = telemetry.completedBytes / (1024.0 * 1024.0)
     val totalMb = telemetry.totalBytes / (1024.0 * 1024.0)
 
-    // Performance Score Calculations (0-100)
-    val baseSpeedScore = (speedMbS / 120.0 * 60.0).coerceIn(15.0, 60.0)
-    val multipathBonus = if (hasUsb && usbCompletedCount > 0 && wifiCompletedCount > 0) 25.0 else 15.0
-    val integrityBonus = 15.0
-    val finalScore = (baseSpeedScore + multipathBonus + integrityBonus).toInt().coerceIn(60, 99)
-
-    val (scoreGrade, scoreTitle) = when {
-        finalScore >= 95 -> "A+" to "Lightning Multipath"
-        finalScore >= 88 -> "A" to "Ultra Fast"
-        finalScore >= 78 -> "B+" to "High Speed"
-        else -> "B" to "Standard Fast-Path"
+    // Track peak speed observed throughout transfer
+    var peakSpeedMbS by remember { mutableDoubleStateOf(0.0) }
+    if (speedMbS > peakSpeedMbS) {
+        peakSpeedMbS = speedMbS
     }
+
+    // Precise 2-decimal floating point percentage
+    val pctFloat = (normalizedProgress * 100f).coerceIn(0f, 100f)
+    val formattedPct = if (isCompleted) "100.00%" else "%.2f%%".format(pctFloat)
 
     Column(
         modifier = modifier
@@ -137,7 +137,7 @@ fun TransferScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // ═══════════════════════════════════════════════════════════════
-        //  TRANSFER HEADER CARD (NEOMORPHIC)
+        //  TOP BAR: TRANSFER HEADER & CANCEL BUTTON
         // ═══════════════════════════════════════════════════════════════
         NeoCard(
             modifier = Modifier.fillMaxWidth(),
@@ -192,7 +192,7 @@ fun TransferScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel",
+                            contentDescription = "Cancel Transfer",
                             tint = NeoRed,
                             modifier = Modifier.size(18.dp)
                         )
@@ -204,7 +204,7 @@ fun TransferScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         // ═══════════════════════════════════════════════════════════════
-        //  NEOMORPHIC TWO-COLORED CIRCULAR PROGRESS DASHBOARD
+        //  NEOMORPHIC DUAL-ARC CIRCULAR PROGRESS DASHBOARD
         // ═══════════════════════════════════════════════════════════════
         Box(
             modifier = Modifier.size(220.dp),
@@ -230,7 +230,7 @@ fun TransferScreen(
                 )
 
                 if (isCompleted) {
-                    // Full Completed Verified Glowing Arc
+                    // Full Completed Verified Arc
                     drawArc(
                         brush = Brush.sweepGradient(listOf(NeoGreen, NeoCyan, NeoGreen)),
                         startAngle = -90f,
@@ -269,13 +269,13 @@ fun TransferScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "${(animatedTotalProgress * 100).toInt()}%",
-                    fontSize = 32.sp,
+                    text = formattedPct,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.Black,
                     color = TextPrimary
                 )
 
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
 
                 // Speed Pill
                 Box(
@@ -285,7 +285,7 @@ fun TransferScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (isCompleted) "Verified" else formattedSpeed,
+                        text = if (isCompleted) "Verified 100%" else formattedSpeed,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isCompleted) NeoGreen else NeoCyan
@@ -303,77 +303,66 @@ fun TransferScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // ═══════════════════════════════════════════════════════════════
-        //  TWO-COLORED SEGMENTED PROGRESS BAR & STATS
+        //  ESSENTIAL METRICS CARD (PEAK SPEED, TOTAL PAYLOAD, RATIO)
         // ═══════════════════════════════════════════════════════════════
         NeoCard(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 16.dp,
-            elevation = 4.dp
+            cornerRadius = 18.dp,
+            elevation = 5.dp
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp)
+                    .padding(16.dp)
             ) {
+                // Row 1: Peak Speed & Total Transferred
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "%.1f MB / %.1f MB".format(sentMb, totalMb.coerceAtLeast(sentMb)),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = if (isCompleted) "100% Done" else "${(animatedTotalProgress * 100).toInt()}%",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isCompleted) NeoGreen else NeoCyan
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Two-Colored Progress Strip
-                NeoInset(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(12.dp),
-                    cornerRadius = 6.dp
-                ) {
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(12.dp)
+                    // Peak Speed Tile
+                    NeoCard(
+                        modifier = Modifier.weight(1f),
+                        cornerRadius = 14.dp,
+                        backgroundColor = NeoCardPressed
                     ) {
-                        if (size.width <= 0f || size.height <= 0f) return@Canvas
-                        val totalW = size.width
-                        val h = size.height
-
-                        val rUsb = animatedUsbProgress.coerceIn(0f, 1f)
-                        val rWifi = animatedWifiProgress.coerceIn(0f, 1f)
-
-                        val usbW = (totalW * rUsb).coerceIn(0f, totalW)
-                        val wifiW = (totalW * rWifi).coerceIn(0f, (totalW - usbW).coerceAtLeast(0f))
-
-                        if (usbW > 0f) {
-                            drawRoundRect(
-                                color = NeoCyan,
-                                topLeft = Offset(0f, 0f),
-                                size = Size(usbW, h),
-                                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Text(text = "Peak Speed", fontSize = 11.sp, color = TextMuted)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = if (peakSpeedMbS >= 1.0) "%.2f MB/s".format(peakSpeedMbS) else "%.1f KB/s".format(peakSpeedMbS * 1024.0),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeoCyan
                             )
                         }
-                        if (wifiW > 0f) {
-                            drawRoundRect(
-                                color = NeoGreen,
-                                topLeft = Offset(usbW, 0f),
-                                size = Size(wifiW, h),
-                                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    }
+
+                    // Total Transferred Tile
+                    NeoCard(
+                        modifier = Modifier.weight(1f),
+                        cornerRadius = 14.dp,
+                        backgroundColor = NeoCardPressed
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Text(text = "Total Payload", fontSize = 11.sp, color = TextMuted)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "%.2f / %.2f MB".format(sentMb, totalMb.coerceAtLeast(sentMb)),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
                             )
                         }
                     }
@@ -381,32 +370,43 @@ fun TransferScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Progress Legend
-                val usbDisplayMb = if (normalizedProgress > 0.001f) sentMb * (usbRatio / normalizedProgress).toDouble() else sentMb * 0.7
-                val wifiDisplayMb = if (normalizedProgress > 0.001f) sentMb * (wifiRatio / normalizedProgress).toDouble() else sentMb * 0.3
+                // Row 2: Transport Multipath Ratio
+                val currentNorm = normalizedProgress.coerceAtLeast(0.001f)
+                val usbPct = (usbRatio / currentNorm * 100f).coerceIn(0f, 100f)
+                val wifiPct = (wifiRatio / currentNorm * 100f).coerceIn(0f, 100f)
+                val ratioText = when {
+                    hasUsb && wifiRatio > 0.001f -> "USB %.1f%% · Wi-Fi %.1f%%".format(usbPct, wifiPct)
+                    hasUsb -> "100% USB Fast-Path"
+                    else -> "100% 5GHz Wi-Fi"
+                }
 
-                Row(
+                NeoCard(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    cornerRadius = 14.dp,
+                    backgroundColor = NeoCardPressed
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(NeoCyan))
-                        Spacer(modifier = Modifier.width(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (hasUsb) Icons.Default.Usb else Icons.Default.Wifi,
+                                contentDescription = null,
+                                tint = if (hasUsb) NeoCyan else NeoGreen,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Link Distribution", fontSize = 12.sp, color = TextMuted)
+                        }
                         Text(
-                            text = "USB Fast-Path: %.1f MB".format(usbDisplayMb),
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(NeoGreen))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "5GHz Wi-Fi: %.1f MB".format(wifiDisplayMb),
-                            fontSize = 11.sp,
-                            color = TextSecondary
+                            text = ratioText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (hasUsb) NeoCyan else NeoGreen
                         )
                     }
                 }
@@ -423,383 +423,45 @@ fun TransferScreen(
         Spacer(modifier = Modifier.height(18.dp))
 
         // ═══════════════════════════════════════════════════════════════
-        //  POST-TRANSFER RESULTS SCORE CARD (SHOWN WHEN COMPLETE)
+        //  POST-TRANSFER ACTIONS (WHEN COMPLETE)
         // ═══════════════════════════════════════════════════════════════
         if (isCompleted) {
-            NeoCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 22.dp,
-                elevation = 8.dp
+            // Open Downloads Button
+            NeoButton(
+                onClick = {
+                    try {
+                        val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                        context.startActivity(intent)
+                    } catch (_: Exception) {}
+                },
+                cornerRadius = 14.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Header Tag
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(NeoGreen.copy(alpha = 0.15f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Verified,
-                            contentDescription = null,
-                            tint = NeoGreen,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "TRANSFER PERFORMANCE REPORT",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeoGreen,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Score Big Dial
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier.size(76.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            NeoInset(
-                                modifier = Modifier.size(76.dp),
-                                cornerRadius = 38.dp
-                            ) {}
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "$finalScore",
-                                    fontSize = 26.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = NeoGreen,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "/100",
-                                    fontSize = 10.sp,
-                                    color = TextMuted
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Grade $scoreGrade",
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = TextPrimary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(NeoCyan.copy(alpha = 0.15f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = scoreTitle,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = NeoCyan
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "100% Zero-Loss CRC32 Verified",
-                                fontSize = 12.sp,
-                                color = NeoGreen,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // Detailed Metric Tiles
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Metric 1: Peak Speed
-                        NeoCard(
-                            modifier = Modifier.weight(1f),
-                            cornerRadius = 14.dp,
-                            backgroundColor = NeoCardPressed
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp)
-                            ) {
-                                Text(text = "Peak Speed", fontSize = 11.sp, color = TextMuted)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (speedMbS > 0) "%.1f MB/s".format(speedMbS) else "48.5 MB/s",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                            }
-                        }
-
-                        // Metric 2: Total Payload
-                        NeoCard(
-                            modifier = Modifier.weight(1f),
-                            cornerRadius = 14.dp,
-                            backgroundColor = NeoCardPressed
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp)
-                            ) {
-                                Text(text = "Total Payload", fontSize = 11.sp, color = TextMuted)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "%.1f MB".format(totalMb.coerceAtLeast(sentMb)),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Metric 3: Multipath Split
-                        NeoCard(
-                            modifier = Modifier.weight(1f),
-                            cornerRadius = 14.dp,
-                            backgroundColor = NeoCardPressed
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp)
-                            ) {
-                                Text(text = "Multipath Ratio", fontSize = 11.sp, color = TextMuted)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "USB 70% · Wi-Fi 30%",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = NeoCyan
-                                )
-                            }
-                        }
-
-                        // Metric 4: Integrity
-                        NeoCard(
-                            modifier = Modifier.weight(1f),
-                            cornerRadius = 14.dp,
-                            backgroundColor = NeoCardPressed
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp)
-                            ) {
-                                Text(text = "Data Integrity", fontSize = 11.sp, color = TextMuted)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "CRC32 Validated",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = NeoGreen
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // Open Downloads Button
-                    NeoButton(
-                        onClick = {
-                            try {
-                                val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        },
-                        cornerRadius = 14.dp,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = null,
-                                tint = NeoCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Open in Downloads / ShareDash",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = NeoCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Open in Downloads / ShareDash",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+            Spacer(modifier = Modifier.height(12.dp))
 
-        // ═══════════════════════════════════════════════════════════════
-        //  DUAL-CHANNEL MULTIPATH LIVE METRICS
-        // ═══════════════════════════════════════════════════════════════
-        if (!isCompleted) {
-            Text(
-                text = "Multipath Links Active",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Start
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // USB Channel Card
-                val usbStats = telemetry.transports.find { it.kind == TransportKind.USB }
-                val usbSpeedText = if (usbStats != null && usbStats.currentMbps > 0) {
-                    "%.1f MB/s (70%%)".format(usbStats.currentMbps)
-                } else if (hasUsb) {
-                    "Fast-Path Ready"
-                } else {
-                    "Inactive"
-                }
-
-                NeoCard(
-                    modifier = Modifier.weight(1f),
-                    cornerRadius = 18.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(NeoCyan.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Usb,
-                                contentDescription = "USB",
-                                tint = NeoCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "USB Fast-Path",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = usbSpeedText,
-                                fontSize = 11.sp,
-                                color = NeoCyan,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                // Wi-Fi Channel Card
-                val wifiStats = telemetry.transports.find { it.kind != TransportKind.USB }
-                val wifiSpeedText = if (wifiStats != null && wifiStats.currentMbps > 0) {
-                    "%.1f MB/s (30%%)".format(wifiStats.currentMbps)
-                } else {
-                    "5GHz Active"
-                }
-
-                NeoCard(
-                    modifier = Modifier.weight(1f),
-                    cornerRadius = 18.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(NeoGreen.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Wifi,
-                                contentDescription = "Wi-Fi",
-                                tint = NeoGreen,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "5GHz Wi-Fi",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = wifiSpeedText,
-                                fontSize = 11.sp,
-                                color = NeoGreen,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        //  COMPLETION DONE BUTTON
-        // ═══════════════════════════════════════════════════════════════
-        if (isCompleted) {
             NeoButton(
                 onClick = onFinish,
                 cornerRadius = 18.dp,
@@ -821,7 +483,7 @@ fun TransferScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Done — File Saved in Downloads",
+                        text = "Done — File Saved",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -831,4 +493,3 @@ fun TransferScreen(
         }
     }
 }
-

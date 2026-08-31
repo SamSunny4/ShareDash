@@ -52,8 +52,37 @@ class AndroidHttpServer(
     )
 
     private val activeChunkTransfers = java.util.concurrent.ConcurrentHashMap<String, ActiveChunkTransfer>()
+    private val activeSockets = java.util.concurrent.ConcurrentHashMap.newKeySet<Socket>()
+    private val activeFilesToCleanup = java.util.concurrent.ConcurrentHashMap.newKeySet<File>()
+    private val isCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    fun cancelActiveTransfers() {
+        isCancelled.set(true)
+        Log.i(TAG, "Cancelling all active incoming transfers on Android...")
+
+        activeChunkTransfers.values.forEach { session ->
+            try {
+                session.channel.close()
+                session.raf.close()
+                session.targetFile.delete()
+            } catch (_: Exception) {}
+        }
+        activeChunkTransfers.clear()
+
+        activeFilesToCleanup.forEach { file ->
+            try { file.delete() } catch (_: Exception) {}
+        }
+        activeFilesToCleanup.clear()
+
+        activeSockets.forEach { sock ->
+            try { sock.close() } catch (_: Exception) {}
+        }
+        activeSockets.clear()
+
+        releaseHighPerfLocksIfIdle()
+    }
 
     private fun acquireHighPerfLocks() {
         try {
@@ -130,6 +159,7 @@ class AndroidHttpServer(
     }
 
     private fun handleClientConnection(socket: Socket) {
+        activeSockets.add(socket)
         try {
             socket.tcpNoDelay = true
             socket.receiveBufferSize = 4 * 1024 * 1024
@@ -140,6 +170,7 @@ class AndroidHttpServer(
             val output = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
 
             while (true) {
+                if (isCancelled.get()) break
                 // Read HTTP request line
                 val firstLine = readLine(input) ?: break
                 val parts = firstLine.split(" ")
@@ -289,6 +320,16 @@ class AndroidHttpServer(
                         } finally {
                             socket.soTimeout = 30000
                         }
+                    }
+
+                    // 7b. Cancel In-Progress Transfer: POST /api/v1/transfers/cancel
+                    method == "POST" && (path == "/api/v1/transfers/cancel" || path.startsWith("/api/v1/transfers/cancel")) -> {
+                        cancelActiveTransfers()
+                        val resp = JSONObject().apply {
+                            put("success", true)
+                            put("message", "All active transfers cancelled")
+                        }
+                        sendJsonResponse(output, 200, resp, isKeepAlive)
                     }
 
                     // 8. Wi-Fi Hardware Capabilities: GET /api/v1/wifi_caps
@@ -547,6 +588,8 @@ class AndroidHttpServer(
         output: BufferedOutputStream,
         isKeepAlive: Boolean = true
     ) {
+        if (isCancelled.get()) return
+
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "ShareDash"
@@ -558,6 +601,9 @@ class AndroidHttpServer(
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
         val startTime = System.currentTimeMillis()
+        var lastSpeedCalcTime = startTime
+        var lastSpeedCalcBytes = 0L
+        var currentSmoothSpeed = 0.0
         var totalWritten = 0L
 
         if (contentType.contains("multipart/form-data")) {
@@ -581,11 +627,20 @@ class AndroidHttpServer(
             }
 
             val targetFile = File(downloadDir, fileName)
+            activeFilesToCleanup.add(targetFile)
             val fos = BufferedOutputStream(FileOutputStream(targetFile), 512 * 1024)
 
             val buf = ByteArray(512 * 1024)
             var remaining = if (contentLength > 0) (contentLength - headerBytesConsumed).toLong().coerceAtLeast(0L) else Long.MAX_VALUE
             while (remaining > 0) {
+                if (isCancelled.get()) {
+                    try { fos.close() } catch (_: Exception) {}
+                    try { targetFile.delete() } catch (_: Exception) {}
+                    activeFilesToCleanup.remove(targetFile)
+                    Log.w(TAG, "Transfer cancelled during multipart stream: $fileName")
+                    return
+                }
+
                 val toRead = minOf(buf.size.toLong(), remaining).toInt()
                 val bytesRead = input.read(buf, 0, toRead)
                 if (bytesRead == -1) break
@@ -593,13 +648,21 @@ class AndroidHttpServer(
                 remaining -= bytesRead
                 totalWritten += bytesRead
 
-                val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(1) / 1000.0
-                val speedMbps = ((totalWritten * 8.0) / 1_000_000.0) / elapsedSec
+                val now = System.currentTimeMillis()
                 val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
-                onTransferProgress(fileName, totalWritten, totalExpected, speedMbps)
+                if (now - lastSpeedCalcTime >= 80L || remaining <= 0) {
+                    val deltaSec = (now - lastSpeedCalcTime).coerceAtLeast(1) / 1000.0
+                    val deltaBytes = totalWritten - lastSpeedCalcBytes
+                    val instantSpeed = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec
+                    currentSmoothSpeed = if (currentSmoothSpeed == 0.0) instantSpeed else (currentSmoothSpeed * 0.35 + instantSpeed * 0.65)
+                    lastSpeedCalcTime = now
+                    lastSpeedCalcBytes = totalWritten
+                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed)
+                }
             }
             fos.flush()
             fos.close()
+            activeFilesToCleanup.remove(targetFile)
 
             if (boundaryBytes.isNotEmpty()) {
                 trimTrailingBoundary(targetFile, boundaryBytes)
@@ -608,10 +671,19 @@ class AndroidHttpServer(
             checkAndMergeParts(fileName, downloadDir)
         } else {
             val targetFile = File(downloadDir, fileName)
+            activeFilesToCleanup.add(targetFile)
             val fos = BufferedOutputStream(FileOutputStream(targetFile), 512 * 1024)
             val buf = ByteArray(512 * 1024)
             var remaining = if (contentLength > 0) contentLength.toLong() else Long.MAX_VALUE
             while (remaining > 0) {
+                if (isCancelled.get()) {
+                    try { fos.close() } catch (_: Exception) {}
+                    try { targetFile.delete() } catch (_: Exception) {}
+                    activeFilesToCleanup.remove(targetFile)
+                    Log.w(TAG, "Transfer cancelled during stream: $fileName")
+                    return
+                }
+
                 val toRead = minOf(buf.size.toLong(), remaining).toInt()
                 val bytesRead = input.read(buf, 0, toRead)
                 if (bytesRead == -1) break
@@ -619,13 +691,21 @@ class AndroidHttpServer(
                 remaining -= bytesRead
                 totalWritten += bytesRead
 
-                val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(1) / 1000.0
-                val speedMbps = ((totalWritten * 8.0) / 1_000_000.0) / elapsedSec
+                val now = System.currentTimeMillis()
                 val totalExpected = if (contentLength > 0) contentLength.toLong() else totalWritten
-                onTransferProgress(fileName, totalWritten, totalExpected, speedMbps)
+                if (now - lastSpeedCalcTime >= 80L || remaining <= 0) {
+                    val deltaSec = (now - lastSpeedCalcTime).coerceAtLeast(1) / 1000.0
+                    val deltaBytes = totalWritten - lastSpeedCalcBytes
+                    val instantSpeed = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec
+                    currentSmoothSpeed = if (currentSmoothSpeed == 0.0) instantSpeed else (currentSmoothSpeed * 0.35 + instantSpeed * 0.65)
+                    lastSpeedCalcTime = now
+                    lastSpeedCalcBytes = totalWritten
+                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed)
+                }
             }
             fos.flush()
             fos.close()
+            activeFilesToCleanup.remove(targetFile)
             checkAndMergeParts(fileName, downloadDir)
         }
 

@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import com.sharedash.app.ui.theme.ShareDashTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.InputStream
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var rfcommServer: com.sharedash.app.discovery.BluetoothRfcommServer
     private var httpServer: com.sharedash.app.server.AndroidHttpServer? = null
     private val transportManager = AndroidTransportManager()
+    private var activeSendJob: kotlinx.coroutines.Job? = null
 
     private val _isUsbCablePlugged = MutableStateFlow(false)
     val isUsbCablePlugged: StateFlow<Boolean> = _isUsbCablePlugged
@@ -387,6 +389,20 @@ class MainActivity : ComponentActivity() {
                         isPairingDialogOpen = false
                         currentScreen = "connected"
                         Toast.makeText(this@MainActivity, "Securely Connected (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                onFilesPickedCallback = { uris ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (activeTarget != null && uris.isNotEmpty()) {
+                            currentScreen = "transfer"
+                            executeRealTransfer(activeTarget!!, uris) { telem ->
+                                activeTelemetry = telem
+                                if (telem.status == "COMPLETED") {
+                                    com.sharedash.app.service.TransferForegroundService.complete(this@MainActivity, telem.title)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -800,9 +816,38 @@ class MainActivity : ComponentActivity() {
                                 targetName = activeTarget?.friendlyName ?: "Target Device",
                                 telemetry = telem,
                                 onCancel = {
+                                    // 1. Cancel active outgoing send coroutine
+                                    activeSendJob?.cancel()
+                                    activeSendJob = null
+
+                                    // 2. Abort active incoming server transfers
+                                    httpServer?.cancelActiveTransfers()
+
+                                    // 3. Stop Foreground Service
+                                    com.sharedash.app.service.TransferForegroundService.stopService(this@MainActivity)
+
+                                    // 4. Close all active client sockets
                                     transportManager.closeAll()
+
+                                    // 5. Notify target peer PC
+                                    activeTarget?.let { peer ->
+                                        lifecycleScope.launch(Dispatchers.IO) {
+                                            try {
+                                                val url = java.net.URL("http://${peer.ipAddress}:${peer.port}/api/v1/transfers/cancel")
+                                                val conn = url.openConnection() as java.net.HttpURLConnection
+                                                conn.requestMethod = "POST"
+                                                conn.connectTimeout = 1500
+                                                conn.readTimeout = 1500
+                                                conn.responseCode
+                                                conn.disconnect()
+                                            } catch (_: Exception) {}
+                                        }
+                                    }
+
+                                    // 6. Reset UI state
                                     activeTelemetry = null
                                     currentScreen = if (activeTarget != null) "connected" else "usb_first"
+                                    Toast.makeText(this@MainActivity, "Transfer stopped", Toast.LENGTH_SHORT).show()
                                 },
                                 onFinish = {
                                     selectedUris.clear()
@@ -843,7 +888,8 @@ class MainActivity : ComponentActivity() {
         val firstFileName = queryFileName(uris[0]) ?: "file.bin"
         val totalFiles = uris.size
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        activeSendJob?.cancel()
+        activeSendJob = lifecycleScope.launch(Dispatchers.IO) {
             // Start Foreground Service safely
             try {
                 val serviceIntent = Intent(this@MainActivity, TransferForegroundService::class.java).apply {
@@ -910,10 +956,13 @@ class MainActivity : ComponentActivity() {
 
             var transferredBytes = 0L
             val startTime = System.currentTimeMillis()
-            var lastSendUiMs = 0L
+            var lastSendUiMs = startTime
+            var lastCalcBytes = 0L
+            var smoothMbps = 0.0
             var success = true
 
             for (uri in uris) {
+                if (!isActive) return@launch
                 val fileName = queryFileName(uri) ?: "file.bin"
 
                 try {
@@ -939,49 +988,61 @@ class MainActivity : ComponentActivity() {
                         val buffer = ByteArray(256 * 1024)
                         var read: Int
                         while (input.read(buffer).also { read = it } != -1) {
+                            if (!isActive) {
+                                try { input.close() } catch (_: Exception) {}
+                                try { os.close() } catch (_: Exception) {}
+                                try { conn.disconnect() } catch (_: Exception) {}
+                                return@launch
+                            }
+
                             os.write(buffer, 0, read)
                             transferredBytes += read
 
-                            val elapsedSec = (System.currentTimeMillis() - startTime).coerceAtLeast(100) / 1000.0
-                            val mbps = (transferredBytes * 8) / (elapsedSec * 1_000_000.0)
-                            val progress = if (effectiveTotalBytes > 0) (transferredBytes.toFloat() / effectiveTotalBytes.toFloat()).coerceIn(0f, 1f) else 0f
-                            val remainingBytes = effectiveTotalBytes - transferredBytes
-                            val eta = if (mbps > 0) (remainingBytes * 8 / (mbps * 1_000_000.0)).toLong() else 0
-
-                            val completedChunkIndex = if (effectiveTotalBytes > 0) ((transferredBytes.toDouble() / effectiveTotalBytes) * totalChunks).toInt() else 0
-                            val visualChunks = (0 until totalChunks).map { idx ->
-                                val stateEnum = when {
-                                    idx < completedChunkIndex -> ChunkState.COMPLETED
-                                    idx == completedChunkIndex -> ChunkState.IN_FLIGHT
-                                    else -> ChunkState.PENDING
-                                }
-                                val transportBadge = if (isUsb) {
-                                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
-                                } else {
-                                    if (idx % 2 == 0) "Wi-Fi Direct" else "Local Wi-Fi"
-                                }
-                                ChunkVisualItem(chunkId = idx, state = stateEnum, transportName = transportBadge)
-                            }
-
-                            val telem = SchedulerTelemetry(
-                                transferId = transferId,
-                                title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
-                                status = "ACTIVE",
-                                aggregateMbps = mbps / 8.0,
-                                totalBytes = effectiveTotalBytes,
-                                completedBytes = transferredBytes,
-                                progressPct = progress,
-                                etaSeconds = eta,
-                                transports = listOf(
-                                    TransportStats("5GHz Wi-Fi", TransportKind.LAN, mbps / 8.0 * (if (isUsb) 0.3 else 1.0), 1.5, (transferredBytes / (256 * 1024)), true),
-                                    if (isUsb) TransportStats("USB Fast-Path", TransportKind.USB, mbps / 8.0 * 0.7, 0.4, (transferredBytes / (256 * 1024)), true)
-                                    else TransportStats("Wi-Fi Direct", TransportKind.WIFI_DIRECT, mbps / 8.0, 3.2, (transferredBytes / (256 * 1024)), true)
-                                ),
-                                chunkStates = visualChunks
-                            )
                             val nowMs = System.currentTimeMillis()
+                            val progress = if (effectiveTotalBytes > 0) (transferredBytes.toFloat() / effectiveTotalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+
                             if (nowMs - lastSendUiMs >= 80L || transferredBytes >= effectiveTotalBytes) {
+                                val deltaSec = (nowMs - lastSendUiMs).coerceAtLeast(1) / 1000.0
+                                val deltaBytes = transferredBytes - lastCalcBytes
+                                val instantMbps = (deltaBytes * 8.0) / (deltaSec * 1_000_000.0)
+                                smoothMbps = if (smoothMbps == 0.0) instantMbps else (smoothMbps * 0.35 + instantMbps * 0.65)
                                 lastSendUiMs = nowMs
+                                lastCalcBytes = transferredBytes
+
+                                val remainingBytes = effectiveTotalBytes - transferredBytes
+                                val eta = if (smoothMbps > 0) (remainingBytes * 8 / (smoothMbps * 1_000_000.0)).toLong() else 0
+
+                                val completedChunkIndex = if (effectiveTotalBytes > 0) ((transferredBytes.toDouble() / effectiveTotalBytes) * totalChunks).toInt() else 0
+                                val visualChunks = (0 until totalChunks).map { idx ->
+                                    val stateEnum = when {
+                                        idx < completedChunkIndex -> ChunkState.COMPLETED
+                                        idx == completedChunkIndex -> ChunkState.IN_FLIGHT
+                                        else -> ChunkState.PENDING
+                                    }
+                                    val transportBadge = if (isUsb) {
+                                        if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                                    } else {
+                                        if (idx % 2 == 0) "Wi-Fi Direct" else "Local Wi-Fi"
+                                    }
+                                    ChunkVisualItem(chunkId = idx, state = stateEnum, transportName = transportBadge)
+                                }
+
+                                val telem = SchedulerTelemetry(
+                                    transferId = transferId,
+                                    title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
+                                    status = "ACTIVE",
+                                    aggregateMbps = smoothMbps,
+                                    totalBytes = effectiveTotalBytes,
+                                    completedBytes = transferredBytes,
+                                    progressPct = progress,
+                                    etaSeconds = eta,
+                                    transports = listOf(
+                                        TransportStats("5GHz Wi-Fi", TransportKind.LAN, smoothMbps * (if (isUsb) 0.3 else 1.0), 1.5, (transferredBytes / (256 * 1024)), true),
+                                        if (isUsb) TransportStats("USB Fast-Path", TransportKind.USB, smoothMbps * 0.7, 0.4, (transferredBytes / (256 * 1024)), true)
+                                        else TransportStats("Wi-Fi Direct", TransportKind.WIFI_DIRECT, smoothMbps, 3.2, (transferredBytes / (256 * 1024)), true)
+                                    ),
+                                    chunkStates = visualChunks
+                                )
                                 withContext(Dispatchers.Main) { onUpdate(telem) }
                             }
                         }
@@ -1001,8 +1062,10 @@ class MainActivity : ComponentActivity() {
                     }
                     conn.disconnect()
                 } catch (e: Exception) {
-                    android.util.Log.e("Transfer", "Failed to send $fileName: ${e.message}")
-                    success = false
+                    if (isActive) {
+                        android.util.Log.e("Transfer", "Failed to send $fileName: ${e.message}")
+                        success = false
+                    }
                 }
             }
 
@@ -1191,6 +1254,19 @@ class MainActivity : ComponentActivity() {
                     android.util.Log.e("MainActivity", "Could not toggle Wi-Fi: ${e.message}")
                 }
             }
+        }
+
+        // Disconnect existing active Wi-Fi connection to eliminate MCC/SCC radio time-slicing and accelerate peer association
+        try {
+            @Suppress("DEPRECATION")
+            wifiManager?.disconnect()
+            val connManager = getSystemService(CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                connManager?.bindProcessToNetwork(null)
+            }
+            android.util.Log.i("MainActivity", "Disconnected existing Wi-Fi station connection to free radio band for $ssid")
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Could not disconnect previous Wi-Fi: ${e.message}")
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

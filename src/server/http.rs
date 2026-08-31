@@ -12,7 +12,7 @@ use tower_http::cors::{Any, CorsLayer};
 use crate::discovery::{BleDiscovery, PairingManager, PeerDiscovery};
 use crate::scheduler::metrics::SchedulerTelemetry;
 use crate::server::api::{
-    cancel_transfer, confirm_pair_session, connect_to_remote_peer, create_pair_session, detect_transports,
+    cancel_all_active_transfers, cancel_transfer, confirm_pair_session, connect_to_remote_peer, create_pair_session, detect_transports,
     get_connection_bridges, get_device_info, get_discovered_peers, get_pairing_status, get_pending_pair_request,
     handle_incoming_pair_request, list_transfers, open_received_folder, open_windows_hotspot_settings, prepare_transfer,
     receive_transfer_chunk, respond_to_pair_request, start_benchmark_transfer, upload_and_transfer_files, verify_pair_pin, AppState,
@@ -107,6 +107,7 @@ impl Server {
             .route("/api/v1/transfers/send", post(upload_and_transfer_files))
             .route("/api/v1/transfers/prepare", post(prepare_transfer))
             .route("/api/v1/transfers/:id/cancel", post(cancel_transfer))
+            .route("/api/v1/transfers/cancel", post(cancel_all_active_transfers))
             .route("/api/v1/benchmark/start", post(start_benchmark_transfer))
             // WebSocket Telemetry Feed
             .route(

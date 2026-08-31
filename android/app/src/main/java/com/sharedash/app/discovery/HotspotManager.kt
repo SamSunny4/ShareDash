@@ -4,6 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.SupplicantState
 import android.net.wifi.WifiManager
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pGroup
@@ -36,6 +39,7 @@ class HotspotManager(private val context: Context) {
     private var p2pChannel: WifiP2pManager.Channel? = null
     private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var isP2pGroupActive = false
+    private var wasWifiConnected = false
 
     private val _hotspotState = MutableStateFlow<HotspotState>(HotspotState.Idle)
     val hotspotState: StateFlow<HotspotState> = _hotspotState.asStateFlow()
@@ -45,6 +49,75 @@ class HotspotManager(private val context: Context) {
             p2pChannel = p2pManager?.initialize(context.applicationContext, context.mainLooper, null)
         } catch (e: Exception) {
             Log.w(TAG, "Could not initialize WifiP2pManager: ${e.message}")
+        }
+    }
+
+    /**
+     * Check whether device is currently connected to an active Wi-Fi AP.
+     */
+    fun isWifiConnected(): Boolean {
+        try {
+            val connectivityManager = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (connectivityManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val activeNetwork = connectivityManager.activeNetwork ?: return false
+                val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+                return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+            }
+            @Suppress("DEPRECATION")
+            val info = wifiManager?.connectionInfo
+            return info != null && info.networkId != -1 && info.supplicantState == SupplicantState.COMPLETED
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking Wi-Fi connection state: ${e.message}")
+            return false
+        }
+    }
+
+    /**
+     * Disconnects active client Wi-Fi before initiating Wi-Fi Direct.
+     * Prevents Multi-Channel Concurrency (MCC) / Single Channel Concurrency (SCC) radio time-slicing
+     * and 2.4GHz downgrades, dedicating 100% of RF chains and MIMO antennas to 5GHz P2P throughput.
+     */
+    @SuppressLint("MissingPermission")
+    fun disconnectActiveWifi() {
+        try {
+            if (isWifiConnected()) {
+                wasWifiConnected = true
+                Log.i(TAG, "Active Wi-Fi station connection detected. Freeing radio: Disconnecting Wi-Fi before Wi-Fi Direct for dedicated 5GHz throughput...")
+                
+                // 1. Unbind any process network bindings
+                val connectivityManager = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    connectivityManager?.bindProcessToNetwork(null)
+                }
+
+                // 2. Disconnect Wi-Fi station mode
+                @Suppress("DEPRECATION")
+                val disconnected = wifiManager?.disconnect() ?: false
+                Log.i(TAG, "wifiManager.disconnect() called (result=$disconnected)")
+            } else {
+                wasWifiConnected = false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not disconnect active Wi-Fi: ${e.message}")
+        }
+    }
+
+    /**
+     * Restores the previous Wi-Fi connection if it was actively disconnected for Wi-Fi Direct.
+     */
+    @SuppressLint("MissingPermission")
+    fun restoreWifiIfNeeded() {
+        if (wasWifiConnected) {
+            wasWifiConnected = false
+            try {
+                Log.i(TAG, "Restoring Wi-Fi station connection after Wi-Fi Direct session...")
+                @Suppress("DEPRECATION")
+                wifiManager?.reconnect()
+                @Suppress("DEPRECATION")
+                wifiManager?.reassociate()
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not restore Wi-Fi connection: ${e.message}")
+            }
         }
     }
 
@@ -72,6 +145,9 @@ class HotspotManager(private val context: Context) {
 
         _hotspotState.value = HotspotState.Starting
         Log.i(TAG, "Initiating 5GHz Wi-Fi Direct Autonomous Group (DIRECT-SD)...")
+
+        // Free 5GHz radio band by disconnecting active client Wi-Fi first
+        disconnectActiveWifi()
 
         start5GHzP2pGroup(onSuccess)
     }
@@ -318,6 +394,8 @@ class HotspotManager(private val context: Context) {
             Log.i(TAG, "Hotspot / Wi-Fi Direct closed successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error closing hotspot: ${e.message}")
+        } finally {
+            restoreWifiIfNeeded()
         }
     }
 

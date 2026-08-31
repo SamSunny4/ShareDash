@@ -52,25 +52,16 @@ impl TerminalCli {
         loop {
             println!();
             println!("{BOLD_WHITE}Select Mode:{RESET}");
-            println!("  {YELLOW}[1]{RESET} 🚀 Auto-Connect Wizard (BLE → Wi-Fi → USB → Send)");
-            println!("  {YELLOW}[2]{RESET} 📡 Manual Scan & Send (classic)");
-            println!("  {YELLOW}[3]{RESET} 📊 Transfer History");
-            println!("  {YELLOW}[4]{RESET} 🔧 Network Info");
+            println!("  {YELLOW}[1]{RESET} 🚀 Auto-Connect Wizard (USB → BLE → Wi-Fi → Send)");
+            println!("  {YELLOW}[2]{RESET} 🔧 Network Info");
             println!("  {YELLOW}[q]{RESET} Quit");
 
             let choice = prompt("ShareDash ❯ ").await;
             match choice.as_str() {
-                "1" | "wizard" | "auto" => {
+                "1" | "wizard" | "auto" | "send" => {
                     self.run_wizard().await;
                 }
-                "2" | "scan" | "send" | "manual" => {
-                    self.handle_scan().await;
-                    self.manual_send_flow().await;
-                }
-                "3" | "status" | "history" => {
-                    self.handle_status().await;
-                }
-                "4" | "info" | "net" => {
+                "2" | "info" | "net" => {
                     self.handle_info().await;
                 }
                 "q" | "quit" | "exit" => {
@@ -83,7 +74,7 @@ impl TerminalCli {
                     print_wizard_banner();
                 }
                 _ => {
-                    println!("{RED}Unknown option.{RESET} Enter 1-4 or q.");
+                    println!("{RED}Unknown option.{RESET} Enter 1, 2, or q.");
                 }
             }
         }
@@ -439,10 +430,7 @@ impl TerminalCli {
 
         if devices.is_empty() {
             print_fail("No ShareDash devices found via Bluetooth or Wi-Fi.");
-            println!("  {YELLOW}Make sure Bluetooth or Wi-Fi is turned ON on both PC and Phone.{RESET}");
-            println!("  {GRAY}Falling back to manual scan...{RESET}");
-            self.handle_scan().await;
-            self.manual_send_flow().await;
+            println!("  {YELLOW}Make sure Bluetooth & Wi-Fi are turned ON on both PC and Phone, and the ShareDash app is open.{RESET}");
             return;
         }
 
@@ -612,8 +600,7 @@ impl TerminalCli {
 
         // ── Phase 4: 3-Way Handshake ─────────────────────────────────
         print_phase_header(4, "Wi-Fi 3-Way Handshake (Direct Channel)");
-        let mut wifi_ready = false;
-        if let Some(target_wifi_ip) = wifi_ip.as_ref() {
+        let wifi_ready = if let Some(target_wifi_ip) = wifi_ip.as_ref() {
             let syn_ok = self.http_probe(target_wifi_ip, 54321).await;
             print_step_result(&format!("SYN  → {}:54321", target_wifi_ip), syn_ok);
 
@@ -624,20 +611,20 @@ impl TerminalCli {
                 if synack_ok {
                     print_step_result("ACK  → Pair Confirmed", true);
                     println!("  🔒 Wi-Fi Direct / Hotspot Channel {GREEN}READY{RESET} (AES-256-GCM)");
-                    wifi_ready = true;
+                    true
                 } else {
-                    wifi_ready = false;
                     wifi_ip = None;
+                    false
                 }
             } else {
                 print_fail(&format!("Could not reach phone at {}:54321", target_wifi_ip));
-                wifi_ready = false;
                 wifi_ip = None;
+                false
             }
         } else {
             print_fail("Wi-Fi Direct channel not established.");
-            wifi_ready = false;
-        }
+            false
+        };
 
         self.send_file_multipath_loop(wifi_ready, wifi_ip, false, String::new(), 54325, false).await;
     }
@@ -1284,6 +1271,7 @@ impl TerminalCli {
     //  LEGACY / MANUAL MODE (kept for backwards compatibility)
     // ═══════════════════════════════════════════════════════════════
 
+    #[allow(dead_code)]
     pub async fn handle_scan(&self) {
         println!();
         println!("{BOLD_CYAN}🔍 Scanning for Nearby Devices & Active Links...{RESET}");
@@ -1380,6 +1368,7 @@ impl TerminalCli {
         }
     }
 
+    #[allow(dead_code)]
     async fn manual_send_flow(&self) {
         let file_path_str = prompt("Enter file path to send (or 'q' to cancel): ").await;
         if file_path_str == "q" || file_path_str.is_empty() {
@@ -1416,6 +1405,7 @@ impl TerminalCli {
             .await;
     }
 
+    #[allow(dead_code)]
     pub async fn handle_status(&self) {
         println!();
         println!("{BOLD_CYAN}📊 Active Transfers & Status{RESET}");

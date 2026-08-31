@@ -936,6 +936,18 @@ pub async fn cancel_transfer(
     }
 }
 
+pub async fn cancel_all_active_transfers(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let mut lock = state.active_transfers.lock();
+    let count = lock.len();
+    for (_, handle) in lock.drain() {
+        handle.cancel_flag.store(true, Ordering::SeqCst);
+    }
+    tracing::info!("Cancelled all active transfers (count={})", count);
+    Json(serde_json::json!({ "success": true, "cancelled_count": count, "message": "All transfers cancelled" }))
+}
+
 pub async fn upload_and_transfer_files(
     State(state): State<AppState>,
     mut multipart: axum::extract::Multipart,
