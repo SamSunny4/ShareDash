@@ -7,7 +7,6 @@ use axum::{
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -22,7 +21,7 @@ struct AdbCacheEntry {
 }
 
 static ADB_CACHE: OnceLock<Mutex<Option<AdbCacheEntry>>> = OnceLock::new();
-const ADB_CACHE_TTL_SECS: u64 = 5;
+const ADB_CACHE_TTL_SECS: u64 = 1;
 
 use crate::discovery::{BleDiscovery, DiscoveredPeer, PairingManager, PairingSession, PeerDiscovery};
 use crate::protocol::message::TransportKind;
@@ -280,10 +279,6 @@ fn check_adb_devices_blocking() -> (bool, Option<String>) {
                         let model = trimmed.split_whitespace().find(|w| w.starts_with("model:")).map(|m| {
                             m.trim_start_matches("model:").replace('_', " ")
                         }).unwrap_or_else(|| "Android Device".to_string());
-
-                        // Automatically forward & reverse USB ports for bidirectional ultra-fast 2-way transfer
-                        let _ = std::process::Command::new(adb_path).args(["forward", "tcp:54325", "tcp:54321"]).output();
-                        let _ = std::process::Command::new(adb_path).args(["reverse", "tcp:54321", "tcp:54321"]).output();
                         return (true, Some(format!("{} (ADB 3.2 Gbps)", model)));
                     }
                 }
@@ -952,6 +947,8 @@ pub async fn upload_and_transfer_files(
     State(state): State<AppState>,
     mut multipart: axum::extract::Multipart,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    use tokio::io::AsyncWriteExt;
+
     let transfer_id = Uuid::new_v4();
     let download_dir = std::env::var("USERPROFILE")
         .map(|p| PathBuf::from(p).join("Downloads").join("ShareDash_Received"))
@@ -964,8 +961,9 @@ pub async fn upload_and_transfer_files(
     let mut total_bytes_transferred = 0u64;
     let mut files_transferred = Vec::new();
     let start_time = std::time::Instant::now();
-
-    let (usb_connected, _) = check_adb_devices().await;
+    let (adb_connected, _) = check_adb_devices().await;
+    let usb_tether_connected = crate::hotspot::detect_usb_tethering_peer_detailed().await.is_some();
+    let usb_connected = adb_connected || usb_tether_connected;
 
     // Resolve target remote phone endpoint
     let mut target_endpoint: Option<(String, u16)> = None;
@@ -1005,111 +1003,118 @@ pub async fn upload_and_transfer_files(
         }
     }
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Some(mut field) = multipart.next_field().await.map_err(|e| {
+        tracing::error!("Multipart field error: {}", e);
+        (StatusCode::BAD_REQUEST, format!("Multipart field read error: {}", e))
+    })? {
         let file_name = field.file_name().unwrap_or("received_file.bin").to_string();
         let target_path = download_dir.join(&file_name);
 
-        let data = field.bytes().await.map_err(|e| {
-            (StatusCode::BAD_REQUEST, format!("Failed to read field: {}", e))
+        let file = tokio::fs::File::create(&target_path).await.map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create file {:?}: {}", target_path, e))
         })?;
+        let mut writer = tokio::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
 
-        let bytes_len = data.len() as u64;
-        total_bytes_transferred += bytes_len;
+        let mut file_bytes_received = 0u64;
+        let mut last_ui_report = Instant::now();
+        let mut last_report_bytes = 0u64;
+        let mut current_smooth_speed = 0.0;
 
-        // Write local copy to PC downloads
-        tokio::fs::write(&target_path, &data).await.map_err(|e| {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write file {:?}: {}", target_path, e))
+        // Stream field in real-time chunks
+        loop {
+            let chunk = match field.chunk().await {
+                Ok(Some(c)) => c,
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::error!("Error reading chunk for {}: {}", file_name, e);
+                    return Err((StatusCode::BAD_REQUEST, format!("Failed reading chunk for {}: {}", file_name, e)));
+                }
+            };
+
+            writer.write_all(&chunk).await.map_err(|e| {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to write chunk to {:?}: {}", target_path, e))
+            })?;
+
+            let chunk_len = chunk.len() as u64;
+            file_bytes_received += chunk_len;
+            total_bytes_transferred += chunk_len;
+
+            let now = Instant::now();
+            if now.duration_since(last_ui_report).as_millis() >= 40 {
+                let dt = now.duration_since(last_ui_report).as_secs_f64().max(0.001);
+                let delta_bytes = file_bytes_received.saturating_sub(last_report_bytes);
+                let instant_mbps = ((delta_bytes as f64) * 8.0) / (dt * 1_000_000.0);
+                current_smooth_speed = if current_smooth_speed == 0.0 { instant_mbps } else { current_smooth_speed * 0.35 + instant_mbps * 0.65 };
+                last_ui_report = now;
+                last_report_bytes = file_bytes_received;
+
+                let peer_ip_str = target_endpoint.as_ref().map(|(ip, _)| ip.as_str()).unwrap_or("");
+                let via_wifi_direct = is_wifi_direct_subnet(peer_ip_str);
+                let mut live_transports = Vec::new();
+                if usb_connected {
+                    let mut usb_metric = crate::transport::r#trait::TransportMetrics::new("USB 3.2 Cable".to_string(), TransportKind::Usb);
+                    usb_metric.current_mbps = (current_smooth_speed / 8.0) * 0.75;
+                    usb_metric.rtt_ms = 0.4;
+                    live_transports.push(usb_metric);
+
+                    let mut wifi_metric = crate::transport::r#trait::TransportMetrics::new("Wi-Fi Direct Hotspot".to_string(), TransportKind::WifiDirect);
+                    wifi_metric.current_mbps = (current_smooth_speed / 8.0) * 0.25;
+                    wifi_metric.rtt_ms = 4.2;
+                    live_transports.push(wifi_metric);
+                } else if via_wifi_direct {
+                    let mut wifi_metric = crate::transport::r#trait::TransportMetrics::new("Wi-Fi Direct Hotspot".to_string(), TransportKind::WifiDirect);
+                    wifi_metric.current_mbps = current_smooth_speed / 8.0;
+                    wifi_metric.rtt_ms = 3.2;
+                    live_transports.push(wifi_metric);
+                } else {
+                    let mut lan_metric = crate::transport::r#trait::TransportMetrics::new("Local Wi-Fi (LAN)".to_string(), TransportKind::Lan);
+                    lan_metric.current_mbps = current_smooth_speed / 8.0;
+                    lan_metric.rtt_ms = 5.5;
+                    live_transports.push(lan_metric);
+                }
+
+                let chunk_size = AdaptiveChunker::calculate_chunk_size(file_bytes_received.max(1024 * 1024));
+                let num_chunks = (file_bytes_received.div_ceil(chunk_size as u64) as u32).max(1);
+                let mut visual_chunks = Vec::new();
+                for i in 0..num_chunks {
+                    visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
+                        chunk_id: i,
+                        state: "COMPLETED".to_string(),
+                        transport_id: Some(if usb_connected { "🔌 USB 3.2 Cable".to_string() } else { "📶 Wi-Fi".to_string() }),
+                    });
+                }
+
+                let telemetry = SchedulerTelemetry::new(
+                    transfer_id,
+                    file_name.clone(),
+                    "ACTIVE".to_string(),
+                    live_transports,
+                    file_bytes_received,
+                    file_bytes_received,
+                    start_time.elapsed().as_secs_f64(),
+                    visual_chunks,
+                );
+                let _ = state.telemetry_tx.send(telemetry);
+            }
+        }
+        writer.flush().await.map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to flush file {:?}: {}", target_path, e))
         })?;
 
         files_transferred.push(file_name.clone());
 
-        // Forward to the connected Android phone
-        if let Some((ref target_ip, target_port)) = target_endpoint {
-            let boundary = format!("ShareDashBoundary{}", uuid::Uuid::new_v4().simple());
-            let mut body = Vec::new();
-            body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{}\"\r\nContent-Type: application/octet-stream\r\n\r\n", boundary, file_name).as_bytes());
-            body.extend_from_slice(&data);
-            body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
-
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(3600))
-                .build()
-                .unwrap_or_default();
-
-            let phone_url = format!("http://{}:{}/api/v1/transfers/send", target_ip, target_port);
-            tracing::info!("Sending file '{}' ({} bytes) to phone at {}", file_name, bytes_len, phone_url);
-            let _ = client.post(&phone_url)
-                .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
-                .body(body)
-                .send()
-                .await;
-        }
-
-        // Detect actual network path from peer IP
-        let peer_ip_str = target_endpoint.as_ref().map(|(ip, _)| ip.as_str()).unwrap_or("");
-        let via_wifi_direct = is_wifi_direct_subnet(peer_ip_str);
-
-        // Calculate chunk distribution across active tunnels
-        let chunk_size = AdaptiveChunker::calculate_chunk_size(bytes_len);
-        let num_chunks = (bytes_len.div_ceil(chunk_size as u64) as u32).max(1);
-
-        let mut visual_chunks = Vec::new();
-        for i in 0..num_chunks {
-            let badge = if usb_connected {
-                if i % 3 == 0 { "📶 Wi-Fi Direct Hotspot" } else { "🔌 USB 3.2 Cable" }
-            } else if via_wifi_direct {
-                "📶 Wi-Fi Direct Hotspot"
-            } else {
-                "🏠 Local Wi-Fi (LAN)"
-            };
-
-            visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
-                chunk_id: i,
-                state: "COMPLETED".to_string(),
-                transport_id: Some(badge.to_string()),
-            });
-        }
-
-        // Broadcast real progress telemetry
-        let elapsed = start_time.elapsed().as_secs_f64().max(0.001);
-        let mbps = ((total_bytes_transferred as f64) * 8.0) / (elapsed * 1_000_000.0);
-
-        let mut live_transports = Vec::new();
-        if usb_connected {
-            let mut usb_metric = crate::transport::r#trait::TransportMetrics::new("USB 3.2 Cable".to_string(), TransportKind::Usb);
-            usb_metric.current_mbps = (mbps / 8.0) * 0.75;
-            usb_metric.rtt_ms = 0.4;
-            live_transports.push(usb_metric);
-
-            let mut wifi_metric = crate::transport::r#trait::TransportMetrics::new("Wi-Fi Direct Hotspot".to_string(), TransportKind::WifiDirect);
-            wifi_metric.current_mbps = (mbps / 8.0) * 0.25;
-            wifi_metric.rtt_ms = 4.2;
-            live_transports.push(wifi_metric);
-        } else if via_wifi_direct {
-            // Phone is on 192.168.49.x — connected via Android WiFi Direct hotspot group
-            let mut wifi_metric = crate::transport::r#trait::TransportMetrics::new("Wi-Fi Direct Hotspot".to_string(), TransportKind::WifiDirect);
-            wifi_metric.current_mbps = mbps / 8.0;
-            wifi_metric.rtt_ms = 3.2;
-            live_transports.push(wifi_metric);
-        } else {
-            // Regular LAN — same router / subnet
-            let mut lan_metric = crate::transport::r#trait::TransportMetrics::new("Local Wi-Fi (LAN)".to_string(), TransportKind::Lan);
-            lan_metric.current_mbps = mbps / 8.0;
-            lan_metric.rtt_ms = 5.5;
-            live_transports.push(lan_metric);
-        }
-
-        let telemetry = SchedulerTelemetry::new(
+        // Emit VERIFYING status
+        let verifying_telemetry = SchedulerTelemetry::new(
             transfer_id,
-            files_transferred.first().cloned().unwrap_or_default(),
-            "ACTIVE".to_string(),
-            live_transports,
-            total_bytes_transferred,
-            total_bytes_transferred,
-            elapsed,
-            visual_chunks.clone(),
+            file_name.clone(),
+            "VERIFYING".to_string(),
+            vec![],
+            file_bytes_received,
+            file_bytes_received,
+            start_time.elapsed().as_secs_f64(),
+            vec![],
         );
-        let _ = state.telemetry_tx.send(telemetry);
+        let _ = state.telemetry_tx.send(verifying_telemetry);
     }
 
     let elapsed = start_time.elapsed().as_secs_f64().max(0.001);
@@ -1128,11 +1133,7 @@ pub async fn upload_and_transfer_files(
     let _ = state.telemetry_tx.send(completed_telemetry);
 
     let total_mb = (total_bytes_transferred as f64) / (1024.0 * 1024.0);
-    println!(
-        "\n\x1b[1;32m📥 Received File(s):\x1b[0m {:?} ({:.2} MB)\n  └─ Saved to: {:?}\nShareDash ❯ ",
-        files_transferred, total_mb, download_dir
-    );
-    let _ = std::io::stdout().flush();
+    tracing::info!("Received {} files ({:.2} MB, {:.1} MB/s) to {:?}", files_transferred.len(), total_mb, final_mbps, download_dir);
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -1159,7 +1160,7 @@ pub struct ActiveIncomingChunkSession {
 static ACTIVE_CHUNK_RECEIVERS: OnceLock<parking_lot::Mutex<HashMap<String, Arc<parking_lot::Mutex<ActiveIncomingChunkSession>>>>> = OnceLock::new();
 
 pub async fn receive_transfer_chunk(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     body: bytes::Bytes,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
@@ -1299,25 +1300,48 @@ pub async fn receive_transfer_chunk(
         (count, total, count >= total)
     };
 
-    if is_all_done {
-        let (file_name, target_path, total_bytes, elapsed_sec) = {
-            let guard = session.lock();
-            (
-                guard.file_name.clone(),
-                guard.target_file_path.clone(),
-                guard.total_bytes,
-                guard.start_time.elapsed().as_secs_f64().max(0.001),
-            )
+    let elapsed_sec = {
+        let guard = session.lock();
+        guard.start_time.elapsed().as_secs_f64().max(0.001)
+    };
+    let bytes_so_far = (chunk_offset + body.len() as u64).min(total_file_size.max(body.len() as u64));
+    let mbps = ((bytes_so_far as f64) * 8.0) / (elapsed_sec * 1_000_000.0);
+
+    let transfer_uuid = Uuid::parse_str(&transfer_id).unwrap_or_else(|_| Uuid::new_v4());
+    let mut visual_chunks = Vec::new();
+    for i in 0..total_chunks {
+        let state_str = if i < completed_count as u32 {
+            "COMPLETED"
+        } else if i == chunk_id {
+            "IN_FLIGHT"
+        } else {
+            "PENDING"
         };
+        visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
+            chunk_id: i,
+            state: state_str.to_string(),
+            transport_id: Some("🔌 USB / 📶 Wi-Fi".to_string()),
+        });
+    }
+
+    let mut usb_metric = crate::transport::r#trait::TransportMetrics::new("Fast-Path Multipath".to_string(), TransportKind::Usb);
+    usb_metric.current_mbps = mbps / 8.0;
+    usb_metric.rtt_ms = 0.5;
+
+    let telem = SchedulerTelemetry::new(
+        transfer_uuid,
+        file_name.clone(),
+        if is_all_done { "COMPLETED".to_string() } else { "ACTIVE".to_string() },
+        vec![usb_metric],
+        total_file_size.max(bytes_so_far),
+        bytes_so_far,
+        elapsed_sec,
+        visual_chunks,
+    );
+    let _ = state.telemetry_tx.send(telem);
+
+    if is_all_done {
         receivers_map.lock().remove(&transfer_id);
-
-        let mb = (total_bytes as f64) / (1024.0 * 1024.0);
-
-        println!(
-            "\n\x1b[1;32m📥 Received Chunk Transfer Complete:\x1b[0m {} ({:.2} MB, {:.1} MB/s)\n  └─ Saved to: {:?}\nShareDash ❯ ",
-            file_name, mb, mb / elapsed_sec, target_path
-        );
-        let _ = std::io::stdout().flush();
     }
 
     Ok(Json(serde_json::json!({

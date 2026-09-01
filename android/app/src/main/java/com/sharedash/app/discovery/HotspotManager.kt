@@ -146,10 +146,47 @@ class HotspotManager(private val context: Context) {
         _hotspotState.value = HotspotState.Starting
         Log.i(TAG, "Initiating 5GHz Wi-Fi Direct Autonomous Group (DIRECT-SD)...")
 
-        // Free 5GHz radio band by disconnecting active client Wi-Fi first
+        // 1. Free 5GHz radio band by disconnecting active client Wi-Fi first
         disconnectActiveWifi()
 
-        start5GHzP2pGroup(onSuccess)
+        // 2. Force-off any existing or lingering Wi-Fi Direct group / Hotspot state
+        forceStopPreviousDirectGroup {
+            // 3. Start fresh 5GHz P2P Group
+            start5GHzP2pGroup(onSuccess)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun forceStopPreviousDirectGroup(onCleaned: () -> Unit) {
+        val mgr = p2pManager
+        val channel = p2pChannel ?: try {
+            mgr?.initialize(context.applicationContext, context.mainLooper, null)?.also { p2pChannel = it }
+        } catch (_: Exception) { null }
+
+        try {
+            hotspotReservation?.close()
+            hotspotReservation = null
+        } catch (_: Exception) {}
+
+        if (mgr != null && channel != null) {
+            try {
+                mgr.cancelConnect(channel, null)
+                mgr.removeGroup(channel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        Log.i(TAG, "Previous Wi-Fi Direct group removed successfully.")
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ onCleaned() }, 200)
+                    }
+                    override fun onFailure(reason: Int) {
+                        Log.w(TAG, "No previous group or remove failed (code $reason). Proceeding.")
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ onCleaned() }, 200)
+                    }
+                })
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during forceStopPreviousDirectGroup: ${e.message}")
+            }
+        }
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ onCleaned() }, 200)
     }
 
     @SuppressLint("MissingPermission")
@@ -170,21 +207,14 @@ class HotspotManager(private val context: Context) {
             return
         }
 
-        // Clean up any stale P2P groups first
-        mgr.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                create5GHzP2pGroupActual(mgr, channel, onSuccess)
-            }
-            override fun onFailure(reason: Int) {
-                create5GHzP2pGroupActual(mgr, channel, onSuccess)
-            }
-        })
+        create5GHzP2pGroupActual(mgr, channel, false, onSuccess)
     }
 
     @SuppressLint("MissingPermission")
     private fun create5GHzP2pGroupActual(
         mgr: WifiP2pManager,
         channel: WifiP2pManager.Channel,
+        isRetry: Boolean = false,
         onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)?
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -219,8 +249,18 @@ class HotspotManager(private val context: Context) {
                     }
 
                     override fun onFailure(reason: Int) {
-                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason). Retrying with Auto-Band P2P...")
-                        createAutoP2pGroup(mgr, channel, onSuccess)
+                        Log.w(TAG, "5GHz Wi-Fi Direct createGroup failed (code $reason, isRetry=$isRetry).")
+                        if (!isRetry) {
+                            Log.i(TAG, "Forcing Wi-Fi Direct teardown and retrying 5GHz createGroup...")
+                            mgr.cancelConnect(channel, null)
+                            mgr.removeGroup(channel, null)
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                create5GHzP2pGroupActual(mgr, channel, true, onSuccess)
+                            }, 350)
+                        } else {
+                            Log.w(TAG, "5GHz retry failed, falling back to Auto-Band P2P...")
+                            createAutoP2pGroup(mgr, channel, onSuccess)
+                        }
                     }
                 })
                 return

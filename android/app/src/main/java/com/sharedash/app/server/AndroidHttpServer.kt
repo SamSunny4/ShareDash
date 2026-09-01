@@ -87,6 +87,10 @@ class AndroidHttpServer(
         releaseHighPerfLocksIfIdle()
     }
 
+    fun resetCancellation() {
+        isCancelled.set(false)
+    }
+
     private fun acquireHighPerfLocks() {
         try {
             if (wakeLock == null) {
@@ -173,7 +177,6 @@ class AndroidHttpServer(
             val output = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)
 
             while (true) {
-                if (isCancelled.get()) break
                 // Read HTTP request line
                 val firstLine = readLine(input) ?: break
                 val parts = firstLine.split(" ")
@@ -498,6 +501,7 @@ class AndroidHttpServer(
         var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
+        isCancelled.set(false)
         val sessionKey = if (transferId.isNotBlank()) transferId else fileName
         val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
             acquireHighPerfLocks()
@@ -527,20 +531,10 @@ class AndroidHttpServer(
                 session.channel.write(byteBuffer, currentOffset)
                 currentOffset += read
                 remaining -= read
-
-                val currentStreamed = session.totalBytesStreamed.addAndGet(read.toLong())
-                val now = System.currentTimeMillis()
-                val lastTime = session.lastProgressReportTime.get()
-                if (now - lastTime >= 35L) {
-                    if (session.lastProgressReportTime.compareAndSet(lastTime, now)) {
-                        val deltaSec = (now - lastTime).coerceAtLeast(1) / 1000.0
-                        val deltaBytes = currentStreamed - session.lastReportedBytes.getAndSet(currentStreamed)
-                        val speedMbps = ((deltaBytes * 8.0) / 1_000_000.0) / deltaSec
-                        val totalTarget = if (session.totalBytes > 0) session.totalBytes else currentStreamed
-                        onTransferProgress(session.fileName, currentStreamed, totalTarget, speedMbps)
-                    }
-                }
             }
+            // Update cumulative bytes ONCE after the entire chunk is streamed (not per-read)
+            val bytesThisChunk = (currentOffset - chunkOffset)
+            session.totalBytesStreamed.addAndGet(bytesThisChunk)
             session.receivedChunks.add(chunkId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed streaming chunk #$chunkId at offset $chunkOffset: ${e.message}")
@@ -604,7 +598,7 @@ class AndroidHttpServer(
         output: BufferedOutputStream,
         isKeepAlive: Boolean = true
     ) {
-        if (isCancelled.get()) return
+        isCancelled.set(false)
 
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),

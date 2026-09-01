@@ -115,6 +115,7 @@ impl Server {
                 get(move |ws| ws_telemetry_handler(ws, ws_telemetry_tx.subscribe())),
             )
             .layer(cors)
+            .layer(axum::extract::DefaultBodyLimit::disable())
             .with_state(state.clone());
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));

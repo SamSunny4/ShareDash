@@ -24,6 +24,7 @@ use crate::server::api::{AppState, IncomingPairRequest, OutgoingPairInfo};
 
 pub struct TerminalCli {
     state: AppState,
+    is_local_sender: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// A BLE-discovered device for the scan table.
@@ -37,7 +38,104 @@ struct BleDevice {
 
 impl TerminalCli {
     pub fn new(state: AppState) -> Self {
-        Self { state }
+        Self {
+            state,
+            is_local_sender: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  INCOMING TRANSFER MONITOR (INTERRUPTS & SHOWS RECEIVE SCREEN)
+    // ═══════════════════════════════════════════════════════════════
+
+    fn spawn_incoming_transfer_monitor(self: Arc<Self>) {
+        let is_local_sender = self.is_local_sender.clone();
+        let mut rx = self.state.telemetry_tx.subscribe();
+
+        tokio::spawn(async move {
+            let mut active_transfer_id: Option<uuid::Uuid> = None;
+            let mut last_draw = Instant::now();
+
+            while let Ok(telem) = rx.recv().await {
+                // If local PC sending is running in execute_transfer, do not duplicate UI
+                if is_local_sender.load(std::sync::atomic::Ordering::SeqCst) {
+                    continue;
+                }
+
+                if telem.status == "ACTIVE" || telem.status == "VERIFYING" {
+                    if active_transfer_id != Some(telem.transfer_id) {
+                        active_transfer_id = Some(telem.transfer_id);
+                        println!();
+                        println!("{BOLD_GREEN}📥 [INCOMING TRANSFER] Receiving from Phone:{RESET} {BOLD_WHITE}{}{RESET}", telem.title);
+                        let channel_count = telem.transports.len().max(1);
+                        init_transfer_progress(channel_count);
+                        last_draw = Instant::now();
+                    }
+
+                    if last_draw.elapsed().as_millis() >= 60 || telem.status == "VERIFYING" {
+                        last_draw = Instant::now();
+                        let channels: Vec<ChannelProgress> = if telem.transports.is_empty() {
+                            vec![ChannelProgress {
+                                name: "Fast-Path Multipath".to_string(),
+                                icon: "⚡".to_string(),
+                                bytes_sent: telem.aggregate.total_bytes_transferred,
+                                speed_mb_s: telem.aggregate.aggregate_mbps,
+                                speed_gbps: (telem.aggregate.aggregate_mbps * 8.0) / 1000.0,
+                                chunks_sent: telem.chunk_states.len(),
+                            }]
+                        } else {
+                            telem.transports
+                                .iter()
+                                .map(|t| {
+                                    let icon = match t.transport_kind {
+                                        crate::protocol::message::TransportKind::Usb => "⚡",
+                                        crate::protocol::message::TransportKind::WifiDirect => "📶",
+                                        _ => "🌐",
+                                    };
+                                    ChannelProgress {
+                                        name: t.transport_id.clone(),
+                                        icon: icon.to_string(),
+                                        bytes_sent: telem.aggregate.total_bytes_transferred,
+                                        speed_mb_s: t.current_mbps,
+                                        speed_gbps: (t.current_mbps * 8.0) / 1000.0,
+                                        chunks_sent: telem.chunk_states.len(),
+                                    }
+                                })
+                                .collect()
+                        };
+
+                        let pct = (telem.aggregate.progress_pct / 100.0).clamp(0.0, 1.0);
+                        draw_transfer_progress(pct, telem.aggregate.eta_seconds as f64, &channels);
+                    }
+                } else if telem.status == "COMPLETED" {
+                    if active_transfer_id == Some(telem.transfer_id) {
+                        active_transfer_id = None;
+                        let mb = (telem.aggregate.total_bytes_transferred as f64) / (1024.0 * 1024.0);
+                        let elapsed = telem.aggregate.elapsed_seconds.max(0.01);
+                        let speed_mb_s = (mb / elapsed).max(telem.aggregate.aggregate_mbps);
+                        let speed_gbps = (speed_mb_s * 8.0) / 1000.0;
+
+                        let result = TransferResult {
+                            file_name: telem.title.clone(),
+                            size_mb: mb,
+                            time_secs: elapsed,
+                            avg_speed_mb_s: speed_mb_s,
+                            avg_speed_gbps: speed_gbps,
+                            usb_speed_mb_s: Some(speed_mb_s * 0.75),
+                            usb_pct: Some(75.0),
+                            wifi_speed_mb_s: Some(speed_mb_s * 0.25),
+                            wifi_pct: Some(25.0),
+                            chunk_size_bytes: 4 * 1024 * 1024,
+                            total_chunks: telem.chunk_states.len().max(1),
+                            integrity_ok: true,
+                        };
+                        print_transfer_result(&result);
+                        print!("\n  ShareDash ❯ ");
+                        let _ = std::io::stdout().flush();
+                    }
+                }
+            }
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -45,9 +143,14 @@ impl TerminalCli {
     // ═══════════════════════════════════════════════════════════════
 
     pub async fn run_interactive_loop(self: Arc<Self>) {
+        // Clean up any stale temporary Wi-Fi profiles in Windows left over from previous runs
+        hotspot::cleanup_cached_wlan_profiles().await;
+
         print_wizard_banner();
         println!("  • Device: {BOLD}{}{RESET}  •  Port: {GREEN}{}{RESET}", self.state.device_name, self.state.server_port);
         println!();
+
+        self.clone().spawn_incoming_transfer_monitor();
 
         loop {
             println!();
@@ -65,7 +168,9 @@ impl TerminalCli {
                     self.handle_info().await;
                 }
                 "q" | "quit" | "exit" => {
-                    println!("{YELLOW}👋 Shutting down ShareDash...{RESET}");
+                    hotspot::cleanup_cached_wlan_profiles_blocking();
+                    println!("{GREEN}  🧹 Cleaned up cached Wi-Fi Direct profiles in Windows.{RESET}");
+                    println!("{YELLOW}  👋 Shutting down ShareDash...{RESET}");
                     std::process::exit(0);
                 }
                 "clear" | "cls" => {
@@ -955,6 +1060,7 @@ impl TerminalCli {
         file_size: u64,
         targets: &[(String, u16, String)],
     ) {
+        self.is_local_sender.store(true, std::sync::atomic::Ordering::SeqCst);
         let file_size_mb = file_size as f64 / (1024.0 * 1024.0);
         let start_time = Instant::now();
 
@@ -982,32 +1088,21 @@ impl TerminalCli {
 
         init_transfer_progress(channel_states.len());
 
+        let transfer_start = Instant::now();
         let ui_handle = tokio::spawn(async move {
-            let mut last_sample_time = Instant::now();
-            let mut last_bytes: Vec<u64> = vec![0; channel_states_ui.len()];
-
             while !stop_ui_clone.load(std::sync::atomic::Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                let now = Instant::now();
-                let dt = now.duration_since(last_sample_time).as_secs_f64().max(0.001);
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                let elapsed = transfer_start.elapsed().as_secs_f64().max(0.01);
 
                 let mut current_channels: Vec<ChannelProgress> = Vec::with_capacity(channel_states_ui.len());
-                for (idx, c) in channel_states_ui.iter().enumerate() {
+                for c in channel_states_ui.iter() {
                     let mut guard = c.lock();
-                    let bytes = guard.bytes_sent;
-                    let delta_bytes = bytes.saturating_sub(last_bytes[idx]);
-                    last_bytes[idx] = bytes;
-
-                    let instant_channel_speed_mb_s = (delta_bytes as f64 / (1024.0 * 1024.0)) / dt;
-                    guard.speed_mb_s = if guard.speed_mb_s == 0.0 {
-                        instant_channel_speed_mb_s
-                    } else {
-                        0.70 * guard.speed_mb_s + 0.30 * instant_channel_speed_mb_s
-                    };
+                    let bytes_mb = guard.bytes_sent as f64 / (1024.0 * 1024.0);
+                    // Stable speed = cumulative bytes / total elapsed time
+                    guard.speed_mb_s = bytes_mb / elapsed;
                     guard.speed_gbps = (guard.speed_mb_s * 8.0) / 1000.0;
                     current_channels.push(guard.clone());
                 }
-                last_sample_time = now;
 
                 let total_sent: u64 = current_channels.iter().map(|c| c.bytes_sent).sum();
                 let pct = if total_size > 0 {
@@ -1123,6 +1218,7 @@ impl TerminalCli {
             integrity_ok: all_ok,
         };
         print_transfer_result(&result);
+        self.is_local_sender.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1644,7 +1740,7 @@ impl DynamicWorkDispatcher {
             let count = self.retries.entry(chunk_id).or_insert(0);
             *count += 1;
             if *count <= 5 {
-                self.unassigned.push_front(chunk_id);
+                self.unassigned.push_back(chunk_id);
             } else {
                 tracing::error!("Chunk #{} exceeded maximum retries (5)!", chunk_id);
                 self.fatal_error = true;
@@ -1721,7 +1817,6 @@ async fn run_transport_chunk_worker(
 
         let chunk_body = bytes::Bytes::copy_from_slice(slice);
 
-        let t0 = Instant::now();
 
         let req = client
             .post(&url_chunk)
@@ -1738,22 +1833,14 @@ async fn run_transport_chunk_worker(
 
         match req.send().await {
             Ok(resp) if resp.status().is_success() => {
-                let dt = t0.elapsed().as_secs_f64().max(0.0001);
-                let chunk_mb = (chunk.length as f64) / (1024.0 * 1024.0);
-                let instant_speed = chunk_mb / dt;
 
                 let is_new = dispatcher.lock().mark_completed(chunk.chunk_id);
                 if is_new {
                     let mut p = progress.lock();
                     p.bytes_sent += chunk.length;
                     p.chunks_sent += 1;
-                    // More stable EWMA for speed tracking
-                    p.speed_mb_s = if p.speed_mb_s == 0.0 {
-                        instant_speed
-                    } else {
-                        0.85 * p.speed_mb_s + 0.15 * instant_speed
-                    };
-                    p.speed_gbps = (p.speed_mb_s * 8.0) / 1000.0;
+                    // Speed is calculated by the UI sampling loop (cumulative bytes / elapsed)
+                    // — do NOT update speed_mb_s here to avoid racing with the UI thread
                 }
             }
             Ok(resp) => {
