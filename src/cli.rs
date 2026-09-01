@@ -906,7 +906,7 @@ impl TerminalCli {
         // Query remote PC Wi-Fi capabilities over USB
         let remote_caps = self.query_phone_wifi_caps_http(&usb_target_ip, usb_target_port).await;
         let pc_caps = hotspot::detect_pc_wifi_caps().await;
-        let mut pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
+        let pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
 
         println!("  Hardware Overview:");
         print_tree_item(
@@ -924,30 +924,6 @@ impl TerminalCli {
             print_tree_item("Remote PC Wi-Fi", "Wi-Fi 6 (802.11ax) (PHY: 1200 Mbps)", true);
         }
 
-        // If Local PC Wi-Fi is OFF, prompt or auto-enable
-        if !pc_wifi_on {
-            println!();
-            println!("  ⚠️  {YELLOW}{BOLD}Local PC Wi-Fi is currently turned OFF.{RESET}");
-            println!("     Enabling Wi-Fi adapter so Windows can force-start 5GHz Hotspot without internet...");
-            hotspot::open_windows_wifi_settings();
-            hotspot::ensure_pc_wifi_adapter_enabled().await;
-            let enabled = with_spinner("Waiting for Wi-Fi radio to be enabled...", async {
-                for _ in 0..15 {
-                    if hotspot::check_pc_wifi_adapter_enabled().await {
-                        return true;
-                    }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                false
-            }).await;
-            if enabled {
-                print_ok("Local PC Wi-Fi adapter is now ON and active!");
-                pc_wifi_on = true;
-            } else {
-                print_warn("Wi-Fi adapter was not enabled via GUI; script will force-activate it during hotspot creation.");
-            }
-        }
-
         // ═══════════════════════════════════════════════════════════════
         //  STEP 3: OPTIMAL HOTSPOT HOST SELECTION (AUTOMATIC DECISION)
         // ═══════════════════════════════════════════════════════════════
@@ -955,7 +931,7 @@ impl TerminalCli {
         let remote_caps_ref = remote_caps.as_ref().unwrap_or(&pc_caps);
         let (_best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, remote_caps_ref).await;
 
-        println!("  Decision: {BOLD}{}{RESET}", host_reason);
+        println!("  {}", host_reason);
 
         // Deterministic host decision: compare PHY rates, then device_name as tie-breaker
         let i_am_host = if pc_caps.max_phy_rate_mbps != remote_caps_ref.max_phy_rate_mbps {
@@ -965,9 +941,9 @@ impl TerminalCli {
         };
 
         if i_am_host {
-            print_ok("Local PC selected as Primary 5GHz Hotspot Host");
+            print_ok("PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
         } else {
-            print_ok("Remote PC selected as Primary 5GHz Hotspot Host");
+            print_ok("Remote PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -979,26 +955,22 @@ impl TerminalCli {
         let mut wifi_ip: Option<String> = None;
 
         if i_am_host {
-            println!("  🚀 Starting 5GHz Hotspot on this PC (running offline force-activation script)...");
-            let script_path = hotspot::write_hotspot_script_to_disk(&ssid, &password).ok();
+            println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
             let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
 
             match hotspot_res {
                 Ok(info) => {
-                    print_ok(&format!("5GHz Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
-                    if let Some(ref path) = script_path {
-                        println!("  💾 Hotspot Script: {GRAY}{:?}{RESET}", path);
-                    }
+                    print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
 
-                    with_spinner("Initializing 5GHz Wi-Fi Radio & DHCP broadcast...", async {
+                    with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                     }).await;
 
                     println!("  Sending hotspot credentials to remote PC through USB...");
                     let sent = self.send_wifi_connect_over_usb(&usb_target_ip, usb_target_port, &info.ssid, &info.password).await;
                     if sent {
-                        print_ok("Remote PC received credentials via USB and connecting to 5GHz Wi-Fi (1200 Mbps)...");
-                        let client_ip = with_spinner("Waiting for remote PC on 5GHz Wi-Fi subnet...", async {
+                        print_ok("Remote PC received credentials via USB and connecting to 5GHz Hotspot (1200 Mbps)...");
+                        let client_ip = with_spinner("Waiting for remote PC on 5GHz Wi-Fi...", async {
                             for _ in 0..30 {
                                 if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
                                     return Some(ip);
@@ -1012,25 +984,25 @@ impl TerminalCli {
                             if self.http_probe(&ip, 54321).await {
                                 let synack = self.pair_handshake_target(&ip, 54321).await;
                                 if synack {
-                                    print_ok(&format!("Remote PC connected & paired on 5GHz Wi-Fi (1200 Mbps Link Speed)! IP: {}", ip));
+                                    print_ok(&format!("Remote PC connected & paired on 5GHz Hotspot (1200 Mbps Link Speed)! IP: {}", ip));
                                     wifi_ip = Some(ip);
                                     wifi_ready = true;
                                 }
                             }
                         } else {
-                            print_warn("Remote PC did not associate to 5GHz Wi-Fi within timeout. Continuing with High-Speed USB...");
+                            print_warn("Remote PC did not associate to 5GHz Wi-Fi. Continuing with Turbo USB...");
                         }
                     } else {
                         print_warn("Could not send credentials to remote PC via USB.");
                     }
                 }
                 Err(e) => {
-                    print_warn(&format!("Local Hotspot notice: {}. Requesting remote PC to host hotspot...", e));
+                    print_warn(&format!("PC Hotspot creation: {}. Trying remote PC hotspot...", e));
                     if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_target_ip, usb_target_port).await {
-                        print_ok(&format!("Remote PC 5GHz Hotspot Started via USB: {}", p_ssid));
-                        println!("  Connecting local Wi-Fi to remote PC 5GHz hotspot (1200 Mbps)...");
+                        print_ok(&format!("Remote PC Hotspot started via USB: {}", p_ssid));
+                        println!("  Connecting local PC to remote PC 5GHz hotspot (1200 Mbps)...");
                         let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                        let detected_ip = with_spinner("Waiting for local Wi-Fi to acquire IP on 5GHz network...", async {
+                        let detected_ip = with_spinner("Waiting for local PC to acquire IP on 5GHz network...", async {
                             hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
                         }).await;
                         if let Some(target) = detected_ip {
@@ -1051,9 +1023,9 @@ impl TerminalCli {
             println!("  Requesting Remote PC to start 5GHz Hotspot over USB...");
             if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_target_ip, usb_target_port).await {
                 print_ok(&format!("Remote PC 5GHz Hotspot Active: SSID='{}'", p_ssid));
-                println!("  Connecting local Wi-Fi to remote PC 5GHz hotspot (1200 Mbps Link Speed)...");
+                println!("  Connecting local PC to remote PC 5GHz hotspot (1200 Mbps Link Speed)...");
                 let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                let detected_ip = with_spinner("Waiting for local Wi-Fi to bind to 5GHz network...", async {
+                let detected_ip = with_spinner("Waiting for local PC to bind to 5GHz network...", async {
                     hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
                 }).await;
                 if let Some(target) = detected_ip {
@@ -1067,7 +1039,7 @@ impl TerminalCli {
                     }
                 }
             } else {
-                print_warn("Remote PC hotspot start failed over USB. Starting Local PC Hotspot fallback...");
+                print_warn("Remote PC hotspot start failed over USB. Trying local PC Hotspot fallback...");
                 if let Ok(info) = hotspot::create_hotspot(&ssid, &password, true).await {
                     let sent = self.send_wifi_connect_over_usb(&usb_target_ip, usb_target_port, &info.ssid, &info.password).await;
                     if sent {
