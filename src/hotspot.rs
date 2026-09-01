@@ -951,14 +951,13 @@ pub fn cleanup_cached_wlan_profiles_blocking() {
     }
 }
 
-/// Detect a phone connected via USB tethering (RNDIS/NCM) without requiring USB debugging.
+/// Detect a phone or PC connected via USB tethering (RNDIS/NCM/Thunderbolt/USB-C) without requiring USB debugging.
 ///
-/// Strictly inspects active USB/RNDIS network interfaces on the host OS to prevent false positives
-/// from standard Wi-Fi LAN or Ethernet connections. Returns (phone_ip, device_name) if found.
+/// Inspects active USB/RNDIS/NCM/Ethernet network interfaces and ARP neighbors on the host OS.
+/// Returns (peer_ip, device_name) if found.
 pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
     let mut candidate_ips: Vec<String> = Vec::new();
     let mut local_ips: Vec<String> = Vec::new();
-    let mut usb_detected = false;
 
     // Fast check: inspect local network interfaces directly in memory
     if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
@@ -969,18 +968,25 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
                 || name_lower.starts_with("ncm")
                 || name_lower.contains("tether")
                 || name_lower.contains("remote ndis")
-                || name_lower.contains("samsung");
+                || name_lower.contains("samsung")
+                || name_lower.contains("apple")
+                || name_lower.contains("cdc")
+                || name_lower.contains("thunderbolt")
+                || name_lower.contains("usb4");
 
             if let std::net::IpAddr::V4(v4) = ip {
                 if !v4.is_loopback() {
                     let octets = v4.octets();
-                    let is_rndis_subnet = octets[0] == 192 && octets[1] == 168 && octets[2] == 42;
-                    if is_usb || is_rndis_subnet {
+                    let is_tether_subnet = (octets[0] == 192 && octets[1] == 168 && (octets[2] == 42 || octets[2] == 43 || octets[2] == 44 || octets[2] == 225 || octets[2] == 137))
+                        || (octets[0] == 172 && octets[1] == 20 && octets[2] == 10)
+                        || (octets[0] == 169 && octets[1] == 254);
+
+                    if is_usb || is_tether_subnet {
                         local_ips.push(ip.to_string());
-                        usb_detected = true;
                         let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
                         candidate_ips.push(format!("{}.129", prefix));
                         candidate_ips.push(format!("{}.1", prefix));
+                        candidate_ips.push(format!("{}.2", prefix));
                         candidate_ips.push(format!("{}.254", prefix));
                         candidate_ips.push(format!("{}.63", prefix));
                     }
@@ -990,25 +996,40 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
     }
 
     #[cfg(target_os = "windows")]
-    if !usb_detected {
-        // Fast ARP scan for 192.168.42.x subnet
+    {
+        // 1. Inspect ARP table for tethering & link-local subnets
         if let Ok(output) = tokio::process::Command::new("arp").arg("-a").output().await {
             let text = String::from_utf8_lossy(&output.stdout);
             for line in text.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("192.168.42.") {
-                    if let Some(ip) = trimmed.split_whitespace().next() {
-                        if ip != "192.168.42.255" && !ip.ends_with(".255") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let ip = parts[0];
+                    if ip.starts_with("192.168.42.") || ip.starts_with("192.168.43.") || ip.starts_with("192.168.44.") || ip.starts_with("192.168.225.") || ip.starts_with("172.20.10.") || ip.starts_with("169.254.") {
+                        if !ip.ends_with(".255") && ip != "255.255.255.255" {
                             candidate_ips.push(ip.to_string());
-                            usb_detected = true;
                         }
                     }
                 }
             }
         }
 
-        // Query active network adapters on Windows specifically for USB/RNDIS/NCM adapters
-        let ps_cmd = r#"Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object { $desc = $_.InterfaceDescription; $name = $_.Name; $idx = $_.InterfaceIndex; $isUsb = ($desc -match 'Remote NDIS|RNDIS|Samsung Mobile USB|CDC NCM|Apple Mobile Device|USB Ethernet|USB NDIS|USB 10/100|Tethering') -or ($name -match 'USB|RNDIS|NCM|Tether' -and $desc -notmatch 'Virtual|Wi-Fi|Wireless|Bluetooth|Hyper-V|WSL|TAP'); $isExcluded = $desc -match 'Wi-Fi|Wireless|802.11|VirtualBox|VMware|Hyper-V|WSL|Bluetooth|Loopback|TAP'; if ($isUsb -and -not $isExcluded) { $ip = (Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1).IPAddress; $gw = (Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1).NextHop; Write-Output "$idx|$name|$desc|$ip|$gw" } }"#;
+        // 2. Query active network adapters and neighbors via PowerShell
+        let ps_cmd = r#"
+            Get-NetAdapter | Where-Object Status -eq 'Up' | ForEach-Object {
+                $desc = $_.InterfaceDescription
+                $name = $_.Name
+                $idx = $_.InterfaceIndex
+                $isUsb = ($desc -match 'Remote NDIS|RNDIS|Samsung Mobile USB|CDC NCM|Apple Mobile Device|USB Ethernet|USB NDIS|USB 10/100|Tethering|Thunderbolt|USB4') -or ($name -match 'USB|RNDIS|NCM|Tether' -and $desc -notmatch 'Virtual|Wi-Fi|Wireless|Bluetooth|Hyper-V|WSL|TAP')
+                $isExcluded = $desc -match 'Wi-Fi|Wireless|802.11|VirtualBox|VMware|Hyper-V|WSL|Bluetooth|Loopback|TAP'
+                if ($isUsb -and -not $isExcluded) {
+                    $ip = (Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1).IPAddress
+                    $gw = (Get-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1).NextHop
+                    $neighbors = (Get-NetNeighbor -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object State -ne 'Unreachable' | Select-Object -ExpandProperty IPAddress) -join ','
+                    Write-Output "$idx|$name|$desc|$ip|$gw|$neighbors"
+                }
+            }
+        "#;
 
         if let Ok(output) = tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", ps_cmd])
@@ -1026,21 +1047,30 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
                     if parts.len() >= 5 {
                         let ip = parts[3].trim();
                         let gw = parts[4].trim();
+                        let neighbors = if parts.len() >= 6 { parts[5].trim() } else { "" };
+
                         if !ip.is_empty() {
                             local_ips.push(ip.to_string());
-                            usb_detected = true;
                             if let Ok(v4) = ip.parse::<std::net::Ipv4Addr>() {
                                 let octets = v4.octets();
                                 let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
                                 candidate_ips.push(format!("{}.129", prefix));
                                 candidate_ips.push(format!("{}.1", prefix));
+                                candidate_ips.push(format!("{}.2", prefix));
                                 candidate_ips.push(format!("{}.63", prefix));
                                 candidate_ips.push(format!("{}.254", prefix));
                             }
                         }
                         if !gw.is_empty() && gw != "0.0.0.0" {
                             candidate_ips.insert(0, gw.to_string());
-                            usb_detected = true;
+                        }
+                        if !neighbors.is_empty() {
+                            for n_ip in neighbors.split(',') {
+                                let n_trimmed = n_ip.trim();
+                                if !n_trimmed.is_empty() && !n_trimmed.ends_with(".255") {
+                                    candidate_ips.insert(0, n_trimmed.to_string());
+                                }
+                            }
                         }
                     }
                 }
@@ -1048,7 +1078,7 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
         }
     }
 
-    if !usb_detected || candidate_ips.is_empty() {
+    if candidate_ips.is_empty() {
         return None;
     }
 
@@ -1061,7 +1091,7 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
     }
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(350))
+        .timeout(Duration::from_millis(600))
         .build()
         .unwrap_or_default();
 
@@ -1076,7 +1106,7 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
                     if let Ok(json) = resp.json::<serde_json::Value>().await {
                         let name = json.get("device_name")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("Android Device")
+                            .unwrap_or("ShareDash Device")
                             .to_string();
                         return Some((ip, name));
                     }
@@ -1230,8 +1260,11 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
                 || iface_lower.contains("ethernet")
                 || iface_lower.contains("bridge")
                 || iface_lower.contains("tether")
+                || iface_lower.contains("thunderbolt")
+                || iface_lower.contains("usb4")
                 || ip_str.starts_with("169.254.")
-                || ip_str.starts_with("192.168.42.");
+                || ip_str.starts_with("192.168.42.")
+                || ip_str.starts_with("192.168.43.");
 
             if let Ok(v4) = ip_str.parse::<std::net::Ipv4Addr>() {
                 let oct = v4.octets();
@@ -1241,11 +1274,12 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
                 candidate_ips.push((format!("{}.2", prefix), is_usb_iface));
                 candidate_ips.push((format!("{}.129", prefix), is_usb_iface));
                 candidate_ips.push((format!("{}.254", prefix), is_usb_iface));
+                candidate_ips.push((format!("{}.63", prefix), is_usb_iface));
             }
         }
     }
 
-    // 2. Inspect ARP table for active neighbors
+    // 2. Inspect ARP table and Get-NetNeighbor for active neighbors
     #[cfg(target_os = "windows")]
     {
         if let Ok(output) = tokio::process::Command::new("arp").arg("-a").output().await {
@@ -1257,10 +1291,26 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
                     if let Ok(v4) = ip.parse::<std::net::Ipv4Addr>() {
                         let ip_s = v4.to_string();
                         if !ip_s.starts_with("127.") && !ip_s.starts_with("224.") && !ip_s.ends_with(".255") {
-                            let is_direct = ip_s.starts_with("169.254.") || ip_s.starts_with("192.168.42.");
+                            let is_direct = ip_s.starts_with("169.254.") || ip_s.starts_with("192.168.42.") || ip_s.starts_with("192.168.43.");
                             candidate_ips.push((ip_s, is_direct));
                         }
                     }
+                }
+            }
+        }
+
+        let ps_cmd = r#"Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object State -ne 'Unreachable' | Select-Object -ExpandProperty IPAddress"#;
+        if let Ok(output) = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_cmd])
+            .output()
+            .await
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let ip_s = line.trim().to_string();
+                if !ip_s.is_empty() && !ip_s.starts_with("127.") && !ip_s.starts_with("224.") && !ip_s.ends_with(".255") {
+                    let is_direct = ip_s.starts_with("169.254.") || ip_s.starts_with("192.168.42.");
+                    candidate_ips.push((ip_s, is_direct));
                 }
             }
         }
@@ -1275,7 +1325,7 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
     }
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(350))
+        .timeout(Duration::from_millis(600))
         .build()
         .unwrap_or_default();
 
@@ -1289,7 +1339,7 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
                     if let Ok(json) = resp.json::<serde_json::Value>().await {
                         let device_name = json.get("device_name")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("ShareDash PC")
+                            .unwrap_or("ShareDash Device")
                             .to_string();
                         let os_name = json.get("os")
                             .and_then(|v| v.as_str())

@@ -207,7 +207,8 @@ impl TerminalCli {
         }
 
         if !usb_connected && rndis_ip.is_none() {
-            println!("  ⚡ {BOLD_CYAN}Waiting for USB connection (Plug in USB cable & Enable USB Tethering for 3+ Gbps Line Speed)...{RESET}");
+            println!("  ⚡ {BOLD_CYAN}Waiting for USB connection (Plug in USB-C cable & Enable USB Tethering for 3+ Gbps Line Speed)...{RESET}");
+            println!("  {CYAN}📱 Tip:{RESET} {WHITE}On Android phone, turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering){RESET}");
             println!("  {GRAY}Plug in USB cable / Enable USB Tethering now (or press [Enter] to switch to Wireless mode){RESET}");
 
             let stdin_handle = tokio::spawn(async {
@@ -217,7 +218,7 @@ impl TerminalCli {
             });
 
             loop {
-                // Check if USB tethering / RNDIS is plugged in
+                // 1. Check if USB tethering / RNDIS / USB-C is plugged in
                 if let Some((peer, name)) = hotspot::detect_usb_tethering_peer_detailed().await {
                     rndis_ip = Some(peer);
                     if usb_serial.is_none() {
@@ -228,11 +229,23 @@ impl TerminalCli {
                     break;
                 }
 
-                // Check if ADB USB is plugged in
+                // 2. Check if ADB USB is plugged in
                 let (conn, ser) = self.check_adb_inner().await;
                 if conn {
                     usb_connected = true;
                     usb_serial = ser;
+                    stdin_handle.abort();
+                    break;
+                }
+
+                // 3. Check direct PC/Device peers via interface sweep
+                let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
+                if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.42.") || p.ip.starts_with("192.168.43.")) {
+                    rndis_ip = Some(peer.ip);
+                    if usb_serial.is_none() {
+                        usb_serial = Some(peer.device_name);
+                    }
+                    usb_connected = true;
                     stdin_handle.abort();
                     break;
                 }
@@ -779,15 +792,15 @@ impl TerminalCli {
             }
         }
 
-        // Check for UDP discovery peers on USB/direct links
+        // Check for UDP discovery peers on USB/direct/LAN links
         if !usb_connected {
             for peer in self.state.discovery.get_active_peers() {
                 let ip_str = peer.remote_addr.ip().to_string();
-                if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.42.")) {
+                if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.") || ip_str.starts_with("10.") || ip_str.starts_with("172.")) {
                     usb_target_ip = ip_str;
                     usb_target_port = peer.server_port;
                     usb_name = peer.friendly_name;
-                    usb_desc = "USB Direct Link".to_string();
+                    usb_desc = "Direct Link / LAN".to_string();
                     usb_connected = true;
                     break;
                 }
@@ -796,8 +809,11 @@ impl TerminalCli {
 
         // If not immediately connected, wait for USB connection
         if !usb_connected {
-            println!("  ⚡ {BOLD_CYAN}Waiting for USB connection (Plug in USB cable & Enable USB Tethering for 3+ Gbps Line Speed)...{RESET}");
-            println!("  {GRAY}Plug in USB cable / Enable USB Tethering now (or press [Enter] to switch to Wireless mode, or enter IP:port){RESET}");
+            println!("  ⚡ {BOLD_CYAN}Waiting for USB connection (Plug in USB-C cable & Enable USB Tethering for 3+ Gbps Line Speed)...{RESET}");
+            println!("  {CYAN}💡 Tips:{RESET}");
+            println!("     {WHITE}• Android Phone: Turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering){RESET}");
+            println!("     {WHITE}• PC-to-PC: Plug in USB-C / Thunderbolt cable, or press [Enter] to switch to 5GHz Wi-Fi Mode{RESET}");
+            println!("  {GRAY}Plug in USB cable now (or press [Enter] to switch to Wireless mode, or enter IP:port){RESET}");
 
             let stdin_handle = tokio::spawn(async {
                 let mut line = String::new();
@@ -819,7 +835,7 @@ impl TerminalCli {
 
                 // Check direct link peers
                 let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
-                if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.42.")) {
+                if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.") || p.ip.starts_with("10.")) {
                     usb_target_ip = peer.ip;
                     usb_target_port = peer.port;
                     usb_name = peer.device_name;
@@ -832,11 +848,11 @@ impl TerminalCli {
                 // Check UDP peers
                 for peer in self.state.discovery.get_active_peers() {
                     let ip_str = peer.remote_addr.ip().to_string();
-                    if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.42.")) {
+                    if ip_str != "127.0.0.1" {
                         usb_target_ip = ip_str;
                         usb_target_port = peer.server_port;
                         usb_name = peer.friendly_name;
-                        usb_desc = "USB Direct Link".to_string();
+                        usb_desc = "ShareDash Network Link".to_string();
                         usb_connected = true;
                         stdin_handle.abort();
                         break;
@@ -865,8 +881,8 @@ impl TerminalCli {
                             if self.http_probe(&ip, port).await {
                                 usb_target_ip = ip;
                                 usb_target_port = port;
-                                usb_name = "Target PC (USB Manual)".to_string();
-                                usb_desc = "USB Direct IP".to_string();
+                                usb_name = "Target Device (Manual IP)".to_string();
+                                usb_desc = "Direct IP".to_string();
                                 usb_connected = true;
                             }
                         }
