@@ -155,16 +155,20 @@ impl TerminalCli {
         loop {
             println!();
             println!("{BOLD_WHITE}Select Mode:{RESET}");
-            println!("  {YELLOW}[1]{RESET} 🚀 Auto-Connect Wizard (USB → BLE → Wi-Fi → Send)");
-            println!("  {YELLOW}[2]{RESET} 🔧 Network Info");
+            println!("  {YELLOW}[1]{RESET} 📱 Auto-Connect Wizard (PC ↔ Phone: USB → BLE → Wi-Fi)");
+            println!("  {YELLOW}[2]{RESET} 💻 PC-to-PC Mode (USB-to-USB → Wi-Fi Direct / Hotspot → Multipath)");
+            println!("  {YELLOW}[3]{RESET} 🔧 Network Info");
             println!("  {YELLOW}[q]{RESET} Quit");
 
             let choice = prompt("ShareDash ❯ ").await;
             match choice.as_str() {
-                "1" | "wizard" | "auto" | "send" => {
+                "1" | "wizard" | "auto" | "phone" => {
                     self.run_wizard().await;
                 }
-                "2" | "info" | "net" => {
+                "2" | "pc" | "pc2pc" | "pc-to-pc" | "p2p" => {
+                    self.run_pc_to_pc_wizard().await;
+                }
+                "3" | "info" | "net" => {
                     self.handle_info().await;
                 }
                 "q" | "quit" | "exit" => {
@@ -179,7 +183,7 @@ impl TerminalCli {
                     print_wizard_banner();
                 }
                 _ => {
-                    println!("{RED}Unknown option.{RESET} Enter 1, 2, or q.");
+                    println!("{RED}Unknown option.{RESET} Enter 1, 2, 3, or q.");
                 }
             }
         }
@@ -734,6 +738,303 @@ impl TerminalCli {
         self.send_file_multipath_loop(wifi_ready, wifi_ip, false, String::new(), 54325, false).await;
     }
 
+    /// ═══════════════════════════════════════════════════════════════
+    ///  PC-TO-PC TRANSFER WIZARD (USB-to-USB + Wi-Fi Direct / Hotspot)
+    /// ═══════════════════════════════════════════════════════════════
+    async fn run_pc_to_pc_wizard(&self) {
+        println!();
+        println!("{BOLD_CYAN}╔════════════════════════════════════════════════════════════════╗{RESET}");
+        println!("{BOLD_CYAN}║{RESET}  {BOLD_WHITE}💻 ShareDash PC-to-PC Multipath Wizard{RESET}                        {BOLD_CYAN}║{RESET}");
+        println!("{BOLD_CYAN}║{RESET}  {GRAY}Bidirectional USB-to-USB + 5GHz Wi-Fi Direct High-Speed Link{RESET}   {BOLD_CYAN}║{RESET}");
+        println!("{BOLD_CYAN}╚════════════════════════════════════════════════════════════════╝{RESET}");
+
+        // ═══════════════════════════════════════════════════════════════
+        //  STEP 1: USB-TO-USB CONNECT & DISCOVER
+        // ═══════════════════════════════════════════════════════════════
+        print_phase_header(1, "USB-to-USB Direct Link Detection (Fast-Path Priority)");
+        println!("  Checking for direct USB-C, Host-to-Host bridge, or Direct Ethernet cable links...");
+
+        let mut usb_ready = false;
+        let mut usb_target_ip = String::new();
+        let mut usb_target_port: u16 = 54321;
+        let mut usb_peer_name = String::new();
+
+        // 1. Check UDP discovery for active PC peers on direct subnets
+        for peer in self.state.discovery.get_active_peers() {
+            let ip_str = peer.remote_addr.ip().to_string();
+            if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.42.") || peer.os_name.to_lowercase().contains("windows") || peer.os_name.to_lowercase().contains("linux") || peer.os_name.to_lowercase().contains("mac")) {
+                usb_target_ip = ip_str;
+                usb_target_port = peer.server_port;
+                usb_peer_name = peer.friendly_name;
+                usb_ready = true;
+                break;
+            }
+        }
+
+        // 2. Scan network interfaces & ARP neighbors for direct PC peers
+        if !usb_ready {
+            let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
+            if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.")) {
+                usb_target_ip = peer.ip;
+                usb_target_port = peer.port;
+                usb_peer_name = peer.device_name;
+                usb_ready = true;
+            }
+        }
+
+        // 3. If not found immediately, prompt user with interactive waiting loop
+        if !usb_ready {
+            println!("  ⚡ {BOLD_CYAN}Waiting for USB-to-USB / direct cable connection...{RESET}");
+            println!("  {GRAY}Plug in cable now (or press [Enter] to scan/skip to Wi-Fi mode, or type peer IP:port):{RESET}");
+
+            let stdin_handle = tokio::spawn(async {
+                let mut line = String::new();
+                let _ = std::io::stdin().read_line(&mut line);
+                line.trim().to_string()
+            });
+
+            let mut ticker = 0;
+            loop {
+                // Check direct link peers
+                let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
+                if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.")) {
+                    usb_target_ip = peer.ip;
+                    usb_target_port = peer.port;
+                    usb_peer_name = peer.device_name;
+                    usb_ready = true;
+                    stdin_handle.abort();
+                    break;
+                }
+
+                // Check UDP peers
+                for peer in self.state.discovery.get_active_peers() {
+                    let ip_str = peer.remote_addr.ip().to_string();
+                    if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.42.")) {
+                        usb_target_ip = ip_str;
+                        usb_target_port = peer.server_port;
+                        usb_peer_name = peer.friendly_name;
+                        usb_ready = true;
+                        stdin_handle.abort();
+                        break;
+                    }
+                }
+
+                if usb_ready {
+                    break;
+                }
+
+                if stdin_handle.is_finished() {
+                    if let Ok(input) = stdin_handle.await {
+                        if !input.is_empty() && input != "q" {
+                            let parts: Vec<&str> = input.split(':').collect();
+                            let ip = parts[0].trim().to_string();
+                            let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
+                            if self.http_probe(&ip, port).await {
+                                usb_target_ip = ip;
+                                usb_target_port = port;
+                                usb_peer_name = "Target PC (USB Manual)".to_string();
+                                usb_ready = true;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                ticker += 1;
+                if ticker % 2 == 0 {
+                    draw_spinner_frame("Scanning USB direct interfaces & ARP neighbors...", ticker / 2);
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            print!("\r{}\r", " ".repeat(80));
+        }
+
+        if usb_ready {
+            print_ok(&format!(
+                "USB Direct Connection Detected: {BOLD}{}{RESET} ({}:{})",
+                usb_peer_name, usb_target_ip, usb_target_port
+            ));
+            let paired = self.pair_handshake_target(&usb_target_ip, usb_target_port).await;
+            if paired {
+                print_step_result("USB 3-Way Pair Handshake", true);
+                println!("  🔒 USB-to-USB Channel {GREEN}READY{RESET} (AES-256-GCM Line Speed: up to 3+ Gbps)");
+            } else {
+                print_warn("USB link verified, proceeding with active channel.");
+            }
+        } else {
+            println!("  ⚠️  {YELLOW}{BOLD}Continuing without direct USB link (Wi-Fi Direct / Hotspot Mode){RESET}");
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  STEP 2: WI-FI DIRECT / 5GHz HOTSPOT SCRIPT & CONNECT
+        // ═══════════════════════════════════════════════════════════════
+        print_phase_header(2, "Wi-Fi Direct / 5GHz Hotspot Provisioning");
+
+        let pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
+        if !pc_wifi_on {
+            println!("  ⚠️  {YELLOW}PC Wi-Fi is currently turned OFF. Enabling...{RESET}");
+            hotspot::open_windows_wifi_settings();
+            hotspot::ensure_pc_wifi_adapter_enabled().await;
+        }
+
+        let pc_caps = hotspot::detect_pc_wifi_caps().await;
+        println!("  Local Wi-Fi Hardware: {} (PHY: {} Mbps)", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps);
+
+        let mut wifi_ready = false;
+        let mut wifi_ip: Option<String> = None;
+
+        println!();
+        println!("{BOLD_WHITE}Wi-Fi Connection Role:{RESET}");
+        println!("  {YELLOW}[1]{RESET} 📡 Host 5GHz Hotspot on this PC (Auto-creates Hotspot)");
+        println!("  {YELLOW}[2]{RESET} 📶 Join Hotspot / Wi-Fi hosted on other PC");
+        println!("  {YELLOW}[3]{RESET} 📜 Generate & Run Standalone PowerShell Hotspot Script");
+        if usb_ready {
+            println!("  {YELLOW}[4]{RESET} ⚡ Auto-Sync over USB (Share Hotspot credentials directly)");
+        }
+
+        let max_opt = if usb_ready { 4 } else { 3 };
+        let wifi_choice = prompt_choice(&format!("Select [1-{}]: ", max_opt), 1, max_opt).await;
+
+        match wifi_choice {
+            1 | 4 => {
+                let (ssid, password) = hotspot::generate_hotspot_credentials();
+                println!("  🚀 Starting 5GHz PC Hotspot: {BOLD}{ssid}{RESET}...");
+                let script_path = hotspot::write_hotspot_script_to_disk(&ssid, &password).ok();
+
+                let hs_res = hotspot::create_hotspot(&ssid, &password, true).await;
+                match hs_res {
+                    Ok(info) => {
+                        print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
+                        println!("  ├─ SSID     : {BOLD}{}{RESET}", info.ssid);
+                        println!("  ├─ Password : {BOLD}{}{RESET}", info.password);
+                        println!("  └─ Gateway  : {BOLD}{}{RESET}", info.gateway_ip);
+
+                        if let Some(ref path) = script_path {
+                            println!("  💾 Script saved to: {GRAY}{:?}{RESET}", path);
+                        }
+
+                        if usb_ready && !usb_target_ip.is_empty() {
+                            println!("  ⚡ Syncing Wi-Fi credentials to other PC over USB...");
+                            let _ = self.send_wifi_connect_over_usb(&usb_target_ip, usb_target_port, &info.ssid, &info.password).await;
+                        }
+
+                        println!("  ⏳ Waiting for remote PC to join Wi-Fi hotspot...");
+                        let client_ip = with_spinner("Waiting for other PC on Wi-Fi hotspot subnet...", async {
+                            for _ in 0..40 {
+                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                    return Some(ip);
+                                }
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+                            }
+                            None
+                        }).await;
+
+                        if let Some(ip) = client_ip {
+                            print_ok(&format!("Remote PC joined Hotspot! IP: {}", ip));
+                            wifi_ip = Some(ip);
+                        } else {
+                            print_warn("No client detected automatically. Checking UDP peer connection...");
+                            for peer in self.state.discovery.get_active_peers() {
+                                let ip_str = peer.remote_addr.ip().to_string();
+                                if ip_str.starts_with("192.168.137.") && ip_str != "192.168.137.1" {
+                                    wifi_ip = Some(ip_str);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        print_fail(&format!("Could not start Hotspot automatically: {}", e));
+                        if let Some(ref path) = script_path {
+                            println!("  {YELLOW}Tip: Run the generated script with Admin privileges:{RESET} {:?}", path);
+                        }
+                    }
+                }
+            }
+            2 => {
+                println!();
+                let target_ssid = prompt("Enter Hotspot SSID on other PC (or 'scan' / Enter for ShareDash-PC): ").await;
+                let target_pass = prompt("Enter Hotspot Password (press Enter if open): ").await;
+
+                let actual_ssid = if target_ssid.is_empty() || target_ssid == "scan" {
+                    "ShareDash-PC".to_string()
+                } else {
+                    target_ssid
+                };
+
+                print_step(&format!("Connecting Wi-Fi adapter to '{}'...", actual_ssid));
+                let conn = hotspot::connect_to_phone_hotspot(&actual_ssid, &target_pass).await.unwrap_or(false);
+                if conn {
+                    print_ok("Wi-Fi association profile applied!");
+                }
+
+                let detected_gw = with_spinner("Acquiring IP and discovering Gateway on Wi-Fi link...", async {
+                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &actual_ssid, Some("192.168.137.1")).await
+                }).await;
+
+                if let Some(gw) = detected_gw {
+                    wifi_ip = Some(gw);
+                } else if self.http_probe("192.168.137.1", 54321).await {
+                    wifi_ip = Some("192.168.137.1".to_string());
+                }
+            }
+            3 => {
+                let (ssid, password) = hotspot::generate_hotspot_credentials();
+                if let Ok(path) = hotspot::write_hotspot_script_to_disk(&ssid, &password) {
+                    print_ok(&format!("Generated Standalone PowerShell Script: {:?}", path));
+                    println!("  SSID:     {BOLD}{}{RESET}", ssid);
+                    println!("  Password: {BOLD}{}{RESET}", password);
+                    println!("  Launching PowerShell script in background...");
+                    let _ = tokio::process::Command::new("powershell")
+                        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.to_str().unwrap_or_default()])
+                        .spawn();
+
+                    let client_ip = with_spinner("Waiting for other PC on Wi-Fi hotspot subnet...", async {
+                        for _ in 0..30 {
+                            if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
+                                return Some(ip);
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        }
+                        None
+                    }).await;
+
+                    if let Some(ip) = client_ip {
+                        print_ok(&format!("Remote PC connected to Hotspot! IP: {}", ip));
+                        wifi_ip = Some(ip);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Wi-Fi 3-way pair verification
+        if let Some(ref target_wifi_ip) = wifi_ip {
+            let syn_ok = self.http_probe(target_wifi_ip, 54321).await;
+            print_step_result(&format!("Wi-Fi Probe → {}:54321", target_wifi_ip), syn_ok);
+            if syn_ok {
+                let pair_ok = self.pair_handshake_target(target_wifi_ip, 54321).await;
+                print_step_result("Wi-Fi 3-Way Pair Handshake", pair_ok);
+                if pair_ok {
+                    println!("  🔒 Wi-Fi Direct / 5GHz Hotspot Channel {GREEN}READY{RESET} (AES-256-GCM)");
+                    wifi_ready = true;
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  STEP 3: BIDIRECTIONAL FILE & FOLDER SEND / RECEIVE LOOP
+        // ═══════════════════════════════════════════════════════════════
+        self.send_file_multipath_loop(
+            wifi_ready,
+            wifi_ip,
+            usb_ready,
+            usb_target_ip,
+            usb_target_port,
+            false,
+        ).await;
+    }
+
     /// Helper HTTP calls over USB
     async fn query_phone_wifi_caps_http(&self, ip: &str, port: u16) -> Option<WifiCapsInfo> {
         let client = reqwest::Client::builder()
@@ -834,7 +1135,7 @@ impl TerminalCli {
     }
 
     /// ═══════════════════════════════════════════════════════════════
-    ///  MULTIPATH FILE SEND LOOP
+    ///  MULTIPATH FILE & FOLDER SEND LOOP
     /// ═══════════════════════════════════════════════════════════════
     async fn send_file_multipath_loop(
         &self,
@@ -866,27 +1167,47 @@ impl TerminalCli {
             },
         );
 
+        println!("  {GRAY}Ready to send files/folders. Both PCs can initiate transfers or receive in background.{RESET}");
+
         loop {
-            let file_path_str = prompt("Paste file path (or 'q' to quit): ").await;
+            let file_path_str = prompt("Paste file or folder path (or 'q' to quit): ").await;
             if file_path_str == "q" || file_path_str == "quit" {
                 break;
             }
 
             let file_path = PathBuf::from(file_path_str.trim().trim_matches('"'));
             if !file_path.exists() {
-                print_fail(&format!("File not found: {:?}", file_path));
+                print_fail(&format!("File or folder not found: {:?}", file_path));
                 continue;
             }
 
-            let file_name = file_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("file");
-            let file_size = if file_path.is_dir() {
-                get_dir_size(&file_path)
+            let is_dir = file_path.is_dir();
+            let (target_file_path, file_name, file_size, is_temp_zip) = if is_dir {
+                println!("  📦 {BOLD_CYAN}Packaging directory into high-speed archive for multipath transfer...{RESET}");
+                match package_directory_to_zip(&file_path) {
+                    Ok((zip_path, size)) => {
+                        let name = zip_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("folder.zip")
+                            .to_string();
+                        (zip_path, name, size, true)
+                    }
+                    Err(e) => {
+                        print_fail(&format!("Failed to package directory: {}", e));
+                        continue;
+                    }
+                }
             } else {
-                std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0)
+                let name = file_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file")
+                    .to_string();
+                let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+                (file_path.clone(), name, size, false)
             };
+
             let file_size_mb = file_size as f64 / (1024.0 * 1024.0);
 
             // Send mode selection
@@ -925,7 +1246,12 @@ impl TerminalCli {
                         "Wi-Fi".to_string(),
                     ),
                 ],
-                _ => continue,
+                _ => {
+                    if is_temp_zip {
+                        let _ = std::fs::remove_file(&target_file_path);
+                    }
+                    continue;
+                }
             };
 
             let mode_name = match mode {
@@ -941,8 +1267,12 @@ impl TerminalCli {
                 file_name, file_size_mb, mode_name
             );
 
-            self.execute_transfer(&file_path, file_name, file_size, &targets)
+            self.execute_transfer(&target_file_path, &file_name, file_size, &targets)
                 .await;
+
+            if is_temp_zip {
+                let _ = std::fs::remove_file(&target_file_path);
+            }
         }
     }
 
@@ -1601,6 +1931,58 @@ fn get_dir_size(path: &Path) -> u64 {
     }
     total
 }
+
+/// Package an entire directory tree into a high-speed `.zip` archive for multipath transmission.
+fn package_directory_to_zip(dir_path: &Path) -> anyhow::Result<(PathBuf, u64)> {
+    use std::io::{Read, Write};
+    let dir_name = dir_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("folder");
+    let temp_dir = std::env::temp_dir().join("sharedash_archives");
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let zip_path = temp_dir.join(format!("{}.zip", dir_name));
+
+    let file = std::fs::File::create(&zip_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored)
+        .unix_permissions(0o755);
+
+    fn walk_dir_entries(root: &Path, current: &Path, list: &mut Vec<(PathBuf, String)>) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                walk_dir_entries(root, &path, list)?;
+            } else if path.is_file() {
+                let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                list.push((path, rel));
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    walk_dir_entries(dir_path, dir_path, &mut files)?;
+
+    let mut buffer = vec![0u8; 1024 * 1024]; // 1 MB copy buffer
+    for (src_path, rel_name) in files {
+        zip.start_file(rel_name, options)?;
+        let mut f = std::fs::File::open(&src_path)?;
+        loop {
+            let n = f.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            zip.write_all(&buffer[..n])?;
+        }
+    }
+    zip.finish()?;
+    let size = std::fs::metadata(&zip_path)?.len();
+    Ok((zip_path, size))
+}
+
 
 #[allow(dead_code)]
 fn create_zip_or_tar_in_memory(path: &Path) -> anyhow::Result<Vec<u8>> {

@@ -1070,3 +1070,201 @@ pub async fn detect_usb_tethering_peer_detailed() -> Option<(String, String)> {
 pub async fn detect_usb_tethering_peer() -> Option<String> {
     detect_usb_tethering_peer_detailed().await.map(|(ip, _)| ip)
 }
+
+/// Generate a standalone PowerShell script to create and activate a Windows Mobile Hotspot / Hosted Network.
+pub fn generate_standalone_hotspot_script(ssid: &str, password: &str) -> String {
+    format!(
+        r#"# ShareDash PC-to-PC 5GHz Hotspot Provisioning Script
+# SSID: {ssid}
+# Key:  {password}
+
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "  ShareDash High-Speed 5GHz PC Mobile Hotspot Script" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "Starting Mobile Hotspot (SSID: {ssid})..." -ForegroundColor Yellow
+
+try {{
+    # Try Modern Windows 10/11 WinRT Tethering API
+    $tetheringManager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType = WindowsRuntime]
+    $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetInternetConnectionProfile()
+    
+    if ($connectionProfile) {{
+        $manager = $tetheringManager::CreateFromConnectionProfile($connectionProfile)
+        $config = $manager.GetCurrentAccessPointConfiguration()
+        $config.Ssid = '{ssid}'
+        $config.Passphrase = '{password}'
+        try {{
+            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
+        }} catch {{}}
+
+        $action = $manager.ConfigureAccessPointAsync($config)
+        while ($action.Status -eq [Windows.Foundation.AsyncStatus]::Started) {{
+            Start-Sleep -Milliseconds 50
+        }}
+
+        if ($manager.TetheringOperationalState -ne [Windows.Networking.NetworkOperators.TetheringOperationalState]::On) {{
+            $op = $manager.StartTetheringAsync()
+            $timeout = 0
+            while ($manager.TetheringOperationalState -ne [Windows.Networking.NetworkOperators.TetheringOperationalState]::On -and $timeout -lt 30) {{
+                Start-Sleep -Milliseconds 300
+                $timeout++
+            }}
+        }}
+
+        if ($manager.TetheringOperationalState -eq [Windows.Networking.NetworkOperators.TetheringOperationalState]::On) {{
+            Write-Host "✔ Mobile Hotspot successfully started on Windows!" -ForegroundColor Green
+            Write-Host "  SSID:     {ssid}" -ForegroundColor White
+            Write-Host "  Password: {password}" -ForegroundColor White
+            Write-Host "  Gateway:  192.168.137.1" -ForegroundColor White
+            return
+        }}
+    }}
+}} catch {{
+    Write-Host "WinRT Hotspot notice: $($_.Exception.Message)" -ForegroundColor Gray
+}}
+
+# Fallback: netsh hostednetwork
+Write-Host "Attempting netsh hostednetwork fallback..." -ForegroundColor Yellow
+netsh wlan set hostednetwork mode=allow ssid="{ssid}" key="{password}"
+netsh wlan start hostednetwork
+
+Write-Host "Opening Windows Mobile Hotspot settings as secondary fallback..." -ForegroundColor Yellow
+Start-Process 'ms-settings:network-mobilehotspot'
+"#,
+        ssid = ssid,
+        password = password
+    )
+}
+
+/// Save the standalone hotspot PowerShell script to `./scripts/start_pc_hotspot.ps1`
+pub fn write_hotspot_script_to_disk(ssid: &str, password: &str) -> Result<std::path::PathBuf> {
+    let scripts_dir = std::path::PathBuf::from("./scripts");
+    let _ = std::fs::create_dir_all(&scripts_dir);
+    let script_path = scripts_dir.join("start_pc_hotspot.ps1");
+    let script_content = generate_standalone_hotspot_script(ssid, password);
+    std::fs::write(&script_path, script_content)?;
+    Ok(script_path)
+}
+
+/// Discovered peer candidate from direct USB / Ethernet / LAN scan
+#[derive(Clone, Debug)]
+pub struct DirectPcPeer {
+    pub ip: String,
+    pub port: u16,
+    pub device_name: String,
+    pub os_name: String,
+    pub is_usb_direct: bool,
+}
+
+/// Scan network interfaces and ARP neighbors for direct PC peers running ShareDash
+pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
+    let mut discovered: Vec<DirectPcPeer> = Vec::new();
+    let mut candidate_ips: Vec<(String, bool)> = Vec::new(); // (ip, is_usb_direct)
+    let mut local_ips: Vec<String> = Vec::new();
+
+    // 1. Inspect all local IPv4 interfaces
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (iface_name, ip) in interfaces {
+            let ip_str = ip.to_string();
+            if ip_str.starts_with("127.") || ip_str.contains("::1") {
+                continue;
+            }
+            local_ips.push(ip_str.clone());
+
+            let iface_lower = iface_name.to_lowercase();
+            let is_usb_iface = iface_lower.contains("usb")
+                || iface_lower.contains("rndis")
+                || iface_lower.contains("ndis")
+                || iface_lower.contains("ethernet")
+                || iface_lower.contains("bridge")
+                || iface_lower.contains("tether")
+                || ip_str.starts_with("169.254.")
+                || ip_str.starts_with("192.168.42.");
+
+            if let Ok(v4) = ip_str.parse::<std::net::Ipv4Addr>() {
+                let oct = v4.octets();
+                let prefix = format!("{}.{}.{}", oct[0], oct[1], oct[2]);
+                // Direct link common partner addresses (host .1, peer .2 or .129 or .254)
+                candidate_ips.push((format!("{}.1", prefix), is_usb_iface));
+                candidate_ips.push((format!("{}.2", prefix), is_usb_iface));
+                candidate_ips.push((format!("{}.129", prefix), is_usb_iface));
+                candidate_ips.push((format!("{}.254", prefix), is_usb_iface));
+            }
+        }
+    }
+
+    // 2. Inspect ARP table for active neighbors
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = tokio::process::Command::new("arp").arg("-a").output().await {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let ip = parts[0];
+                    if let Ok(v4) = ip.parse::<std::net::Ipv4Addr>() {
+                        let ip_s = v4.to_string();
+                        if !ip_s.starts_with("127.") && !ip_s.starts_with("224.") && !ip_s.ends_with(".255") {
+                            let is_direct = ip_s.starts_with("169.254.") || ip_s.starts_with("192.168.42.");
+                            candidate_ips.push((ip_s, is_direct));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Deduplicate candidate IPs
+    let mut unique_candidates: Vec<(String, bool)> = Vec::new();
+    for (ip, is_usb) in candidate_ips {
+        if !local_ips.contains(&ip) && !unique_candidates.iter().any(|(u, _)| u == &ip) {
+            unique_candidates.push((ip, is_usb));
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(350))
+        .build()
+        .unwrap_or_default();
+
+    let mut tasks = Vec::new();
+    for (ip, is_usb) in unique_candidates {
+        let client_ref = client.clone();
+        tasks.push(tokio::spawn(async move {
+            let url = format!("http://{}:54321/api/v1/info", ip);
+            if let Ok(resp) = client_ref.get(&url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        let device_name = json.get("device_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("ShareDash PC")
+                            .to_string();
+                        let os_name = json.get("os")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Windows")
+                            .to_string();
+                        return Some(DirectPcPeer {
+                            ip,
+                            port: 54321,
+                            device_name,
+                            os_name,
+                            is_usb_direct: is_usb,
+                        });
+                    }
+                }
+            }
+            None
+        }));
+    }
+
+    for task in tasks {
+        if let Ok(Some(peer)) = task.await {
+            if !discovered.iter().any(|p| p.ip == peer.ip) {
+                discovered.push(peer);
+            }
+        }
+    }
+
+    discovered
+}
+
