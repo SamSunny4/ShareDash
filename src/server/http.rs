@@ -14,8 +14,9 @@ use crate::scheduler::metrics::SchedulerTelemetry;
 use crate::server::api::{
     cancel_all_active_transfers, cancel_transfer, confirm_pair_session, connect_to_remote_peer, create_pair_session, detect_transports,
     get_connection_bridges, get_device_info, get_discovered_peers, get_pairing_status, get_pending_pair_request,
-    handle_incoming_pair_request, list_transfers, open_received_folder, open_windows_hotspot_settings, prepare_transfer,
-    receive_transfer_chunk, respond_to_pair_request, start_benchmark_transfer, upload_and_transfer_files, verify_pair_pin, AppState,
+    get_wifi_caps_handler, handle_incoming_pair_request, handle_start_hotspot, handle_wifi_connect, list_transfers,
+    open_received_folder, open_windows_hotspot_settings, prepare_transfer, receive_transfer_chunk, respond_to_pair_request,
+    start_benchmark_transfer, upload_and_transfer_files, verify_pair_pin, AppState,
 };
 use crate::server::ws_telemetry::ws_telemetry_handler;
 use crate::storage::manifest_db::ManifestDb;
@@ -101,6 +102,9 @@ impl Server {
             .route("/api/v1/pair/connect", post(connect_to_remote_peer))
             .route("/api/v1/pair/status", get(get_pairing_status))
             .route("/api/v1/storage/open_folder", post(open_received_folder))
+            .route("/api/v1/wifi_caps", get(get_wifi_caps_handler))
+            .route("/api/v1/wifi_connect", post(handle_wifi_connect))
+            .route("/api/v1/hotspot/start", post(handle_start_hotspot))
             .route("/api/v1/hotspot/open-settings", post(open_windows_hotspot_settings))
             .route("/api/v1/transfers", get(list_transfers))
             .route("/api/v1/transfers/chunk", post(receive_transfer_chunk))

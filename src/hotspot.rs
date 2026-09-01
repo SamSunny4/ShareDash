@@ -233,20 +233,43 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
             }
         }
 
-        // Step 1: Use the modern Windows Mobile Hotspot via WinRT API
+        // Step 1: Force enable Wi-Fi interface if disabled
+        let _ = tokio::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Enable-NetAdapter -Name 'Wi-Fi*' -Confirm:$false -ErrorAction SilentlyContinue; netsh interface set interface name=\"Wi-Fi\" admin=ENABLED 2>$null",
+            ])
+            .output()
+            .await;
+
+        // Step 2: Use the modern Windows Mobile Hotspot via WinRT API (with offline profile fallback)
         let ps_script = format!(
             r#"
             try {{
                 $tetheringManager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType = WindowsRuntime]
                 $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetInternetConnectionProfile()
+                
+                # If no active internet connection profile (offline PC-to-PC), use any existing network profile
+                if (-not $connectionProfile) {{
+                    $profiles = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetConnectionProfiles()
+                    if ($profiles -and $profiles.Count -gt 0) {{
+                        $connectionProfile = $profiles[0]
+                    }}
+                }}
+
                 if ($connectionProfile) {{
                     $manager = $tetheringManager::CreateFromConnectionProfile($connectionProfile)
                     $config = $manager.GetCurrentAccessPointConfiguration()
                     $config.Ssid = '{ssid}'
                     $config.Passphrase = '{password}'
                     try {{
-                        $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
-                    }} catch {{}}
+                        $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::FiveGigahertz
+                    }} catch {{
+                        try {{
+                            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
+                        }} catch {{}}
+                    }}
 
                     $action = $manager.ConfigureAccessPointAsync($config)
                     while ($action.Status -eq [Windows.Foundation.AsyncStatus]::Started) {{
@@ -264,14 +287,21 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
 
                     if ($manager.TetheringOperationalState -eq [Windows.Networking.NetworkOperators.TetheringOperationalState]::On) {{
                         Write-Host "HOTSPOT_STARTED"
+                        return
                     }} else {{
                         Write-Host "HOTSPOT_FAILED"
                     }}
-                }} else {{
-                    Write-Host "NO_INTERNET_PROFILE"
                 }}
             }} catch {{
                 Write-Host "ERROR:$($_.Exception.Message)"
+            }}
+
+            # Step 3: Hosted Network Fallback
+            netsh wlan set hostednetwork mode=allow ssid="{ssid}" key="{password}" 2>$null
+            $startOut = netsh wlan start hostednetwork 2>$null
+            if ($startOut -match "started") {{
+                Write-Host "HOTSPOT_STARTED"
+                return
             }}
             "#,
             ssid = ssid,
@@ -303,7 +333,7 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
             }
         }
 
-        // Fallback: Open Windows Settings only if automatic WinRT fails
+        // Fallback: Open Windows Settings only if direct automation fails
         let _ = tokio::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", "Start-Process 'ms-settings:network-mobilehotspot'"])
             .spawn();
@@ -1083,19 +1113,37 @@ Write-Host "  ShareDash High-Speed 5GHz PC Mobile Hotspot Script" -ForegroundCol
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "Starting Mobile Hotspot (SSID: {ssid})..." -ForegroundColor Yellow
 
+# 1. Force enable Wi-Fi interface if disabled
 try {{
-    # Try Modern Windows 10/11 WinRT Tethering API
+    Enable-NetAdapter -Name 'Wi-Fi*' -Confirm:$false -ErrorAction SilentlyContinue
+    netsh interface set interface name="Wi-Fi" admin=ENABLED 2>$null
+}} catch {{}}
+
+# 2. Modern Windows 10/11 WinRT Tethering API (with offline profile fallback)
+try {{
     $tetheringManager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType = WindowsRuntime]
     $connectionProfile = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetInternetConnectionProfile()
     
+    # If no active internet connection profile (offline PC-to-PC), use any existing network profile
+    if (-not $connectionProfile) {{
+        $profiles = [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType = WindowsRuntime]::GetConnectionProfiles()
+        if ($profiles -and $profiles.Count -gt 0) {{
+            $connectionProfile = $profiles[0]
+        }}
+    }}
+
     if ($connectionProfile) {{
         $manager = $tetheringManager::CreateFromConnectionProfile($connectionProfile)
         $config = $manager.GetCurrentAccessPointConfiguration()
         $config.Ssid = '{ssid}'
         $config.Passphrase = '{password}'
         try {{
-            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
-        }} catch {{}}
+            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::FiveGigahertz
+        }} catch {{
+            try {{
+                $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
+            }} catch {{}}
+        }}
 
         $action = $manager.ConfigureAccessPointAsync($config)
         while ($action.Status -eq [Windows.Foundation.AsyncStatus]::Started) {{
@@ -1112,7 +1160,7 @@ try {{
         }}
 
         if ($manager.TetheringOperationalState -eq [Windows.Networking.NetworkOperators.TetheringOperationalState]::On) {{
-            Write-Host "✔ Mobile Hotspot successfully started on Windows!" -ForegroundColor Green
+            Write-Host "✔ Mobile Hotspot successfully started on Windows (5GHz)!" -ForegroundColor Green
             Write-Host "  SSID:     {ssid}" -ForegroundColor White
             Write-Host "  Password: {password}" -ForegroundColor White
             Write-Host "  Gateway:  192.168.137.1" -ForegroundColor White
@@ -1123,10 +1171,14 @@ try {{
     Write-Host "WinRT Hotspot notice: $($_.Exception.Message)" -ForegroundColor Gray
 }}
 
-# Fallback: netsh hostednetwork
+# 3. Fallback: netsh hostednetwork
 Write-Host "Attempting netsh hostednetwork fallback..." -ForegroundColor Yellow
-netsh wlan set hostednetwork mode=allow ssid="{ssid}" key="{password}"
-netsh wlan start hostednetwork
+netsh wlan set hostednetwork mode=allow ssid="{ssid}" key="{password}" 2>$null
+$startOut = netsh wlan start hostednetwork 2>$null
+if ($startOut -match "started") {{
+    Write-Host "✔ Hosted Network started successfully!" -ForegroundColor Green
+    return
+}}
 
 Write-Host "Opening Windows Mobile Hotspot settings as secondary fallback..." -ForegroundColor Yellow
 Start-Process 'ms-settings:network-mobilehotspot'

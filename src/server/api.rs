@@ -24,6 +24,7 @@ static ADB_CACHE: OnceLock<Mutex<Option<AdbCacheEntry>>> = OnceLock::new();
 const ADB_CACHE_TTL_SECS: u64 = 1;
 
 use crate::discovery::{BleDiscovery, DiscoveredPeer, PairingManager, PairingSession, PeerDiscovery};
+use crate::hotspot;
 use crate::protocol::message::TransportKind;
 use crate::scheduler::dynamic_scheduler::{MultipathScheduler, TransferHandle};
 use crate::scheduler::metrics::SchedulerTelemetry;
@@ -119,6 +120,49 @@ pub async fn get_device_info(State(state): State<AppState>) -> impl IntoResponse
         local_ips: ips,
     })
 }
+
+pub async fn get_wifi_caps_handler() -> impl IntoResponse {
+    let caps = hotspot::detect_pc_wifi_caps().await;
+    Json(caps)
+}
+
+#[derive(Deserialize)]
+pub struct WifiConnectPayload {
+    pub ssid: String,
+    pub password: String,
+}
+
+pub async fn handle_wifi_connect(
+    Json(payload): Json<WifiConnectPayload>,
+) -> impl IntoResponse {
+    let success = hotspot::connect_to_phone_hotspot(&payload.ssid, &payload.password)
+        .await
+        .unwrap_or(false);
+    Json(serde_json::json!({
+        "success": success,
+        "ssid": payload.ssid
+    }))
+}
+
+pub async fn handle_start_hotspot() -> impl IntoResponse {
+    let (ssid, password) = hotspot::generate_hotspot_credentials();
+    match hotspot::create_hotspot(&ssid, &password, true).await {
+        Ok(info) => Json(serde_json::json!({
+            "success": true,
+            "ssid": info.ssid,
+            "password": info.password,
+            "gateway": info.gateway_ip
+        })),
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e.to_string(),
+            "ssid": ssid,
+            "password": password,
+            "gateway": "192.168.137.1"
+        })),
+    }
+}
+
 
 #[derive(Serialize)]
 pub struct UsbBridgeStatus {
