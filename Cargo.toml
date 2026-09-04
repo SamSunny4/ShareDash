@@ -42,7 +42,7 @@ clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
-btleplug = "0.11"
+btleplug = "0.13"
 memmap2 = "0.9"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
