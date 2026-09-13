@@ -156,7 +156,7 @@ impl TerminalCli {
             println!();
             println!("{BOLD_WHITE}Select Mode:{RESET}");
             println!("  {YELLOW}[1]{RESET} 📱 Auto-Connect Wizard (PC ↔ Phone: USB → BLE → Wi-Fi)");
-            println!("  {YELLOW}[2]{RESET} 💻 PC-to-PC Mode (USB-to-USB → Wi-Fi Direct / Hotspot → Multipath)");
+            println!("  {YELLOW}[2]{RESET} 💻 PC-to-PC Wireless Mode (Bluetooth Discovery → Fast Wi-Fi Hotspot)");
             println!("  {YELLOW}[3]{RESET} 🔧 Network Info");
             println!("  {YELLOW}[q]{RESET} Quit");
 
@@ -752,330 +752,316 @@ impl TerminalCli {
     }
 
     /// ═══════════════════════════════════════════════════════════════
-    ///  PC-TO-PC TRANSFER WIZARD (USB-to-USB + Wi-Fi Direct / Hotspot)
+    ///  PC-TO-PC PURE WIRELESS WIZARD
+    ///  (Bluetooth Discovery & Handshake ➔ Optimal Wi-Fi Hotspot)
     /// ═══════════════════════════════════════════════════════════════
     async fn run_pc_to_pc_wizard(&self) {
         println!();
         println!("{BOLD_CYAN}╔════════════════════════════════════════════════════════════════╗{RESET}");
-        println!("{BOLD_CYAN}║{RESET}  {BOLD_WHITE}💻 ShareDash PC-to-PC Multipath Wizard{RESET}                        {BOLD_CYAN}║{RESET}");
-        println!("{BOLD_CYAN}║{RESET}  {GRAY}Bidirectional USB 3.x + 5GHz Wi-Fi Direct High-Speed Engine{RESET}   {BOLD_CYAN}║{RESET}");
+        println!("{BOLD_CYAN}║{RESET}  {BOLD_WHITE}💻 ShareDash PC-to-PC Wireless Mode{RESET}                           {BOLD_CYAN}║{RESET}");
+        println!("{BOLD_CYAN}║{RESET}  {GRAY}Bluetooth Discovery ➔ Dynamic Wi-Fi Hotspot (Pure Wireless){RESET}   {BOLD_CYAN}║{RESET}");
         println!("{BOLD_CYAN}╚════════════════════════════════════════════════════════════════╝{RESET}");
 
         // ═══════════════════════════════════════════════════════════════
-        //  STEP 1: USB-TO-USB CONNECTION CHECK (Fast-Path Priority)
+        //  STEP 1: LOCAL HARDWARE & WI-FI RADIO VERIFICATION
         // ═══════════════════════════════════════════════════════════════
-        print_phase_header(1, "USB Connection Check (Fast-Path Priority)");
+        print_phase_header(1, "Local Wi-Fi & Bluetooth Radio Verification");
 
-        let mut usb_connected = false;
-        let mut usb_target_ip = String::new();
-        let mut usb_target_port: u16 = 54321;
-        let mut usb_name = String::new();
-        let mut usb_desc = String::new();
+        hotspot::ensure_pc_wifi_adapter_enabled().await;
+        let pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
+        let pc_caps = hotspot::detect_pc_wifi_caps().await;
 
-        // Check for USB tethering (RNDIS/NCM)
-        if let Some((ip, name)) = hotspot::detect_usb_tethering_peer_detailed().await {
-            usb_target_ip = ip;
-            usb_name = name;
-            usb_desc = "USB Tethering RNDIS".to_string();
-            usb_connected = true;
+        print_tree_item(
+            "Local PC Wi-Fi Radio",
+            &format!(
+                "{} (PHY: {} Mbps, Bands: {}) [{}]",
+                pc_caps.wifi_standard,
+                pc_caps.max_phy_rate_mbps,
+                pc_caps.supported_bands.join(", "),
+                if pc_wifi_on { "ACTIVE" } else { "OFF" }
+            ),
+            false,
+        );
+
+        let bt_available = crate::discovery::bluetooth::BleDiscovery::check_available().await;
+        print_tree_item(
+            "Bluetooth Radio",
+            if bt_available { "Ready (BLE 4.0+ Active)" } else { "Unavailable / Limited" },
+            true,
+        );
+
+        // ═══════════════════════════════════════════════════════════════
+        //  STEP 2: BLUETOOTH LE ADVERTISING & NEARBY PC DISCOVERY
+        // ═══════════════════════════════════════════════════════════════
+        print_phase_header(2, "Bluetooth LE Discovery & Radar Scan");
+
+        // Start broadcasting our presence over Bluetooth LE
+        let advertiser = crate::discovery::BleAdvertiser::new();
+        let adv_started = advertiser.start_advertising(
+            &self.state.device_name,
+            self.state.server_port,
+            Some(&pc_caps),
+        ).unwrap_or(false);
+
+        if adv_started {
+            print_ok(&format!(
+                "Broadcasting Bluetooth LE beacon: {BOLD}{}{RESET} (Port: {})",
+                self.state.device_name, self.state.server_port
+            ));
+        } else {
+            tracing::warn!("BLE Advertiser could not start; continuing with scan and network discovery.");
         }
 
-        // Check for direct USB / Ethernet / NDIS PC peers
-        if !usb_connected {
-            let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
-            if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.42.")) {
-                usb_target_ip = peer.ip;
-                usb_target_port = peer.port;
-                usb_name = peer.device_name;
-                usb_desc = "USB Direct Link / NDIS".to_string();
-                usb_connected = true;
+        println!("  {CYAN}Scanning for nearby ShareDash PCs over Bluetooth & Wi-Fi...{RESET}");
+        println!("  {GRAY}(Press [Enter] to refresh scan, or enter IP:port to connect directly){RESET}");
+
+        let stdin_handle = tokio::spawn(async {
+            let mut line = String::new();
+            let _ = std::io::stdin().read_line(&mut line);
+            line.trim().to_string()
+        });
+
+        let mut discovered_pc_name = String::new();
+        let mut target_ip = String::new();
+        let mut target_port: u16 = 54321;
+        let mut remote_caps: Option<WifiCapsInfo> = None;
+        let mut discovery_method = "Bluetooth LE";
+
+        let mut ticker = 0;
+        loop {
+            // 1. Check BLE-discovered devices
+            let ble_peers = self.state.ble_discovery.get_ble_peers();
+            if let Some(peer) = ble_peers.into_iter().find(|p| {
+                p.os_name == "Windows"
+                    || p.friendly_name.contains("PC")
+                    || p.friendly_name.contains("ShareDash")
+                    || p.friendly_name.starts_with("SD-")
+            }) {
+                discovered_pc_name = peer.friendly_name;
+                target_port = peer.server_port;
+                remote_caps = peer.wifi_caps;
+                if peer.remote_addr.ip() != std::net::Ipv4Addr::new(0, 0, 0, 0)
+                    && peer.remote_addr.ip() != std::net::Ipv4Addr::new(127, 0, 0, 1)
+                {
+                    target_ip = peer.remote_addr.ip().to_string();
+                }
+                discovery_method = "Bluetooth LE Beacon";
+                stdin_handle.abort();
+                break;
             }
-        }
 
-        // Check for UDP discovery peers on USB/direct/LAN links
-        if !usb_connected {
-            for peer in self.state.discovery.get_active_peers() {
-                let ip_str = peer.remote_addr.ip().to_string();
-                if ip_str != "127.0.0.1" && (ip_str.starts_with("169.254.") || ip_str.starts_with("192.168.") || ip_str.starts_with("10.") || ip_str.starts_with("172.")) {
-                    usb_target_ip = ip_str;
-                    usb_target_port = peer.server_port;
-                    usb_name = peer.friendly_name;
-                    usb_desc = "Direct Link / LAN".to_string();
-                    usb_connected = true;
-                    break;
-                }
+            // 2. Check mDNS / UDP network peers
+            let net_peers = self.state.discovery.get_active_peers();
+            if let Some(peer) = net_peers.into_iter().find(|p| {
+                p.friendly_name != self.state.device_name
+                    && (p.os_name == "Windows"
+                        || p.friendly_name.contains("PC")
+                        || p.friendly_name.contains("ShareDash")
+                        || p.friendly_name.starts_with("SD-")
+                        || p.remote_addr.ip().to_string() != "127.0.0.1")
+            }) {
+                discovered_pc_name = peer.friendly_name;
+                target_ip = peer.remote_addr.ip().to_string();
+                target_port = peer.server_port;
+                remote_caps = peer.wifi_caps;
+                discovery_method = "Local Network Discovery";
+                stdin_handle.abort();
+                break;
             }
-        }
 
-        // If not immediately connected, wait for USB connection
-        if !usb_connected {
-            println!("  ⚡ {BOLD_CYAN}Waiting for USB connection (Plug in USB-C cable & Enable USB Tethering for 3+ Gbps Line Speed)...{RESET}");
-            println!("  {CYAN}💡 Tips:{RESET}");
-            println!("     {WHITE}• Android Phone: Turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering){RESET}");
-            println!("     {WHITE}• PC-to-PC: Plug in USB-C / Thunderbolt cable, or press [Enter] to switch to 5GHz Wi-Fi Mode{RESET}");
-            println!("  {GRAY}Plug in USB cable now (or press [Enter] to switch to Wireless mode, or enter IP:port){RESET}");
-
-            let stdin_handle = tokio::spawn(async {
-                let mut line = String::new();
-                let _ = std::io::stdin().read_line(&mut line);
-                line.trim().to_string()
-            });
-
-            let mut ticker = 0;
-            loop {
-                // Check USB Tethering
-                if let Some((ip, name)) = hotspot::detect_usb_tethering_peer_detailed().await {
-                    usb_target_ip = ip;
-                    usb_name = name;
-                    usb_desc = "USB Tethering RNDIS".to_string();
-                    usb_connected = true;
-                    stdin_handle.abort();
-                    break;
-                }
-
-                // Check direct link peers
-                let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
-                if let Some(peer) = direct_peers.into_iter().find(|p| p.is_usb_direct || p.ip.starts_with("169.254.") || p.ip.starts_with("192.168.") || p.ip.starts_with("10.")) {
-                    usb_target_ip = peer.ip;
-                    usb_target_port = peer.port;
-                    usb_name = peer.device_name;
-                    usb_desc = "USB Direct Link / NDIS".to_string();
-                    usb_connected = true;
-                    stdin_handle.abort();
-                    break;
-                }
-
-                // Check UDP peers
-                for peer in self.state.discovery.get_active_peers() {
-                    let ip_str = peer.remote_addr.ip().to_string();
-                    if ip_str != "127.0.0.1" {
-                        usb_target_ip = ip_str;
-                        usb_target_port = peer.server_port;
-                        usb_name = peer.friendly_name;
-                        usb_desc = "ShareDash Network Link".to_string();
-                        usb_connected = true;
-                        stdin_handle.abort();
-                        break;
-                    }
-                }
-
-                // Check ADB USB
-                let (conn, ser) = self.check_adb_inner().await;
-                if conn {
-                    let _ = self.setup_adb_forward().await;
-                    usb_target_ip = "127.0.0.1".to_string();
-                    usb_target_port = 54325;
-                    usb_name = ser.unwrap_or_else(|| "USB ADB Device".to_string());
-                    usb_desc = "USB ADB Fast-Path".to_string();
-                    usb_connected = true;
-                    stdin_handle.abort();
-                    break;
-                }
-
-                if stdin_handle.is_finished() {
-                    if let Ok(input) = stdin_handle.await {
-                        if !input.is_empty() && input != "q" {
-                            let parts: Vec<&str> = input.split(':').collect();
-                            let ip = parts[0].trim().to_string();
-                            let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
-                            if self.http_probe(&ip, port).await {
-                                usb_target_ip = ip;
-                                usb_target_port = port;
-                                usb_name = "Target Device (Manual IP)".to_string();
-                                usb_desc = "Direct IP".to_string();
-                                usb_connected = true;
-                            }
+            // 3. User manual input
+            if stdin_handle.is_finished() {
+                if let Ok(input) = stdin_handle.await {
+                    if !input.is_empty() && input != "q" {
+                        let parts: Vec<&str> = input.split(':').collect();
+                        let ip = parts[0].trim().to_string();
+                        let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
+                        if self.http_probe(&ip, port).await {
+                            discovered_pc_name = "Target PC (Manual IP)".to_string();
+                            target_ip = ip;
+                            target_port = port;
+                            discovery_method = "Direct IP";
+                            break;
+                        } else {
+                            print_fail(&format!("Could not reach PC at {}:{}", ip, port));
                         }
                     }
-                    break;
                 }
-
-                ticker += 1;
-                if ticker % 2 == 0 {
-                    draw_spinner_frame("Scanning USB direct interfaces & RNDIS adapters...", ticker / 2);
-                }
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                break;
             }
-            print!("\r{}\r", " ".repeat(80));
-        }
 
-        if !usb_connected {
-            println!();
-            println!("  ⚠️  {YELLOW}{BOLD}Continuing without USB (Wireless Mode){RESET}");
-            println!("  {YELLOW}Warning: Wireless transfer speeds might slow down compared to USB 3.x line speed.{RESET}");
-            println!();
-            self.run_wireless_direct_wizard().await;
+            ticker += 1;
+            if ticker % 2 == 0 {
+                draw_spinner_frame("Listening for nearby ShareDash PCs (Bluetooth LE)...", ticker / 2);
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        print!("\r{}\r", " ".repeat(80));
+
+        // Stop advertising now that discovery is progressing
+        advertiser.stop_advertising();
+
+        if discovered_pc_name.is_empty() && target_ip.is_empty() {
+            print_warn("No nearby PC discovered over Bluetooth. Please ensure ShareDash is open on the other PC in Option [2].");
             return;
         }
 
         print_ok(&format!(
-            "USB Connected: {BOLD}{}{RESET} ({}:{} - {})",
-            usb_name, usb_target_ip, usb_target_port, usb_desc
+            "Discovered Remote PC: {BOLD}{}{RESET} (via {})",
+            discovered_pc_name, discovery_method
         ));
 
         // ═══════════════════════════════════════════════════════════════
-        //  STEP 2: HARDWARE CAPABILITY EXCHANGE (VIA USB)
+        //  STEP 3: WI-FI CAPABILITY EXCHANGE & OPTIMAL BAND SELECTION
         // ═══════════════════════════════════════════════════════════════
-        print_phase_header(2, "Hardware Capability Exchange (via USB)");
-        println!("  Exchanging device capabilities and Wi-Fi specs over USB...");
+        print_phase_header(3, "Wi-Fi Compatibility & Optimal Band Selection");
 
-        // Query remote PC Wi-Fi capabilities over USB
-        let remote_caps = self.query_phone_wifi_caps_http(&usb_target_ip, usb_target_port).await;
-        let pc_caps = hotspot::detect_pc_wifi_caps().await;
-        let pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
+        // If remote caps were not in BLE payload, query via HTTP if IP is already available
+        if remote_caps.is_none() && !target_ip.is_empty() {
+            remote_caps = self.query_phone_wifi_caps_http(&target_ip, target_port).await;
+        }
 
-        println!("  Hardware Overview:");
+        let remote_caps_ref = remote_caps.unwrap_or_else(|| WifiCapsInfo {
+            wifi_standard: "Wi-Fi 6 (802.11ax)".to_string(),
+            max_frequency_ghz: 5.0,
+            max_channel_width_mhz: 160,
+            max_phy_rate_mbps: 1200,
+            supported_bands: vec!["2.4 GHz".to_string(), "5 GHz".to_string()],
+        });
+
+        println!("  Hardware Comparison:");
         print_tree_item(
-            "Local PC Wi-Fi",
-            &format!("{} (PHY: {} Mbps) [{}]", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps, if pc_wifi_on { "ON" } else { "OFF" }),
+            "Local PC",
+            &format!("{} (PHY: {} Mbps, {})", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps, pc_caps.supported_bands.join("/")),
             false,
         );
-        if let Some(ref r_caps) = remote_caps {
-            print_tree_item(
-                "Remote PC Wi-Fi",
-                &format!("{} (PHY: {} Mbps)", r_caps.wifi_standard, r_caps.max_phy_rate_mbps),
-                true,
-            );
-        } else {
-            print_tree_item("Remote PC Wi-Fi", "Wi-Fi 6 (802.11ax) (PHY: 1200 Mbps)", true);
-        }
+        print_tree_item(
+            "Remote PC",
+            &format!("{} (PHY: {} Mbps, {})", remote_caps_ref.wifi_standard, remote_caps_ref.max_phy_rate_mbps, remote_caps_ref.supported_bands.join("/")),
+            false,
+        );
+
+        let (i_am_host, selected_band, host_reason) = hotspot::select_optimal_pc_to_pc_host(
+            &pc_caps,
+            &remote_caps_ref,
+            &self.state.device_name,
+            &discovered_pc_name,
+        );
+
+        print_tree_item("Fastest Mutually Supported Band", &format!("{BOLD_GREEN}{}{RESET}", selected_band), false);
+        print_tree_item("Hotspot Host Decision", &host_reason, true);
 
         // ═══════════════════════════════════════════════════════════════
-        //  STEP 3: OPTIMAL HOTSPOT HOST SELECTION (AUTOMATIC DECISION)
+        //  STEP 4: CREATE HOTSPOT ON FASTEST BAND & CONNECT
         // ═══════════════════════════════════════════════════════════════
-        print_phase_header(3, "Optimal Hotspot Host Selection");
-        let remote_caps_ref = remote_caps.as_ref().unwrap_or(&pc_caps);
-        let (_best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, remote_caps_ref).await;
+        print_phase_header(4, &format!("Provisioning {} Mobile Hotspot", selected_band));
 
-        println!("  {}", host_reason);
-
-        // Deterministic host decision: compare PHY rates, then device_name as tie-breaker
-        let i_am_host = if pc_caps.max_phy_rate_mbps != remote_caps_ref.max_phy_rate_mbps {
-            pc_caps.max_phy_rate_mbps >= remote_caps_ref.max_phy_rate_mbps
-        } else {
-            self.state.device_name <= usb_name
-        };
-
-        if i_am_host {
-            print_ok("PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
-        } else {
-            print_ok("Remote PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        //  STEP 4: CREATE 5GHz HOTSPOT & SHARE CREDENTIALS OVER USB
-        // ═══════════════════════════════════════════════════════════════
-        print_phase_header(4, "Creating 5GHz Hotspot & Sharing over USB");
         let (ssid, password) = hotspot::generate_hotspot_credentials();
         let mut wifi_ready = false;
         let mut wifi_ip: Option<String> = None;
 
         if i_am_host {
-            println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
-            let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
-
-            match hotspot_res {
+            println!("  Starting Local PC {} Hotspot: {BOLD}{ssid}{RESET}...", selected_band);
+            match hotspot::create_hotspot_with_band(&ssid, &password, &selected_band).await {
                 Ok(info) => {
-                    print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
+                    print_ok(&format!("Local Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
 
-                    with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
+                    // If remote IP is known, push credentials via HTTP
+                    let mut credentials_sent = false;
+                    if !target_ip.is_empty() {
+                        credentials_sent = self.send_wifi_connect_over_usb(&target_ip, target_port, &info.ssid, &info.password).await;
+                    }
+
+                    if credentials_sent {
+                        println!("  Sent hotspot credentials to remote PC. Waiting for auto-connection...");
+                    } else {
+                        println!();
+                        println!("  {BOLD_YELLOW}Hotspot Ready for Client Connection:{RESET}");
+                        println!("    • Network (SSID): {BOLD_WHITE}{}{RESET}", info.ssid);
+                        println!("    • Password:       {BOLD_WHITE}{}{RESET}", info.password);
+                        println!("    • Band:           {BOLD_GREEN}{}{RESET}", info.band);
+                        println!();
+                    }
+
+                    let client_ip = with_spinner(&format!("Waiting for remote PC on {} Hotspot...", selected_band), async {
+                        for _ in 0..40 {
+                            if let Some(ip) = hotspot::fast_scan_hotspot_clients(target_port).await {
+                                return Some(ip);
+                            }
+                            tokio::time::sleep(Duration::from_millis(400)).await;
+                        }
+                        None
                     }).await;
 
-                    println!("  Sending hotspot credentials to remote PC through USB...");
-                    let sent = self.send_wifi_connect_over_usb(&usb_target_ip, usb_target_port, &info.ssid, &info.password).await;
-                    if sent {
-                        print_ok("Remote PC received credentials via USB and connecting to 5GHz Hotspot (1200 Mbps)...");
-                        let client_ip = with_spinner("Waiting for remote PC on 5GHz Wi-Fi...", async {
-                            for _ in 0..30 {
-                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
-                                    return Some(ip);
-                                }
-                                tokio::time::sleep(Duration::from_millis(300)).await;
+                    if let Some(ip) = client_ip {
+                        if self.http_probe(&ip, target_port).await {
+                            let synack = self.pair_handshake_target(&ip, target_port).await;
+                            if synack {
+                                print_ok(&format!("Remote PC connected & paired on {} Wi-Fi ({} Mbps Link)! IP: {}", selected_band, pc_caps.max_phy_rate_mbps, ip));
+                                wifi_ip = Some(ip);
+                                wifi_ready = true;
                             }
-                            None
-                        }).await;
-
-                        if let Some(ip) = client_ip {
-                            if self.http_probe(&ip, 54321).await {
-                                let synack = self.pair_handshake_target(&ip, 54321).await;
-                                if synack {
-                                    print_ok(&format!("Remote PC connected & paired on 5GHz Hotspot (1200 Mbps Link Speed)! IP: {}", ip));
-                                    wifi_ip = Some(ip);
-                                    wifi_ready = true;
-                                }
-                            }
-                        } else {
-                            print_warn("Remote PC did not associate to 5GHz Wi-Fi. Continuing with Turbo USB...");
                         }
                     } else {
-                        print_warn("Could not send credentials to remote PC via USB.");
+                        print_warn("Timed out waiting for client on Wi-Fi hotspot.");
                     }
                 }
                 Err(e) => {
-                    print_warn(&format!("PC Hotspot creation: {}. Trying remote PC hotspot...", e));
-                    if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_target_ip, usb_target_port).await {
-                        print_ok(&format!("Remote PC Hotspot started via USB: {}", p_ssid));
-                        println!("  Connecting local PC to remote PC 5GHz hotspot (1200 Mbps)...");
-                        let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                        let detected_ip = with_spinner("Waiting for local PC to acquire IP on 5GHz network...", async {
-                            hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
-                        }).await;
-                        if let Some(target) = detected_ip {
-                            if self.http_probe(&target, 54321).await {
-                                let synack = self.pair_handshake_target(&target, 54321).await;
-                                if synack {
-                                    print_ok(&format!("Direct 5GHz Wi-Fi link verified (1200 Mbps): {}:54321", target));
-                                    wifi_ip = Some(target);
-                                    wifi_ready = true;
-                                }
-                            }
-                        }
-                    }
+                    print_fail(&format!("Failed to start Local PC hotspot: {}", e));
                 }
             }
         } else {
             // Remote PC is Host
-            println!("  Requesting Remote PC to start 5GHz Hotspot over USB...");
-            if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_target_ip, usb_target_port).await {
-                print_ok(&format!("Remote PC 5GHz Hotspot Active: SSID='{}'", p_ssid));
-                println!("  Connecting local PC to remote PC 5GHz hotspot (1200 Mbps Link Speed)...");
-                let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                let detected_ip = with_spinner("Waiting for local PC to bind to 5GHz network...", async {
-                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
-                }).await;
-                if let Some(target) = detected_ip {
-                    if self.http_probe(&target, 54321).await {
-                        let synack = self.pair_handshake_target(&target, 54321).await;
-                        if synack {
-                            print_ok(&format!("5GHz Wi-Fi Direct link verified & paired (1200 Mbps): {}:54321", target));
-                            wifi_ip = Some(target);
-                            wifi_ready = true;
+            println!("  Requesting Remote PC to start {} Hotspot...", selected_band);
+            let mut hotspot_started = false;
+
+            if !target_ip.is_empty() {
+                if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_with_band(&target_ip, target_port, &selected_band).await {
+                    print_ok(&format!("Remote PC Hotspot started: SSID='{}'", p_ssid));
+                    println!("  Auto-connecting local PC Wi-Fi to {} hotspot...", selected_band);
+                    let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
+                    let detected_ip = with_spinner("Waiting for local PC to acquire IP on hotspot network...", async {
+                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
+                    }).await;
+
+                    if let Some(target) = detected_ip {
+                        if self.http_probe(&target, target_port).await {
+                            let synack = self.pair_handshake_target(&target, target_port).await;
+                            if synack {
+                                print_ok(&format!("{} Wi-Fi link verified & paired: {}:{}", selected_band, target, target_port));
+                                wifi_ip = Some(target);
+                                wifi_ready = true;
+                                hotspot_started = true;
+                            }
                         }
                     }
                 }
-            } else {
-                print_warn("Remote PC hotspot start failed over USB. Trying local PC Hotspot fallback...");
-                if let Ok(info) = hotspot::create_hotspot(&ssid, &password, true).await {
-                    let sent = self.send_wifi_connect_over_usb(&usb_target_ip, usb_target_port, &info.ssid, &info.password).await;
-                    if sent {
-                        let client_ip = with_spinner("Waiting for remote PC on local 5GHz Wi-Fi...", async {
-                            for _ in 0..20 {
-                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
-                                    return Some(ip);
-                                }
-                                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+
+            // Fallback: If remote PC couldn't host, host locally
+            if !hotspot_started {
+                print_warn("Remote PC hotspot unavailable; falling back to hosting locally...");
+                if let Ok(info) = hotspot::create_hotspot_with_band(&ssid, &password, &selected_band).await {
+                    print_ok(&format!("Local Fallback Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
+                    if !target_ip.is_empty() {
+                        let _ = self.send_wifi_connect_over_usb(&target_ip, target_port, &info.ssid, &info.password).await;
+                    }
+                    let client_ip = with_spinner("Waiting for remote PC on local Wi-Fi...", async {
+                        for _ in 0..30 {
+                            if let Some(ip) = hotspot::fast_scan_hotspot_clients(target_port).await {
+                                return Some(ip);
                             }
-                            None
-                        }).await;
-                        if let Some(client_ip) = client_ip {
-                            if self.http_probe(&client_ip, 54321).await {
-                                let synack = self.pair_handshake_target(&client_ip, 54321).await;
-                                if synack {
-                                    print_ok(&format!("Remote PC connected to local 5GHz hotspot (1200 Mbps): {}", client_ip));
-                                    wifi_ip = Some(client_ip);
-                                    wifi_ready = true;
-                                }
+                            tokio::time::sleep(Duration::from_millis(400)).await;
+                        }
+                        None
+                    }).await;
+                    if let Some(client_ip) = client_ip {
+                        if self.http_probe(&client_ip, target_port).await {
+                            let synack = self.pair_handshake_target(&client_ip, target_port).await;
+                            if synack {
+                                print_ok(&format!("Remote PC connected & paired! IP: {}", client_ip));
+                                wifi_ip = Some(client_ip);
+                                wifi_ready = true;
                             }
                         }
                     }
@@ -1084,33 +1070,60 @@ impl TerminalCli {
         }
 
         // ═══════════════════════════════════════════════════════════════
-        //  STEP 5: USB 3-WAY HANDSHAKE (MULTIPATH LINK VERIFICATION)
+        //  STEP 5: HIGH-SPEED WI-FI FILE TRANSFER
         // ═══════════════════════════════════════════════════════════════
-        print_phase_header(5, "USB + Wi-Fi Multipath Link Handshake");
-        let syn = self.http_probe(&usb_target_ip, usb_target_port).await;
-        print_step_result(&format!("USB SYN  → {}:{}", usb_target_ip, usb_target_port), syn);
-
-        let mut usb_ready = false;
-        if syn {
-            let synack = self.pair_handshake_target(&usb_target_ip, usb_target_port).await;
-            print_step_result(&format!("USB ACK  ← {}", usb_name), synack);
-            if synack {
-                println!("  🔒 USB Channel {GREEN}READY{RESET} (AES-256-GCM Line Speed: up to 3+ Gbps)");
-                usb_ready = true;
+        if !wifi_ready {
+            // Check if existing network IP is reachable as a direct fallback
+            if !target_ip.is_empty() && self.http_probe(&target_ip, target_port).await {
+                let synack = self.pair_handshake_target(&target_ip, target_port).await;
+                if synack {
+                    print_ok(&format!("Connected via existing Wi-Fi LAN link: {}:{}", target_ip, target_port));
+                    wifi_ip = Some(target_ip);
+                    wifi_ready = true;
+                }
             }
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  STEP 6: BIDIRECTIONAL FILE & FOLDER SEND / RECEIVE LOOP
-        // ═══════════════════════════════════════════════════════════════
+        if !wifi_ready {
+            print_fail("Could not establish a direct Wi-Fi link between the two PCs.");
+            return;
+        }
+
+        print_phase_header(5, &format!("Ultra-Fast {} Wi-Fi Transfer Channel Ready", selected_band));
+
         self.send_file_multipath_loop(
-            wifi_ready,
-            wifi_ip,
-            usb_ready,
-            usb_target_ip,
-            usb_target_port,
+            true,              // wifi_ready
+            wifi_ip,           // wifi_ip
+            false,             // usb_ready (No USB in PC-to-PC!)
+            String::new(),     // usb_target_ip empty
+            target_port,
             false,
         ).await;
+    }
+
+    async fn send_start_hotspot_with_band(&self, ip: &str, port: u16, band: &str) -> Option<(String, String, String)> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .ok()?;
+        let url = format!("http://{}:{}/api/v1/hotspot/start", ip, port);
+        let body = serde_json::json!({
+            "band": band
+        });
+        for _ in 0..3 {
+            if let Ok(resp) = client.post(&url).json(&body).send().await {
+                if resp.status().is_success() {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        let ssid = json.get("ssid")?.as_str()?.to_string();
+                        let password = json.get("password")?.as_str()?.to_string();
+                        let gw = json.get("gateway").and_then(|g| g.as_str()).unwrap_or("192.168.137.1").to_string();
+                        return Some((ssid, password, gw));
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
+        None
     }
 
     /// Helper HTTP calls over USB

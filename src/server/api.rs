@@ -144,21 +144,28 @@ pub async fn handle_wifi_connect(
     }))
 }
 
-pub async fn handle_start_hotspot() -> impl IntoResponse {
+pub async fn handle_start_hotspot(body: axum::body::Bytes) -> impl IntoResponse {
+    let band = if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&body) {
+        json.get("band").and_then(|b| b.as_str()).unwrap_or("5 GHz").to_string()
+    } else {
+        "5 GHz".to_string()
+    };
     let (ssid, password) = hotspot::generate_hotspot_credentials();
-    match hotspot::create_hotspot(&ssid, &password, true).await {
+    match hotspot::create_hotspot_with_band(&ssid, &password, &band).await {
         Ok(info) => Json(serde_json::json!({
             "success": true,
             "ssid": info.ssid,
             "password": info.password,
-            "gateway": info.gateway_ip
+            "gateway": info.gateway_ip,
+            "band": info.band
         })),
         Err(e) => Json(serde_json::json!({
             "success": false,
             "error": e.to_string(),
             "ssid": ssid,
             "password": password,
-            "gateway": "192.168.137.1"
+            "gateway": "192.168.137.1",
+            "band": band
         })),
     }
 }

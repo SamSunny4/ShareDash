@@ -200,20 +200,71 @@ impl BleDiscovery {
         };
 
         let has_sharedash_service = properties.services.iter().any(|s| *s == sharedash_uuid)
-            || properties.service_data.contains_key(&sharedash_uuid);
+            || properties.service_data.contains_key(&sharedash_uuid)
+            || properties.manufacturer_data.contains_key(&0x5344)
+            || properties.local_name.as_ref().map(|n| n.contains("ShareDash")).unwrap_or(false);
 
         if !has_sharedash_service {
             return;
         }
 
-        let device_name = properties.local_name.unwrap_or_else(|| "Android Device".to_string());
+        let raw_name = properties.local_name.clone().unwrap_or_default();
+        let mut os_name = if raw_name.contains("PC") || raw_name.contains("Windows") {
+            "Windows".to_string()
+        } else {
+            "Android".to_string()
+        };
 
-        // Try to extract IP address, port, and Wi-Fi capabilities from service data
+        let device_name = if !raw_name.is_empty() {
+            raw_name
+        } else if os_name == "Windows" {
+            "ShareDash PC".to_string()
+        } else {
+            "Android Device".to_string()
+        };
+
+        // Try to extract IP address, port, and Wi-Fi capabilities from service data or manufacturer data
         let mut wifi_caps: Option<WifiCapsInfo> = None;
-        let (ip_addr, port) = if let Some(service_data) = properties.service_data.get(&sharedash_uuid) {
+        let mut port = 54321;
+        let mut ip_addr: Option<Ipv4Addr> = None;
+
+        // 1. Check ShareDash manufacturer data (used by Windows PCs)
+        if let Some(mfg) = properties.manufacturer_data.get(&0x5344) {
+            if !mfg.is_empty() && mfg[0] == 0x01 {
+                os_name = "Windows".to_string();
+            }
+            if mfg.len() >= 3 {
+                port = ((mfg[1] as u16) << 8) | (mfg[2] as u16);
+            }
+            if mfg.len() >= 8 {
+                let std_num = mfg[3];
+                let max_freq = (mfg[4] as f64) / 10.0;
+                let max_phy = ((mfg[5] as u32) << 8) | (mfg[6] as u32);
+                let bands_mask = mfg[7];
+                let mut bands = vec!["2.4 GHz".to_string()];
+                if bands_mask & 0x02 != 0 { bands.push("5 GHz".to_string()); }
+                if bands_mask & 0x04 != 0 { bands.push("6 GHz".to_string()); }
+                let standard_str = match std_num {
+                    7 => "Wi-Fi 7 (802.11be)",
+                    6 if max_freq >= 6.0 => "Wi-Fi 6E (802.11ax)",
+                    6 => "Wi-Fi 6 (802.11ax)",
+                    _ => "Wi-Fi 5 (802.11ac)",
+                };
+                wifi_caps = Some(WifiCapsInfo {
+                    wifi_standard: standard_str.to_string(),
+                    max_frequency_ghz: if max_freq > 0.0 { max_freq } else { 5.0 },
+                    max_channel_width_mhz: 160,
+                    max_phy_rate_mbps: if max_phy > 0 { max_phy } else { 1200 },
+                    supported_bands: bands,
+                });
+            }
+        }
+
+        // 2. Check service data (used by Android devices)
+        if let Some(service_data) = properties.service_data.get(&sharedash_uuid) {
             if service_data.len() >= 12 {
                 let ip = Ipv4Addr::new(service_data[0], service_data[1], service_data[2], service_data[3]);
-                let port = ((service_data[4] as u16) << 8) | (service_data[5] as u16);
+                port = ((service_data[4] as u16) << 8) | (service_data[5] as u16);
                 let std_num = service_data[6];
                 let max_freq = (service_data[7] as f64) / 10.0;
                 let max_bw = service_data[8] as u32;
@@ -235,22 +286,18 @@ impl BleDiscovery {
                     max_phy_rate_mbps: if max_phy > 0 { max_phy } else { 1200 },
                     supported_bands: bands,
                 });
-                (Some(ip), port)
+                ip_addr = Some(ip);
             } else if service_data.len() >= 6 {
                 let ip = Ipv4Addr::new(service_data[0], service_data[1], service_data[2], service_data[3]);
-                let port = ((service_data[4] as u16) << 8) | (service_data[5] as u16);
-                (Some(ip), port)
+                port = ((service_data[4] as u16) << 8) | (service_data[5] as u16);
+                ip_addr = Some(ip);
             } else if service_data.len() >= 4 {
                 let ip = Ipv4Addr::new(service_data[0], service_data[1], service_data[2], service_data[3]);
-                (Some(ip), 54321)
-            } else {
-                (None, 54321)
+                ip_addr = Some(ip);
             }
-        } else {
-            (None, 54321)
-        };
+        }
 
-        // If IP from BLE is 0.0.0.0 or not set, check if PC is connected to Phone Hotspot (192.168.43.x / 192.168.49.x)
+        // If IP from BLE is 0.0.0.0 or not set, check if PC is connected to Hotspot
         let resolved_ip = match ip_addr {
             Some(ip) if !ip.is_unspecified() && ip != Ipv4Addr::new(127, 0, 0, 1) => Some(ip),
             _ => {
@@ -263,6 +310,9 @@ impl BleDiscovery {
                             break;
                         } else if ip_str.starts_with("192.168.49.") && ip_str != "192.168.49.1" {
                             gw = Some(Ipv4Addr::new(192, 168, 49, 1));
+                            break;
+                        } else if ip_str.starts_with("192.168.137.") && ip_str != "192.168.137.1" {
+                            gw = Some(Ipv4Addr::new(192, 168, 137, 1));
                             break;
                         }
                     }
@@ -282,7 +332,7 @@ impl BleDiscovery {
                 let peer = DiscoveredPeer {
                     device_id: device_id.clone(),
                     friendly_name: device_name,
-                    os_name: "Android".to_string(),
+                    os_name,
                     remote_addr,
                     server_port: port,
                     app_version: super::CURRENT_APP_VERSION.to_string(),
@@ -297,7 +347,7 @@ impl BleDiscovery {
             let peer = DiscoveredPeer {
                 device_id: device_id.clone(),
                 friendly_name: device_name,
-                os_name: "Android".to_string(),
+                os_name,
                 remote_addr: "0.0.0.0:0".parse().unwrap(),
                 server_port: port,
                 app_version: super::CURRENT_APP_VERSION.to_string(),
@@ -579,4 +629,124 @@ impl BleDiscovery {
         self.stop_flag.store(true, Ordering::SeqCst);
     }
 }
+
+/// Windows BLE Advertiser for PC-to-PC Discovery
+#[derive(Clone)]
+pub struct BleAdvertiser {
+    #[cfg(target_os = "windows")]
+    publisher: Arc<Mutex<Option<windows::Devices::Bluetooth::Advertisement::BluetoothLEAdvertisementPublisher>>>,
+    #[cfg(not(target_os = "windows"))]
+    _dummy: (),
+}
+
+impl BleAdvertiser {
+    pub fn new() -> Self {
+        Self {
+            #[cfg(target_os = "windows")]
+            publisher: Arc::new(Mutex::new(None)),
+            #[cfg(not(target_os = "windows"))]
+            _dummy: (),
+        }
+    }
+
+    /// Start advertising this PC over Bluetooth Low Energy
+    pub fn start_advertising(&self, local_name: &str, server_port: u16, caps: Option<&WifiCapsInfo>) -> Result<bool> {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::core::HSTRING;
+            use windows::Devices::Bluetooth::Advertisement::{
+                BluetoothLEAdvertisementPublisher, BluetoothLEManufacturerData,
+            };
+            use windows::Storage::Streams::DataWriter;
+
+            let publisher = match BluetoothLEAdvertisementPublisher::new() {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("Failed to create BLE advertisement publisher: {:?}", e);
+                    return Ok(false);
+                }
+            };
+
+            if let Ok(adv) = publisher.Advertisement() {
+                let name = if local_name.starts_with("ShareDash") {
+                    local_name.to_string()
+                } else {
+                    format!("ShareDash-{}", local_name)
+                };
+                let _ = adv.SetLocalName(&HSTRING::from(name));
+
+                // Add ShareDash Service UUID: 00005344-0000-1000-8000-00805f9b34fb
+                if let Ok(uuids) = adv.ServiceUuids() {
+                    let sd_guid = windows::core::GUID::from_u128(0x00005344_0000_1000_8000_00805f9b34fb);
+                    let _ = uuids.Append(sd_guid);
+                }
+
+                // Add ShareDash Manufacturer Data (CompanyId: 0x5344)
+                if let (Ok(mfg_data), Ok(writer)) = (BluetoothLEManufacturerData::new(), DataWriter::new()) {
+                    let _ = mfg_data.SetCompanyId(0x5344);
+                    let _ = writer.WriteByte(0x01); // 0x01 = Windows PC
+                    let _ = writer.WriteUInt16(server_port);
+                    
+                    let std_num: u8 = if let Some(c) = caps {
+                        if c.wifi_standard.contains("Wi-Fi 7") { 7 }
+                        else if c.wifi_standard.contains("Wi-Fi 6") { 6 }
+                        else { 5 }
+                    } else { 6 };
+                    let freq_byte = caps.map(|c| (c.max_frequency_ghz * 10.0) as u8).unwrap_or(50);
+                    let phy_rate = caps.map(|c| c.max_phy_rate_mbps as u16).unwrap_or(1200);
+                    let mut bands_mask: u8 = 0x01;
+                    if let Some(c) = caps {
+                        if c.supported_bands.iter().any(|b| b.contains("5 GHz")) { bands_mask |= 0x02; }
+                        if c.supported_bands.iter().any(|b| b.contains("6 GHz")) { bands_mask |= 0x04; }
+                    } else {
+                        bands_mask |= 0x02;
+                    }
+
+                    let _ = writer.WriteByte(std_num);
+                    let _ = writer.WriteByte(freq_byte);
+                    let _ = writer.WriteUInt16(phy_rate);
+                    let _ = writer.WriteByte(bands_mask);
+
+                    if let Ok(buf) = writer.DetachBuffer() {
+                        let _ = mfg_data.SetData(&buf);
+                        if let Ok(mfg_list) = adv.ManufacturerData() {
+                            let _ = mfg_list.Append(&mfg_data);
+                        }
+                    }
+                }
+            }
+
+            match publisher.Start() {
+                Ok(_) => {
+                    tracing::info!("Started BLE advertisement as '{}' on port {}", local_name, server_port);
+                    *self.publisher.lock() = Some(publisher);
+                    Ok(true)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start BLE advertisement publisher: {:?}", e);
+                    Ok(false)
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (local_name, server_port, caps);
+            Ok(false)
+        }
+    }
+
+    /// Stop BLE advertising
+    pub fn stop_advertising(&self) {
+        #[cfg(target_os = "windows")]
+        {
+            let mut lock = self.publisher.lock();
+            if let Some(ref publ) = *lock {
+                let _ = publ.Stop();
+                tracing::info!("Stopped BLE advertisement.");
+            }
+            *lock = None;
+        }
+    }
+}
+
 

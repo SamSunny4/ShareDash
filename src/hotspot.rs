@@ -172,67 +172,66 @@ pub fn select_best_hotspot_host(_pc_caps: &WifiCapsInfo, _phone_caps: &WifiCapsI
     HotspotHostChoice::Phone
 }
 
-/// Create and start a Windows Mobile Hotspot.
-///
-/// Uses the modern Windows Mobile Hotspot via `netsh wlan` commands.
-/// Falls back to opening Settings if direct control fails.
-pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Result<HotspotInfo> {
+/// Select the optimal PC to host the Mobile Hotspot and determine the fastest mutually supported band.
+pub fn select_optimal_pc_to_pc_host(
+    local_caps: &WifiCapsInfo,
+    remote_caps: &WifiCapsInfo,
+    local_name: &str,
+    remote_name: &str,
+) -> (bool, String, String) {
+    // 1. Determine fastest mutually supported band
+    let local_has_6g = local_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) || local_caps.max_frequency_ghz >= 6.0;
+    let remote_has_6g = remote_caps.supported_bands.iter().any(|b| b.contains("6 GHz")) || remote_caps.max_frequency_ghz >= 6.0;
+    let local_has_5g = local_caps.supported_bands.iter().any(|b| b.contains("5 GHz")) || local_caps.max_frequency_ghz >= 5.0;
+    let remote_has_5g = remote_caps.supported_bands.iter().any(|b| b.contains("5 GHz")) || remote_caps.max_frequency_ghz >= 5.0;
+
+    let selected_band = if local_has_6g && remote_has_6g {
+        "6 GHz".to_string()
+    } else if local_has_5g && remote_has_5g {
+        "5 GHz".to_string()
+    } else {
+        "2.4 GHz".to_string()
+    };
+
+    // 2. Select host: higher max_phy_rate_mbps wins, then channel width, then name tie-breaker
+    let (i_am_host, reason) = if local_caps.max_phy_rate_mbps != remote_caps.max_phy_rate_mbps {
+        let local_better = local_caps.max_phy_rate_mbps > remote_caps.max_phy_rate_mbps;
+        let r = format!(
+            "{} selected as Host based on superior Wi-Fi hardware PHY rate ({} Mbps vs {} Mbps) on {} band",
+            if local_better { local_name } else { remote_name },
+            std::cmp::max(local_caps.max_phy_rate_mbps, remote_caps.max_phy_rate_mbps),
+            std::cmp::min(local_caps.max_phy_rate_mbps, remote_caps.max_phy_rate_mbps),
+            selected_band
+        );
+        (local_better, r)
+    } else if local_caps.max_channel_width_mhz != remote_caps.max_channel_width_mhz {
+        let local_better = local_caps.max_channel_width_mhz > remote_caps.max_channel_width_mhz;
+        let r = format!(
+            "{} selected as Host based on wider channel width ({} MHz vs {} MHz) on {} band",
+            if local_better { local_name } else { remote_name },
+            std::cmp::max(local_caps.max_channel_width_mhz, remote_caps.max_channel_width_mhz),
+            std::cmp::min(local_caps.max_channel_width_mhz, remote_caps.max_channel_width_mhz),
+            selected_band
+        );
+        (local_better, r)
+    } else {
+        let local_better = local_name <= remote_name;
+        let r = format!(
+            "Matched Wi-Fi capability ({} / {} Mbps). {} elected as Host on {} band",
+            local_caps.wifi_standard, local_caps.max_phy_rate_mbps,
+            if local_better { local_name } else { remote_name },
+            selected_band
+        );
+        (local_better, r)
+    };
+
+    (i_am_host, selected_band, reason)
+}
+
+/// Create and start a Windows Mobile Hotspot targeting a specific band (5 GHz, 6 GHz, 2.4 GHz, or Auto).
+pub async fn create_hotspot_with_band(ssid: &str, password: &str, target_band: &str) -> Result<HotspotInfo> {
     #[cfg(target_os = "windows")]
     {
-        // Step 1: Configure the hosted network
-        let _ = band_5ghz;
-
-        // Try using netsh wlan to set up a hosted network
-        let configure = tokio::process::Command::new("netsh")
-            .args([
-                "wlan",
-                "set",
-                "hostednetwork",
-                &format!("mode=allow"),
-                &format!("ssid={}", ssid),
-                &format!("key={}", password),
-            ])
-            .output()
-            .await;
-
-        match configure {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                tracing::info!("Hotspot configure: {}", stdout.trim());
-
-                if stdout.contains("success") || stdout.contains("hosted network") || output.status.success() {
-                    // Step 2: Start the hosted network
-                    let start = tokio::process::Command::new("netsh")
-                        .args(["wlan", "start", "hostednetwork"])
-                        .output()
-                        .await;
-
-                    match start {
-                        Ok(start_output) => {
-                            let start_msg = String::from_utf8_lossy(&start_output.stdout);
-                            tracing::info!("Hotspot start: {}", start_msg.trim());
-
-                            if start_msg.contains("started") || start_output.status.success() {
-                                return Ok(HotspotInfo {
-                                    ssid: ssid.to_string(),
-                                    password: password.to_string(),
-                                    band: if band_5ghz { "5 GHz".to_string() } else { "Auto".to_string() },
-                                    gateway_ip: "192.168.137.1".to_string(),
-                                    is_active: true,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to start hostednetwork: {}", e);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("netsh hostednetwork not available: {}", e);
-            }
-        }
-
         // Step 1: Force enable Wi-Fi interface if disabled
         let _ = tokio::process::Command::new("powershell")
             .args([
@@ -263,8 +262,19 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
                     $config = $manager.GetCurrentAccessPointConfiguration()
                     $config.Ssid = '{ssid}'
                     $config.Passphrase = '{password}'
+                    $targetBand = '{target_band}'
                     try {{
-                        $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::FiveGigahertz
+                        if ($targetBand -eq '5 GHz' -or $targetBand -eq '6 GHz') {{
+                            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::FiveGigahertz
+                        }} elseif ($targetBand -eq '2.4 GHz') {{
+                            $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::TwoPointFourGigahertz
+                        }} else {{
+                            try {{
+                                $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::FiveGigahertz
+                            }} catch {{
+                                $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
+                            }}
+                        }}
                     }} catch {{
                         try {{
                             $config.Band = [Windows.Networking.NetworkOperators.TetheringWiFiBand]::Auto
@@ -306,6 +316,7 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
             "#,
             ssid = ssid,
             password = password,
+            target_band = target_band,
         );
 
         let ps_result = tokio::process::Command::new("powershell")
@@ -322,7 +333,7 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
                     return Ok(HotspotInfo {
                         ssid: ssid.to_string(),
                         password: password.to_string(),
-                        band: if band_5ghz { "5 GHz".to_string() } else { "Auto".to_string() },
+                        band: target_band.to_string(),
                         gateway_ip: detect_hotspot_gateway().await.unwrap_or("192.168.137.1".to_string()),
                         is_active: true,
                     });
@@ -341,7 +352,7 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
         Ok(HotspotInfo {
             ssid: ssid.to_string(),
             password: password.to_string(),
-            band: if band_5ghz { "5 GHz".to_string() } else { "Auto".to_string() },
+            band: target_band.to_string(),
             gateway_ip: "192.168.137.1".to_string(),
             is_active: false,
         })
@@ -349,8 +360,14 @@ pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Resu
 
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = (ssid, password, target_band);
         Err(anyhow!("Hotspot management is only supported on Windows"))
     }
+}
+
+/// Create and start a Windows Mobile Hotspot (defaults to 5 GHz if band_5ghz is true).
+pub async fn create_hotspot(ssid: &str, password: &str, band_5ghz: bool) -> Result<HotspotInfo> {
+    create_hotspot_with_band(ssid, password, if band_5ghz { "5 GHz" } else { "Auto" }).await
 }
 
 /// Stop the hosted network / mobile hotspot.
