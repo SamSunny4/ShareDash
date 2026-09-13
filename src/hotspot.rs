@@ -846,6 +846,7 @@ pub async fn wait_for_phone_hotspot_interface(
 ) -> Option<String> {
     let start = std::time::Instant::now();
     let target_gw = expected_gateway.unwrap_or("192.168.49.1");
+    let mut detected_subnet_gw: Option<String> = None;
 
     let mut attempt = 0;
     while start.elapsed() < timeout {
@@ -873,16 +874,20 @@ pub async fn wait_for_phone_hotspot_interface(
                         wifi_ip.starts_with("192.168.49.")
                     } else if target_gw.starts_with("192.168.43.") {
                         wifi_ip.starts_with("192.168.43.")
+                    } else if target_gw.starts_with("192.168.137.") {
+                        wifi_ip.starts_with("192.168.137.")
                     } else {
                         let target_prefix: String = target_gw.split('.').take(3).collect::<Vec<_>>().join(".");
                         wifi_ip.starts_with(&target_prefix)
                     };
 
                     if is_target_subnet {
+                        detected_subnet_gw = Some(target_gw.to_string());
+
                         if let Ok(local_ip_addr) = wifi_ip.parse::<std::net::IpAddr>() {
                             let bound_client = reqwest::Client::builder()
                                 .local_address(local_ip_addr)
-                                .timeout(Duration::from_millis(600))
+                                .timeout(Duration::from_millis(1500))
                                 .build()
                                 .unwrap_or_default();
 
@@ -894,12 +899,25 @@ pub async fn wait_for_phone_hotspot_interface(
                                 }
                             }
                         }
+
+                        // Also attempt quick standard probe
+                        let std_client = reqwest::Client::builder()
+                            .timeout(Duration::from_millis(1500))
+                            .build()
+                            .unwrap_or_default();
+                        let url = format!("http://{}:54321/api/v1/info", target_gw);
+                        if let Ok(resp) = std_client.get(&url).send().await {
+                            if resp.status().is_success() {
+                                tracing::info!("Verified Wi-Fi Direct link -> {}", target_gw);
+                                return Some(target_gw.to_string());
+                            }
+                        }
                     }
                 }
             }
 
-            // 2. Retry connect if still connecting (every 1.5s)
-            if attempt % 3 == 0 {
+            // 2. Retry connect if still connecting (every 3s)
+            if attempt % 6 == 0 {
                 let _ = tokio::process::Command::new("netsh")
                     .args(["wlan", "connect", &format!("name={}", target_ssid), &format!("ssid={}", target_ssid), "interface=Wi-Fi"])
                     .output()
@@ -910,7 +928,7 @@ pub async fn wait_for_phone_hotspot_interface(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    None
+    detected_subnet_gw
 }
 
 /// Detect if the PC is connected to a phone hotspot by looking for candidate gateway interfaces.

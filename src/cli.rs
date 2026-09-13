@@ -414,16 +414,18 @@ impl TerminalCli {
                             println!("  Connecting PC to phone hotspot...");
                             let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                             let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot...", async {
-                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
+                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
                             }).await;
                             if let Some(target) = detected_ip {
-                                if self.http_probe(&target, 54321).await {
-                                    let synack = self.pair_handshake_target(&target, 54321).await;
-                                    if synack {
-                                        print_ok(&format!("Direct 5GHz Wi-Fi link verified: {}:54321", target));
-                                        wifi_ip = Some(target);
-                                        wifi_ready = true;
-                                    }
+                                let verified = with_spinner("Verifying Wi-Fi link & pairing with phone...", async {
+                                    self.verify_and_pair_wifi_with_retries(&target, 54321, 15).await
+                                }).await;
+                                if verified {
+                                    print_ok(&format!("Direct 5GHz Wi-Fi link verified & paired: {}:54321", target));
+                                    wifi_ip = Some(target);
+                                    wifi_ready = true;
+                                } else {
+                                    print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
                                 }
                             }
                         }
@@ -437,18 +439,16 @@ impl TerminalCli {
                     println!("  Connecting PC to phone 5GHz hotspot...");
                     let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                     let detected_ip = with_spinner("Waiting for PC to bind to 5GHz network...", async {
-                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
+                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
                     }).await;
                     if let Some(target) = detected_ip {
-                        if self.http_probe(&target, 54321).await {
-                            let synack = self.pair_handshake_target(&target, 54321).await;
-                            if synack {
-                                print_ok(&format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target));
-                                wifi_ip = Some(target);
-                                wifi_ready = true;
-                            } else {
-                                print_warn(&format!("Wi-Fi handshake failed at {}:54321. Wi-Fi disabled.", target));
-                            }
+                        let verified = with_spinner("Verifying Wi-Fi link & pairing with phone...", async {
+                            self.verify_and_pair_wifi_with_retries(&target, 54321, 15).await
+                        }).await;
+                        if verified {
+                            print_ok(&format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target));
+                            wifi_ip = Some(target);
+                            wifi_ready = true;
                         } else {
                             print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
                         }
@@ -641,12 +641,15 @@ impl TerminalCli {
                 }
 
                 let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot subnet...", async {
-                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
+                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
                 }).await;
 
                 if let Some(target_ip) = detected_ip {
-                    if self.http_probe(&target_ip, 54321).await {
-                        print_ok(&format!("Direct Wi-Fi link verified: {}:54321", target_ip));
+                    let verified = with_spinner("Verifying Wi-Fi link & pairing with phone...", async {
+                        self.verify_and_pair_wifi_with_retries(&target_ip, 54321, 15).await
+                    }).await;
+                    if verified {
+                        print_ok(&format!("Direct Wi-Fi link verified & paired: {}:54321", target_ip));
                         wifi_ip = Some(target_ip);
                     } else {
                         print_fail(&format!("Could not reach phone at {}:54321 over Wi-Fi", target_ip));
@@ -1021,18 +1024,18 @@ impl TerminalCli {
                     println!("  Auto-connecting local PC Wi-Fi to {} hotspot...", selected_band);
                     let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
                     let detected_ip = with_spinner("Waiting for local PC to acquire IP on hotspot network...", async {
-                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(15), &p_ssid, Some(&p_gw)).await
+                        hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
                     }).await;
 
                     if let Some(target) = detected_ip {
-                        if self.http_probe(&target, target_port).await {
-                            let synack = self.pair_handshake_target(&target, target_port).await;
-                            if synack {
-                                print_ok(&format!("{} Wi-Fi link verified & paired: {}:{}", selected_band, target, target_port));
-                                wifi_ip = Some(target);
-                                wifi_ready = true;
-                                hotspot_started = true;
-                            }
+                        let verified = with_spinner("Verifying Wi-Fi link & pairing with remote PC...", async {
+                            self.verify_and_pair_wifi_with_retries(&target, target_port, 15).await
+                        }).await;
+                        if verified {
+                            print_ok(&format!("{} Wi-Fi link verified & paired: {}:{}", selected_band, target, target_port));
+                            wifi_ip = Some(target);
+                            wifi_ready = true;
+                            hotspot_started = true;
                         }
                     }
                 }
@@ -1208,11 +1211,25 @@ impl TerminalCli {
             Err(_) => return false,
         };
 
+        let initiator_ip = if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+            let target_prefix: String = ip.split('.').take(3).collect::<Vec<_>>().join(".");
+            interfaces
+                .into_iter()
+                .find(|(_, if_ip)| {
+                    let s = if_ip.to_string();
+                    s.starts_with(&target_prefix) && s != ip
+                })
+                .map(|(_, if_ip)| if_ip.to_string())
+                .unwrap_or_else(|| "127.0.0.1".to_string())
+        } else {
+            "127.0.0.1".to_string()
+        };
+
         let pin = format!("{:06}", rand::random::<u32>() % 1_000_000);
         let body = serde_json::json!({
             "initiator_device_id": self.state.device_id,
             "initiator_name": self.state.device_name,
-            "initiator_ip": "127.0.0.1",
+            "initiator_ip": initiator_ip,
             "pin_code": pin,
             "app_version": env!("CARGO_PKG_VERSION"),
             "status": "PENDING"
@@ -1223,6 +1240,77 @@ impl TerminalCli {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
+    }
+
+    /// Robust Wi-Fi verification and pairing handshake with retries and multi-homed local interface binding.
+    async fn verify_and_pair_wifi_with_retries(&self, target_ip: &str, port: u16, max_retries: usize) -> bool {
+        let url_info = format!("http://{}:{}/api/v1/info", target_ip, port);
+
+        // Find local Wi-Fi interface IP on the same subnet if available to force interface routing
+        let local_wifi_ip: Option<std::net::IpAddr> = if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+            let target_prefix: String = target_ip.split('.').take(3).collect::<Vec<_>>().join(".");
+            interfaces
+                .into_iter()
+                .find(|(_, ip)| {
+                    let s = ip.to_string();
+                    s.starts_with(&target_prefix) && s != target_ip
+                })
+                .map(|(_, ip)| ip)
+        } else {
+            None
+        };
+
+        let bound_client = local_wifi_ip.and_then(|local_ip| {
+            reqwest::Client::builder()
+                .local_address(local_ip)
+                .timeout(Duration::from_millis(2000))
+                .build()
+                .ok()
+        });
+
+        let standard_client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(2000))
+            .build()
+            .unwrap_or_default();
+
+        let mut link_alive = false;
+
+        // Retry loop for HTTP probe (waiting for DHCP & ARP table stabilization)
+        for _ in 0..max_retries {
+            // Try bound client first (forces packet out the Wi-Fi Direct interface)
+            if let Some(ref bc) = bound_client {
+                if let Ok(resp) = bc.get(&url_info).send().await {
+                    if resp.status().is_success() {
+                        link_alive = true;
+                        break;
+                    }
+                }
+            }
+
+            // Try standard client
+            if let Ok(resp) = standard_client.get(&url_info).send().await {
+                if resp.status().is_success() {
+                    link_alive = true;
+                    break;
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(800)).await;
+        }
+
+        if !link_alive {
+            return false;
+        }
+
+        // Now execute pairing handshake with up to 3 retries
+        for _ in 0..3 {
+            if self.pair_handshake_target(target_ip, port).await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
+
+        false
     }
 
     /// ═══════════════════════════════════════════════════════════════
