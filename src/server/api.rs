@@ -56,6 +56,7 @@ pub struct AppState {
     pub pending_pair: Arc<Mutex<Option<IncomingPairRequest>>>,
     pub active_paired_peer: Arc<Mutex<Option<String>>>,
     pub outgoing_pair: Arc<Mutex<Option<OutgoingPairInfo>>>,
+    pub active_sender_cancel_flag: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -985,12 +986,13 @@ pub async fn cancel_transfer(
 pub async fn cancel_all_active_transfers(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
+    state.active_sender_cancel_flag.store(true, Ordering::SeqCst);
     let mut lock = state.active_transfers.lock();
     let count = lock.len();
     for (_, handle) in lock.drain() {
         handle.cancel_flag.store(true, Ordering::SeqCst);
     }
-    tracing::info!("Cancelled all active transfers (count={})", count);
+    tracing::info!("Cancelled all active transfers and active CLI sender (count={})", count);
     Json(serde_json::json!({ "success": true, "cancelled_count": count, "message": "All transfers cancelled" }))
 }
 

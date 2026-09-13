@@ -1649,7 +1649,8 @@ impl TerminalCli {
         let dispatcher = Arc::new(parking_lot::Mutex::new(
             DynamicWorkDispatcher::new(file_size),
         ));
-        let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_flag = self.state.active_sender_cancel_flag.clone();
+        stop_flag.store(false, std::sync::atomic::Ordering::SeqCst);
         let mut handles = Vec::new();
 
         // High-performance workers: 6 for USB (high queue depth), 4 for Wi-Fi
@@ -1679,6 +1680,15 @@ impl TerminalCli {
             }
         }
 
+        let was_cancelled = stop_flag.load(std::sync::atomic::Ordering::SeqCst) || dispatcher.lock().is_cancelled();
+        stop_ui.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = ui_handle.await;
+
+        if was_cancelled {
+            println!("\n  {YELLOW}⛔ Transfer was cancelled by the remote device.{RESET}");
+            return;
+        }
+
         // Check if dispatcher completed successfully
         {
             let guard = dispatcher.lock();
@@ -1686,9 +1696,6 @@ impl TerminalCli {
                 all_ok = false;
             }
         }
-
-        stop_ui.store(true, std::sync::atomic::Ordering::SeqCst);
-        let _ = ui_handle.await;
 
         // Final UI render
         let final_channels: Vec<ChannelProgress> =
@@ -2196,6 +2203,7 @@ struct DynamicWorkDispatcher {
     retries: std::collections::HashMap<u32, u32>,
     chunks: Vec<TransferChunkInfo>,
     fatal_error: bool,
+    cancelled: bool,
 }
 
 impl DynamicWorkDispatcher {
@@ -2261,10 +2269,15 @@ impl DynamicWorkDispatcher {
             retries: std::collections::HashMap::new(),
             chunks,
             fatal_error: false,
+            cancelled: false,
         }
     }
 
     fn pop_chunk(&mut self, transport_name: &str) -> Option<TransferChunkInfo> {
+        if self.cancelled || self.fatal_error {
+            return None;
+        }
+
         if let Some(cid) = self.unassigned.pop_front() {
             self.in_flight
                 .insert(cid, (Instant::now(), transport_name.to_string()));
@@ -2295,8 +2308,21 @@ impl DynamicWorkDispatcher {
         self.completed.insert(chunk_id)
     }
 
+    fn mark_cancelled(&mut self) {
+        self.cancelled = true;
+        self.unassigned.clear();
+        self.in_flight.clear();
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
     fn return_for_retry(&mut self, chunk_id: u32) {
         self.in_flight.remove(&chunk_id);
+        if self.cancelled || self.fatal_error {
+            return;
+        }
         if !self.completed.contains(&chunk_id) {
             let count = self.retries.entry(chunk_id).or_insert(0);
             *count += 1;
@@ -2310,7 +2336,7 @@ impl DynamicWorkDispatcher {
     }
 
     fn is_done(&self) -> bool {
-        self.completed.len() >= self.chunks.len()
+        self.cancelled || self.fatal_error || self.completed.len() >= self.chunks.len()
     }
 
     fn has_fatal_error(&self) -> bool {
@@ -2360,6 +2386,10 @@ async fn run_transport_chunk_worker(
             }
         };
 
+        if stop_flag.load(std::sync::atomic::Ordering::SeqCst) || dispatcher.lock().is_cancelled() {
+            break;
+        }
+
         let start_idx = chunk.offset as usize;
         let end_idx = (chunk.offset + chunk.length) as usize;
         if end_idx > mmap.len() {
@@ -2390,6 +2420,7 @@ async fn run_transport_chunk_worker(
             .header("x-chunk-crc32", &chunk_crc)
             .header("x-total-chunks", total_chunks.to_string())
             .header("Content-Type", "application/octet-stream")
+            .header("Connection", "keep-alive")
             .body(chunk_body);
 
         match req.send().await {
@@ -2404,8 +2435,27 @@ async fn run_transport_chunk_worker(
                     // — do NOT update speed_mb_s here to avoid racing with the UI thread
                 }
             }
+            Ok(resp) if resp.status() == reqwest::StatusCode::GONE 
+                     || resp.status() == reqwest::StatusCode::CONFLICT => {
+                tracing::info!("Remote peer explicitly cancelled transfer (HTTP {}). Aborting.", resp.status());
+                stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                dispatcher.lock().mark_cancelled();
+                break;
+            }
             Ok(resp) => {
                 let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                if body.contains("TRANSFER_CANCELLED") || body.contains("cancelled") {
+                    tracing::info!("Remote peer indicated transfer cancellation. Aborting.");
+                    stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    dispatcher.lock().mark_cancelled();
+                    break;
+                }
+
+                if stop_flag.load(std::sync::atomic::Ordering::SeqCst) || dispatcher.lock().is_cancelled() {
+                    break;
+                }
+
                 tracing::warn!(
                     "Chunk #{} rejected by {} (status {}), retransmitting...",
                     chunk.chunk_id,
@@ -2416,6 +2466,9 @@ async fn run_transport_chunk_worker(
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             Err(e) => {
+                if stop_flag.load(std::sync::atomic::Ordering::SeqCst) || dispatcher.lock().is_cancelled() {
+                    break;
+                }
                 tracing::warn!(
                     "Chunk #{} network error on {}: {}, retransmitting...",
                     chunk.chunk_id,

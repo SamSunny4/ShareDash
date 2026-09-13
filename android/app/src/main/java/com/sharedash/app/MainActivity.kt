@@ -837,15 +837,26 @@ class MainActivity : ComponentActivity() {
                                     // 4. Close all active client sockets
                                     transportManager.closeAll()
 
-                                    // 5. Notify target peer PC
+                                    // 5. Notify target peer PC across all candidate endpoints
+                                    val candidateHosts = mutableListOf<Pair<String, Int>>()
+                                    candidateHosts.add("127.0.0.1" to 54321)
+                                    candidateHosts.add("127.0.0.1" to 54325)
+                                    candidateHosts.add("192.168.42.1" to 54321)
+                                    candidateHosts.add("192.168.49.1" to 54321)
+                                    candidateHosts.add("192.168.137.1" to 54321)
                                     activeTarget?.let { peer ->
-                                        lifecycleScope.launch(Dispatchers.IO) {
+                                        if (peer.ipAddress.isNotBlank()) {
+                                            candidateHosts.add(peer.ipAddress to peer.port)
+                                        }
+                                    }
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        for ((host, port) in candidateHosts) {
                                             try {
-                                                val url = java.net.URL("http://${peer.ipAddress}:${peer.port}/api/v1/transfers/cancel")
+                                                val url = java.net.URL("http://$host:$port/api/v1/transfers/cancel")
                                                 val conn = url.openConnection() as java.net.HttpURLConnection
                                                 conn.requestMethod = "POST"
-                                                conn.connectTimeout = 1500
-                                                conn.readTimeout = 1500
+                                                conn.connectTimeout = 800
+                                                conn.readTimeout = 800
                                                 conn.responseCode
                                                 conn.disconnect()
                                             } catch (_: Exception) {}
@@ -941,6 +952,7 @@ class MainActivity : ComponentActivity() {
         val totalFiles = uris.size
 
         activeSendJob?.cancel()
+        httpServer?.resetCancellation()
         activeSendJob = lifecycleScope.launch(Dispatchers.IO) {
             val (resolvedIp, resolvedPort) = resolveBestTargetEndpoint(target)
 

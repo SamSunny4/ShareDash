@@ -79,6 +79,7 @@ impl Server {
             pending_pair: Arc::new(Mutex::new(None)),
             active_paired_peer: Arc::new(Mutex::new(None)),
             outgoing_pair: Arc::new(Mutex::new(None)),
+            active_sender_cancel_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         let cors = CorsLayer::new()

@@ -501,7 +501,17 @@ class AndroidHttpServer(
         var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
-        isCancelled.set(false)
+        if (isCancelled.get()) {
+            Log.i(TAG, "Rejecting chunk #$chunkId for transfer $transferId: transfer was cancelled.")
+            val resp = JSONObject().apply {
+                put("success", false)
+                put("error", "TRANSFER_CANCELLED")
+                put("message", "Transfer was cancelled by receiver")
+            }
+            sendJsonResponse(output, 410, resp, false)
+            return
+        }
+
         val sessionKey = if (transferId.isNotBlank()) transferId else fileName
         val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
             acquireHighPerfLocks()
@@ -521,6 +531,19 @@ class AndroidHttpServer(
 
         try {
             while (remaining > 0) {
+                if (isCancelled.get()) {
+                    try { session.channel.close() } catch (_: Exception) {}
+                    try { session.raf.close() } catch (_: Exception) {}
+                    try { session.targetFile.delete() } catch (_: Exception) {}
+                    activeChunkTransfers.remove(sessionKey)
+                    val resp = JSONObject().apply {
+                        put("success", false)
+                        put("error", "TRANSFER_CANCELLED")
+                        put("message", "Transfer was cancelled by receiver")
+                    }
+                    sendJsonResponse(output, 410, resp, false)
+                    return
+                }
                 val toRead = minOf(buf.size, remaining)
                 val read = input.read(buf, 0, toRead)
                 if (read == -1) break
@@ -598,7 +621,16 @@ class AndroidHttpServer(
         output: BufferedOutputStream,
         isKeepAlive: Boolean = true
     ) {
-        isCancelled.set(false)
+        if (isCancelled.get()) {
+            Log.i(TAG, "Rejecting incoming file upload: transfer was cancelled.")
+            val resp = JSONObject().apply {
+                put("success", false)
+                put("error", "TRANSFER_CANCELLED")
+                put("message", "Transfer was cancelled by receiver")
+            }
+            sendJsonResponse(output, 410, resp, false)
+            return
+        }
 
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
