@@ -7,27 +7,45 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Close
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.sharedash.app.discovery.BleCommandServer
@@ -44,19 +62,29 @@ import com.sharedash.app.model.TransportKind
 import com.sharedash.app.model.TransportStats
 import com.sharedash.app.service.TransferForegroundService
 import com.sharedash.app.transport.AndroidTransportManager
+import com.sharedash.app.ui.components.BottomPillBar
 import com.sharedash.app.ui.components.ConnectingDialog
-import com.sharedash.app.ui.components.UsbPromptDialog
+import com.sharedash.app.ui.components.NavTab
 import com.sharedash.app.ui.components.WirelessWarningDialog
 import com.sharedash.app.ui.screens.ConnectedScreen
 import com.sharedash.app.ui.screens.DiscoveryScreen
+import com.sharedash.app.ui.screens.HomeScreen
 import com.sharedash.app.ui.screens.PairingScreen
+import com.sharedash.app.ui.screens.SettingsScreen
+import com.sharedash.app.ui.screens.TransferHistoryScreen
 import com.sharedash.app.ui.screens.TransferScreen
 import com.sharedash.app.ui.screens.UsbFirstScreen
+import com.sharedash.app.storage.SettingsManager
+import com.sharedash.app.storage.TransferHistoryManager
+import com.sharedash.app.model.TransferRecord
+import com.sharedash.app.model.TransferDirection
+import com.sharedash.app.model.TransferStatus
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import com.sharedash.app.ui.theme.ShareDashTheme
+import com.sharedash.app.ui.theme.NeoBg
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -70,6 +98,8 @@ object DeviceIdentity {
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var settingsManager: SettingsManager
+    private lateinit var historyManager: TransferHistoryManager
     private lateinit var bleManager: BleDiscoveryManager
     private lateinit var udpManager: UdpDiscoveryManager
     private lateinit var hotspotManager: HotspotManager
@@ -86,6 +116,17 @@ class MainActivity : ComponentActivity() {
     val isUsbTetheringActive: StateFlow<Boolean> = _isUsbTetheringActive
 
     private val selectedUris = mutableListOf<Uri>()
+
+    fun openDownloadsFolder() {
+        try {
+            val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
+        }
+    }
 
     fun checkUsbState() {
         try {
@@ -164,6 +205,70 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val folderPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+
+            lifecycleScope.launch(Dispatchers.IO) {
+                val uris = collectFilesFromTree(treeUri)
+                withContext(Dispatchers.Main) {
+                    if (uris.isNotEmpty()) {
+                        selectedUris.clear()
+                        selectedUris.addAll(uris)
+                        onFilesPickedCallback?.invoke(uris)
+                    } else {
+                        Toast.makeText(this@MainActivity, "No files found in selected folder", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun collectFilesFromTree(treeUri: Uri): List<Uri> {
+        val fileUris = mutableListOf<Uri>()
+        val docId = try {
+            DocumentsContract.getTreeDocumentId(treeUri)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+
+        fun traverse(parentDocId: String) {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+            contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeIdx = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    val childId = cursor.getString(idIdx)
+                    val mime = cursor.getString(mimeIdx)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        traverse(childId)
+                    } else {
+                        val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                        fileUris.add(fileUri)
+                    }
+                }
+            }
+        }
+
+        try {
+            traverse(docId)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed traversing directory tree: ${e.message}")
+        }
+        return fileUris
+    }
+
     private var onIncomingPairCallback: ((initiatorId: String, initiatorName: String, initiatorIp: String, pin: String, appVer: String) -> Unit)? = null
     private var onPairAcceptedCallback: ((targetId: String, targetName: String) -> Unit)? = null
     private var onPairConfirmedCallback: (() -> Unit)? = null
@@ -174,7 +279,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val myFriendlyName = "${Build.MANUFACTURER} ${Build.MODEL}"
+        settingsManager = SettingsManager.getInstance(this)
+        historyManager = TransferHistoryManager.getInstance(this)
+
+        val myFriendlyName = settingsManager.deviceName
         bleManager = BleDiscoveryManager(this)
         udpManager = UdpDiscoveryManager(this, myFriendlyName)
         hotspotManager = HotspotManager(this)
@@ -287,6 +395,7 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         checkAndRequestPermissions()
         checkUsbState()
+        ensureWifiEnabled()
 
         val usbFilter = android.content.IntentFilter().apply {
             addAction("android.hardware.usb.action.USB_DEVICE_ATTACHED")
@@ -320,18 +429,24 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            ShareDashTheme {
-                var currentScreen by remember { mutableStateOf("usb_first") }
+            val themeModeState by settingsManager.themeModeFlow.collectAsState()
+            ShareDashTheme(themeMode = themeModeState) {
+                var currentNavTab by remember { mutableStateOf(NavTab.HOME) }
                 var activeTarget by remember { mutableStateOf<DiscoveredPeer?>(null) }
                 var activeTelemetry by remember { mutableStateOf<SchedulerTelemetry?>(null) }
                 var isPairingDialogOpen by remember { mutableStateOf(false) }
-                var isUsbPromptDialogOpen by remember { mutableStateOf(false) }
                 var isWirelessWarningDialogOpen by remember { mutableStateOf(false) }
                 var pairingStep by remember { mutableIntStateOf(2) }
                 var pairingPin by remember { mutableStateOf("000000") }
 
                 val isUsbCablePluggedState by isUsbCablePlugged.collectAsState()
                 val isUsbTetheringActiveState by isUsbTetheringActive.collectAsState()
+                val deviceNameState by settingsManager.deviceNameFlow.collectAsState()
+                val connectionModeState by settingsManager.connectionModeFlow.collectAsState()
+                val preferUsbState by settingsManager.preferUsbFlow.collectAsState()
+                val prefer5GHzState by settingsManager.prefer5GHzFlow.collectAsState()
+                val serverPortState by settingsManager.serverPortFlow.collectAsState()
+                val historyRecordsState by historyManager.historyFlow.collectAsState()
 
                 val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator() }
 
@@ -339,23 +454,35 @@ class MainActivity : ComponentActivity() {
                 val udpPeers by udpManager.discoveredPeers.collectAsState()
                 val hotspotState by hotspotManager.hotspotState.collectAsState()
 
-                // Auto-enter connected screen when USB is detected
+                // Auto-enter connected state when USB is detected
                 onUsbConnectedCallback = {
                     lifecycleScope.launch(Dispatchers.Main) {
                         if (activeTarget == null) {
-                            activeTarget = DiscoveredPeer(
-                                deviceId = "usb-pc",
-                                friendlyName = "ShareDash PC (USB 3.2 Cable)",
-                                osName = "Windows",
-                                ipAddress = "127.0.0.1",
-                                port = 54321,
-                                supportedBridges = listOf("USB 3.2 Cable Fast-Path", "Wi-Fi Direct", "LAN"),
-                                isCompatible = true
-                            )
-                            isPairingDialogOpen = false
-                            isWirelessWarningDialogOpen = false
-                            currentScreen = "connected"
-                            Toast.makeText(this@MainActivity, "USB 3.2 Fast-Path Connected! Ready to transfer.", Toast.LENGTH_SHORT).show()
+                            val verifiedEndpoint = withContext(Dispatchers.IO) {
+                                resolveBestTargetEndpoint(
+                                    DiscoveredPeer(
+                                        deviceId = "usb-pc",
+                                        friendlyName = "ShareDash PC",
+                                        osName = "Windows",
+                                        ipAddress = "192.168.42.1",
+                                        port = 54321
+                                    )
+                                )
+                            }
+                            if (verifiedEndpoint != null) {
+                                activeTarget = DiscoveredPeer(
+                                    deviceId = "usb-pc",
+                                    friendlyName = "ShareDash PC",
+                                    osName = "Windows",
+                                    ipAddress = verifiedEndpoint.first,
+                                    port = verifiedEndpoint.second,
+                                    supportedBridges = listOf("USB Fast-Path", "Wi-Fi Direct", "LAN"),
+                                    isCompatible = true
+                                )
+                                isPairingDialogOpen = false
+                                isWirelessWarningDialogOpen = false
+                                Toast.makeText(this@MainActivity, "Connected to ShareDash PC!", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }
@@ -379,7 +506,6 @@ class MainActivity : ComponentActivity() {
                 onPairAcceptedCallback = { targetId, targetName ->
                     lifecycleScope.launch(Dispatchers.Main) {
                         isPairingDialogOpen = false
-                        currentScreen = "connected"
                         Toast.makeText(this@MainActivity, "Securely Connected to $targetName (AES-256-GCM)", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -387,22 +513,7 @@ class MainActivity : ComponentActivity() {
                 onPairConfirmedCallback = {
                     lifecycleScope.launch(Dispatchers.Main) {
                         isPairingDialogOpen = false
-                        currentScreen = "connected"
                         Toast.makeText(this@MainActivity, "Securely Connected (AES-256-GCM)", Toast.LENGTH_SHORT).show()
-                    }
-                }
-
-                onFilesPickedCallback = { uris ->
-                    lifecycleScope.launch(Dispatchers.Main) {
-                        if (activeTarget != null && uris.isNotEmpty()) {
-                            currentScreen = "transfer"
-                            executeRealTransfer(activeTarget!!, uris) { telem ->
-                                activeTelemetry = telem
-                                if (telem.status == "COMPLETED") {
-                                    com.sharedash.app.service.TransferForegroundService.complete(this@MainActivity, telem.title)
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -424,7 +535,7 @@ class MainActivity : ComponentActivity() {
                                     else -> com.sharedash.app.model.ChunkState.PENDING
                                 }
                                 val transportBadge = if (isUsb) {
-                                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
                                 } else {
                                     "5GHz Wi-Fi"
                                 }
@@ -470,7 +581,7 @@ class MainActivity : ComponentActivity() {
                                 transports = transportsList,
                                 chunkStates = chunkList
                             )
-                            currentScreen = "transfer"
+                            currentNavTab = NavTab.TRANSFER
                         }
                     }
                 }
@@ -481,7 +592,7 @@ class MainActivity : ComponentActivity() {
                         val isUsb = isUsbCablePluggedState || isUsbTetheringActiveState
                         val finalChunks = (0 until 64).map { idx ->
                             val transportBadge = if (isUsb) {
-                                if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                                if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
                             } else {
                                 "5GHz Wi-Fi"
                             }
@@ -507,7 +618,20 @@ class MainActivity : ComponentActivity() {
                             ),
                             chunkStates = finalChunks
                         )
-                        currentScreen = "transfer"
+                        currentNavTab = NavTab.TRANSFER
+
+                        historyManager.addRecord(
+                            TransferRecord(
+                                fileName = fileName,
+                                fileSize = bytes,
+                                direction = TransferDirection.RECEIVED,
+                                status = TransferStatus.COMPLETED,
+                                peerName = activeTarget?.friendlyName ?: "ShareDash PC",
+                                transportUsed = if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi",
+                                speedMbps = estimatedSpeed,
+                                filePath = "/storage/emulated/0/Download/ShareDash/$fileName"
+                            )
+                        )
                     }
                 }
 
@@ -532,11 +656,11 @@ class MainActivity : ComponentActivity() {
                     if (uris.isNotEmpty()) {
                         val peer = activeTarget ?: combinedPeers.firstOrNull() ?: DiscoveredPeer(
                             deviceId = "peer-pc",
-                            friendlyName = "Connected PC",
+                            friendlyName = "ShareDash PC",
                             osName = "Windows",
-                            ipAddress = "127.0.0.1",
+                            ipAddress = "192.168.137.1",
                             port = 54321,
-                            supportedBridges = listOf("USB 3.2 Cable Fast-Path", "5GHz Wi-Fi"),
+                            supportedBridges = listOf("USB Fast-Path", "5GHz Wi-Fi"),
                             isCompatible = true
                         )
                         activeTarget = peer
@@ -560,7 +684,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         activeTelemetry = initialTelem
-                        currentScreen = "transfer"
+                        currentNavTab = NavTab.TRANSFER
                         executeRealTransfer(peer, uris) { telem ->
                             activeTelemetry = telem
                         }
@@ -574,326 +698,354 @@ class MainActivity : ComponentActivity() {
                 }
                 val isBluetoothOn = isBluetoothEnabledSafely()
 
-                when (currentScreen) {
-                    "usb_first" -> {
-                        UsbFirstScreen(
-                            isUsbCablePlugged = isUsbCablePluggedState,
-                            isUsbTetheringActive = isUsbTetheringActiveState,
-                            onEnableUsbTethering = {
-                                openUsbTetheringSettings()
-                            },
-                            onContinueWithoutUsb = {
-                                isWirelessWarningDialogOpen = true
-                            },
-                            onOpenDownloadsFolder = {
-                                try {
-                                    val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
-                                    startActivity(intent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(this@MainActivity, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        )
-
-                        if (isWirelessWarningDialogOpen) {
-                            WirelessWarningDialog(
-                                onConfirmWireless = {
-                                    isWirelessWarningDialogOpen = false
-                                    currentScreen = "discovery"
-                                    startDiscovery()
-                                    Toast.makeText(this@MainActivity, "Wireless Mode: Searching nearby PCs via Wi-Fi & BT", Toast.LENGTH_SHORT).show()
-                                },
-                                onUseUsb = {
-                                    isWirelessWarningDialogOpen = false
-                                    openUsbTetheringSettings()
-                                },
-                                onDismiss = {
-                                    isWirelessWarningDialogOpen = false
-                                }
-                            )
-                        }
-                    }
-                    "discovery" -> {
-                        DiscoveryScreen(
-                            discoveredPeers = combinedPeers,
-                            connectedPeer = null,
-                            isUsbConnected = false,
-                            isWifiEnabled = isWifiOn,
-                            isBluetoothEnabled = isBluetoothOn,
-                            onReturnToUsbMode = {
-                                currentScreen = "usb_first"
-                            },
-                            onDeviceSelected = { peer ->
-                                if (!peer.isCompatible) {
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "Incompatible App Version: ${peer.friendlyName} is running v${peer.appVersion}. Please update both apps.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } else {
-                                    val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
-                                        val myIps = udpManager.getLocalIpAddresses()
-                                        when {
-                                            myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1" // PC 5GHz Hotspot Gateway
-                                            myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"   // USB Tethering Gateway
-                                            myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"   // Phone Hotspot
-                                            myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"   // Wi-Fi Direct
-                                            else -> ""
-                                        }
-                                    } else {
-                                        peer.ipAddress
-                                    }
-
-                                    if (effectiveIp.isEmpty()) {
-                                        Toast.makeText(this@MainActivity, "No network path to ${peer.friendlyName}. Turn on Hotspot & connect PC to it.", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        activeTarget = peer.copy(ipAddress = effectiveIp)
-                                        val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
-                                        pairingPin = pin
-                                        pairingStep = 1 // Step 1: SYN (Sending connection request to PC)
-                                        isPairingDialogOpen = true
-                                        val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
-                                        lifecycleScope.launch {
-                                            val sent = pairingCoordinator.sendPairRequest(effectiveIp, peer.port, pin, android.os.Build.MODEL, myIp)
-                                            if (sent) {
-                                                pairingCoordinator.startPairingPoller(
-                                                    scope = this,
-                                                    targetIp = effectiveIp,
-                                                    targetPort = peer.port,
-                                                    onIncoming = { _, _ -> },
-                                                    onAccepted = { name ->
-                                                        pairingStep = 3 // Step 3: ACK
-                                                        lifecycleScope.launch {
-                                                            delay(500)
-                                                            isPairingDialogOpen = false
-                                                            Toast.makeText(this@MainActivity, "Securely Connected to $name (AES-256-GCM)", Toast.LENGTH_SHORT).show()
-                                                            val isUsbActive = peer.supportedBridges.any { it.contains("USB", true) }
-                                                            if (!isUsbActive) {
-                                                                isUsbPromptDialogOpen = true
-                                                            }
-                                                        }
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            onDisconnect = {
-                                activeTarget?.let { peer ->
-                                    lifecycleScope.launch {
-                                        pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
-                                    }
-                                }
-                                activeTarget = null
-                                selectedUris.clear()
-                            },
-                            onPickFiles = {
-                                filePickerLauncher.launch("*/*")
-                            },
-                            onPickFolder = {
-                                filePickerLauncher.launch("*/*")
-                            },
-                            onOpenPairing = { currentScreen = "pairing" },
-                            onOpenDownloadsFolder = {
-                                try {
-                                    val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
-                                    startActivity(intent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(this, "Files saved in Downloads/ShareDash", Toast.LENGTH_LONG).show()
-                                }
-                            },
-                            onEnableWifi = {
-                                try {
-                                    startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
-                                } catch (_: Exception) {}
-                            },
-                            onEnableBluetooth = {
-                                try {
-                                    val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                                    enableBtLauncher.launch(enableBtIntent)
-                                } catch (_: Exception) {
-                                    try {
-                                        startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
-                                    } catch (_: Exception) {}
-                                }
-                            },
-                            onOpenUsbSettings = {
-                                isUsbPromptDialogOpen = true
-                            },
-                            hotspotState = hotspotState,
-                            onStartHotspot = {
-                                hotspotManager.start5GHzHotspot { _, _, _ ->
-                                    udpManager.startDiscovery(lifecycleScope)
-                                }
-                            },
-                            onStopHotspot = {
-                                hotspotManager.stopHotspot()
-                            },
-                            onOpenHotspotSettings = {
-                                try {
-                                    startActivity(Intent("android.settings.TETHER_SETTINGS"))
-                                } catch (_: Exception) {
-                                    try {
-                                        startActivity(Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
-                                    } catch (_: Exception) {}
-                                }
-                            }
-                        )
-
-                        if (isPairingDialogOpen) {
-                            ConnectingDialog(
-                                targetName = activeTarget?.friendlyName ?: "PC",
-                                pin = pairingPin,
-                                step = pairingStep,
-                                onConfirm = {
-                                    pairingStep = 3
-                                    activeTarget?.let { peer ->
-                                        lifecycleScope.launch {
-                                            val accepted = pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, true)
-                                            if (accepted) {
-                                                pairingCoordinator.confirmPairSession(peer.ipAddress, peer.port)
-                                            }
-                                            delay(500)
-                                            isPairingDialogOpen = false
-                                            val isUsbActive = peer.supportedBridges.any { it.contains("USB", true) }
-                                            if (!isUsbActive) {
-                                                isUsbPromptDialogOpen = true
-                                            }
-                                        }
-                                    }
-                                },
-                                onCancel = {
-                                    isPairingDialogOpen = false
-                                }
-                            )
-                        }
-
-                        if (isUsbPromptDialogOpen) {
-                            UsbPromptDialog(
-                                onOpenSettings = {
-                                    isUsbPromptDialogOpen = false
-                                    try {
-                                        startActivity(android.content.Intent("android.settings.TETHER_SETTINGS"))
-                                    } catch (_: Exception) {
-                                        try {
-                                            startActivity(android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
-                                        } catch (_: Exception) {
-                                            Toast.makeText(this@MainActivity, "Enable USB Tethering in Settings -> Connections", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                },
-                                onSkip = {
-                                    isUsbPromptDialogOpen = false
-                                }
-                            )
-                        }
-                    }
-                    "connected" -> {
-                        if (activeTarget != null) {
-                            ConnectedScreen(
-                                connectedPeer = activeTarget!!,
-                                isUsbConnected = activeTarget?.supportedBridges?.any { it.contains("USB", true) } == true,
-                                onPickFiles = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onPickFolder = {
-                                    filePickerLauncher.launch("*/*")
-                                },
-                                onOpenUsbSettings = {
-                                    isUsbPromptDialogOpen = true
-                                },
-                                onDisconnect = {
-                                    activeTarget?.let { peer ->
-                                        lifecycleScope.launch {
-                                            pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
-                                        }
-                                    }
+                // Heartbeat to detect when PC ShareDash is shutdown
+                LaunchedEffect(activeTarget) {
+                    if (activeTarget != null) {
+                        var consecutiveFailures = 0
+                        while (isActive && activeTarget != null) {
+                            delay(3000)
+                            val targetPeer = activeTarget ?: break
+                            val ep = resolveBestTargetEndpoint(targetPeer)
+                            if (ep == null) {
+                                consecutiveFailures++
+                                if (consecutiveFailures >= 2) {
+                                    Toast.makeText(this@MainActivity, "ShareDash PC disconnected or shutdown", Toast.LENGTH_SHORT).show()
                                     activeTarget = null
-                                    currentScreen = "usb_first"
-                                    selectedUris.clear()
+                                    break
                                 }
-                            )
-                        } else {
-                            currentScreen = "usb_first"
+                            } else {
+                                consecutiveFailures = 0
+                            }
                         }
                     }
-                    "transfer" -> {
-                        activeTelemetry?.let { telem ->
-                            TransferScreen(
-                                targetName = activeTarget?.friendlyName ?: "Target Device",
-                                telemetry = telem,
-                                onCancel = {
-                                    // 1. Cancel active outgoing send coroutine
-                                    activeSendJob?.cancel()
-                                    activeSendJob = null
+                }
 
-                                    // 2. Abort active incoming server transfers
-                                    httpServer?.cancelActiveTransfers()
+                val handleDeviceSelect: (DiscoveredPeer) -> Unit = { peer ->
+                    if (!peer.isCompatible) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Incompatible App Version: ${peer.friendlyName} is running v${peer.appVersion}. Please update both apps.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
+                            val myIps = udpManager.getLocalIpAddresses()
+                            when {
+                                myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1"
+                                myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"
+                                myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"
+                                myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"
+                                else -> ""
+                            }
+                        } else {
+                            peer.ipAddress
+                        }
 
-                                    // 3. Stop Foreground Service
-                                    com.sharedash.app.service.TransferForegroundService.stopService(this@MainActivity)
-
-                                    // 4. Close all active client sockets
-                                    transportManager.closeAll()
-
-                                    // 5. Notify target peer PC across all candidate endpoints
-                                    val candidateHosts = mutableListOf<Pair<String, Int>>()
-                                    candidateHosts.add("127.0.0.1" to 54321)
-                                    candidateHosts.add("127.0.0.1" to 54325)
-                                    candidateHosts.add("192.168.42.1" to 54321)
-                                    candidateHosts.add("192.168.49.1" to 54321)
-                                    candidateHosts.add("192.168.137.1" to 54321)
-                                    activeTarget?.let { peer ->
-                                        if (peer.ipAddress.isNotBlank()) {
-                                            candidateHosts.add(peer.ipAddress to peer.port)
+                        if (effectiveIp.isEmpty()) {
+                            Toast.makeText(this@MainActivity, "No network path to ${peer.friendlyName}. Turn on Hotspot & connect PC to it.", Toast.LENGTH_LONG).show()
+                        } else {
+                            activeTarget = peer.copy(ipAddress = effectiveIp)
+                            val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
+                            pairingPin = pin
+                            pairingStep = 1
+                            isPairingDialogOpen = true
+                            val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
+                            lifecycleScope.launch {
+                                val sent = pairingCoordinator.sendPairRequest(effectiveIp, peer.port, pin, settingsManager.deviceName, myIp)
+                                if (sent) {
+                                    pairingCoordinator.startPairingPoller(
+                                        scope = this,
+                                        targetIp = effectiveIp,
+                                        targetPort = peer.port,
+                                        onIncoming = { _, _ -> },
+                                        onAccepted = { name ->
+                                            pairingStep = 3
+                                            lifecycleScope.launch {
+                                                delay(500)
+                                                isPairingDialogOpen = false
+                                                Toast.makeText(this@MainActivity, "Securely Connected to $name (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
-                                    lifecycleScope.launch(Dispatchers.IO) {
-                                        for ((host, port) in candidateHosts) {
-                                            try {
-                                                val url = java.net.URL("http://$host:$port/api/v1/transfers/cancel")
-                                                val conn = url.openConnection() as java.net.HttpURLConnection
-                                                conn.requestMethod = "POST"
-                                                conn.connectTimeout = 800
-                                                conn.readTimeout = 800
-                                                conn.responseCode
-                                                conn.disconnect()
-                                            } catch (_: Exception) {}
-                                        }
-                                    }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
-                                    // 6. Reset UI state
-                                    activeTelemetry = null
-                                    currentScreen = if (activeTarget != null) "connected" else "usb_first"
-                                    Toast.makeText(this@MainActivity, "Transfer stopped", Toast.LENGTH_SHORT).show()
+                val handleDisconnect: () -> Unit = {
+                    activeTarget?.let { peer ->
+                        lifecycleScope.launch {
+                            pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
+                        }
+                    }
+                    activeTarget = null
+                    selectedUris.clear()
+                }
+
+                val handleCancelTransfer: () -> Unit = {
+                    activeTelemetry?.let { telem ->
+                        historyManager.addRecord(
+                            TransferRecord(
+                                fileName = telem.title.ifEmpty { "Transfer" },
+                                fileSize = telem.totalBytes,
+                                direction = TransferDirection.SENT,
+                                status = TransferStatus.CANCELLED,
+                                peerName = activeTarget?.friendlyName ?: "ShareDash PC",
+                                transportUsed = "USB / Wi-Fi",
+                                speedMbps = telem.aggregateMbps
+                            )
+                        )
+                    }
+
+                    activeSendJob?.cancel()
+                    activeSendJob = null
+                    httpServer?.cancelActiveTransfers()
+                    TransferForegroundService.stopService(this@MainActivity)
+                    transportManager.closeAll()
+
+                    val candidateHosts = mutableListOf<Pair<String, Int>>()
+                    candidateHosts.add("127.0.0.1" to 54325)
+                    candidateHosts.add("192.168.42.1" to 54321)
+                    candidateHosts.add("192.168.49.1" to 54321)
+                    candidateHosts.add("192.168.137.1" to 54321)
+                    activeTarget?.let { peer ->
+                        if (peer.ipAddress.isNotBlank()) {
+                            candidateHosts.add(peer.ipAddress to peer.port)
+                        }
+                    }
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        for ((host, port) in candidateHosts) {
+                            try {
+                                val url = java.net.URL("http://$host:$port/api/v1/transfers/cancel")
+                                val conn = url.openConnection() as java.net.HttpURLConnection
+                                conn.requestMethod = "POST"
+                                conn.connectTimeout = 800
+                                conn.readTimeout = 800
+                                conn.responseCode
+                                conn.disconnect()
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    activeTelemetry = null
+                    httpServer?.resetCancellation()
+                    currentNavTab = NavTab.HOME
+                    Toast.makeText(this@MainActivity, "Transfer stopped", Toast.LENGTH_SHORT).show()
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(NeoBg)
+                        .statusBarsPadding()
+                ) {
+                    when (currentNavTab) {
+                        NavTab.HOME -> {
+                            HomeScreen(
+                                connectionMode = connectionModeState,
+                                onConnectionModeChange = { settingsManager.connectionMode = it },
+                                isUsbCablePlugged = isUsbCablePluggedState,
+                                isUsbTetheringActive = isUsbTetheringActiveState,
+                                connectedPeer = activeTarget,
+                                discoveredPeers = combinedPeers,
+                                onEnableUsbTethering = { openUsbTetheringSettings() },
+                                onSkipUsb = {
+                                    isWirelessWarningDialogOpen = true
                                 },
+                                onDeviceSelected = handleDeviceSelect,
+                                onDisconnect = handleDisconnect,
+                                onPickFiles = { filePickerLauncher.launch("*/*") },
+                                onPickFolder = { folderPickerLauncher.launch(null) },
+                                onOpenDownloadsFolder = { openDownloadsFolder() },
+                                hotspotState = hotspotState,
+                                onStartHotspot = {
+                                    hotspotManager.start5GHzHotspot { _, _, _ ->
+                                        udpManager.startDiscovery(lifecycleScope)
+                                    }
+                                },
+                                onStopHotspot = { hotspotManager.stopHotspot() },
+                                deviceName = deviceNameState
+                            )
+                        }
+                        NavTab.TRANSFER -> {
+                            TransferScreen(
+                                targetName = activeTarget?.friendlyName ?: "ShareDash PC",
+                                telemetry = activeTelemetry,
+                                onCancel = handleCancelTransfer,
                                 onFinish = {
                                     selectedUris.clear()
                                     activeTelemetry = null
-                                    currentScreen = if (activeTarget != null) "connected" else "usb_first"
+                                    httpServer?.resetCancellation()
+                                    currentNavTab = NavTab.HOME
                                 },
                                 onSendAnother = {
                                     selectedUris.clear()
                                     filePickerLauncher.launch("*/*")
-                                }
+                                },
+                                onPickFiles = { filePickerLauncher.launch("*/*") },
+                                onPickFolder = { folderPickerLauncher.launch(null) },
+                                onNavigateToHistory = { currentNavTab = NavTab.HISTORY }
+                            )
+                        }
+                        NavTab.HISTORY -> {
+                            TransferHistoryScreen(
+                                records = historyRecordsState,
+                                onClearAll = { historyManager.clearAll() },
+                                onDeleteRecord = { id -> historyManager.deleteRecord(id) },
+                                onOpenDownloadsFolder = { openDownloadsFolder() }
+                            )
+                        }
+                        NavTab.SETTINGS -> {
+                            SettingsScreen(
+                                deviceName = deviceNameState,
+                                onDeviceNameChange = { settingsManager.deviceName = it },
+                                connectionMode = connectionModeState,
+                                onConnectionModeChange = { settingsManager.connectionMode = it },
+                                preferUsb = preferUsbState,
+                                onPreferUsbChange = { settingsManager.preferUsb = it },
+                                prefer5GHz = prefer5GHzState,
+                                onPrefer5GHzChange = { settingsManager.prefer5GHz = it },
+                                serverPort = serverPortState,
+                                localIpAddresses = udpManager.getLocalIpAddresses(),
+                                isUsbCablePlugged = isUsbCablePluggedState,
+                                isUsbTetheringActive = isUsbTetheringActiveState,
+                                onOpenDownloadsFolder = { openDownloadsFolder() },
+                                onOpenTetheringSettings = { openUsbTetheringSettings() },
+                                themeMode = themeModeState,
+                                onThemeModeChange = { settingsManager.themeMode = it }
                             )
                         }
                     }
-                    "pairing" -> {
-                        PairingScreen(
-                            onBack = { currentScreen = "discovery" },
-                            onPairWithPin = { pin ->
-                                combinedPeers.forEach { peer ->
-                                    if (peer.ipAddress.isNotEmpty()) {
-                                        lifecycleScope.launch {
-                                            pairingCoordinator.sendPairRequest(peer.ipAddress, peer.port, pin, android.os.Build.MODEL, udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1")
+
+                    // Persistent Floating Active Transfer Bar (accessible from any screen except Transfer tab)
+                    activeTelemetry?.let { telem ->
+                        if (currentNavTab != NavTab.TRANSFER && telem.status != "CANCELLED") {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                com.sharedash.app.ui.theme.NeoCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { currentNavTab = NavTab.TRANSFER },
+                                    cornerRadius = 18.dp,
+                                    elevation = 10.dp,
+                                    backgroundColor = com.sharedash.app.ui.theme.NeoCard
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (telem.status == "COMPLETED") com.sharedash.app.ui.theme.NeoGreen.copy(alpha = 0.2f)
+                                                        else if (telem.status == "FAILED") com.sharedash.app.ui.theme.NeoRed.copy(alpha = 0.2f)
+                                                        else com.sharedash.app.ui.theme.NeoCyan.copy(alpha = 0.2f)
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                androidx.compose.material3.Icon(
+                                                    imageVector = if (telem.status == "COMPLETED") Icons.Default.Check
+                                                    else if (telem.status == "FAILED") Icons.Default.Close
+                                                    else Icons.Default.Sync,
+                                                    contentDescription = null,
+                                                    tint = if (telem.status == "COMPLETED") com.sharedash.app.ui.theme.NeoGreen
+                                                    else if (telem.status == "FAILED") com.sharedash.app.ui.theme.NeoRed
+                                                    else com.sharedash.app.ui.theme.NeoCyan,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                androidx.compose.material3.Text(
+                                                    text = telem.title.ifEmpty { "Active Transfer" },
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = com.sharedash.app.ui.theme.TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                )
+                                                androidx.compose.material3.Text(
+                                                    text = if (telem.status == "COMPLETED") "Transfer Complete · Tap to view"
+                                                    else if (telem.status == "FAILED") "Transfer Failed · Tap to view"
+                                                    else "%.1f MB/s · %d%% (Tap to view)".format(
+                                                        telem.aggregateMbps,
+                                                        (telem.progressPct * 100).toInt()
+                                                    ),
+                                                    fontSize = 11.sp,
+                                                    color = com.sharedash.app.ui.theme.TextSecondary
+                                                )
+                                            }
                                         }
+
+                                        androidx.compose.material3.Text(
+                                            text = "VIEW",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = com.sharedash.app.ui.theme.NeoCyan
+                                        )
                                     }
                                 }
-                                Toast.makeText(this, "Pairing PIN: $pin submitted", Toast.LENGTH_SHORT).show()
-                                currentScreen = "discovery"
                             }
+                        }
+                    }
+
+                    // Floating Bottom Pill Navigation Bar
+                    BottomPillBar(
+                        currentTab = currentNavTab,
+                        onTabSelected = { currentNavTab = it },
+                        hasActiveTransfer = activeTelemetry != null && activeTelemetry?.status != "COMPLETED" && activeTelemetry?.status != "FAILED",
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+
+                    // Dialogs
+                    if (isPairingDialogOpen) {
+                        ConnectingDialog(
+                            targetName = activeTarget?.friendlyName ?: "ShareDash PC",
+                            pin = pairingPin,
+                            step = pairingStep,
+                            onConfirm = {
+                                pairingStep = 3
+                                activeTarget?.let { peer ->
+                                    lifecycleScope.launch {
+                                        val accepted = pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, true)
+                                        if (accepted) {
+                                            pairingCoordinator.confirmPairSession(peer.ipAddress, peer.port)
+                                        }
+                                        delay(500)
+                                        isPairingDialogOpen = false
+                                    }
+                                }
+                            },
+                            onCancel = { isPairingDialogOpen = false }
+                        )
+                    }
+
+                    if (isWirelessWarningDialogOpen) {
+                        WirelessWarningDialog(
+                            onConfirmWireless = {
+                                isWirelessWarningDialogOpen = false
+                                startDiscovery()
+                                Toast.makeText(this@MainActivity, "Wireless Mode: Searching nearby PCs via Wi-Fi & BT", Toast.LENGTH_SHORT).show()
+                            },
+                            onUseUsb = {
+                                isWirelessWarningDialogOpen = false
+                                openUsbTetheringSettings()
+                            },
+                            onDismiss = { isWirelessWarningDialogOpen = false }
                         )
                     }
                 }
@@ -901,44 +1053,92 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun resolveBestTargetEndpoint(target: DiscoveredPeer): Pair<String, Int> = withContext(Dispatchers.IO) {
+
+
+    private fun ensureWifiEnabled() {
+        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return
+        if (!wifiManager.isWifiEnabled) {
+            android.util.Log.i("MainActivity", "Wi-Fi is OFF on app launch. Enabling...")
+            try {
+                @Suppress("DEPRECATION")
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    wifiManager.isWifiEnabled = true
+                } else {
+                    var directEnabled = false
+                    try {
+                        val method = wifiManager.javaClass.getMethod("setWifiEnabled", Boolean::class.javaPrimitiveType)
+                        directEnabled = method.invoke(wifiManager, true) as? Boolean ?: false
+                    } catch (_: Exception) {}
+
+                    if (!directEnabled) {
+                        try {
+                            val panelIntent = Intent(android.provider.Settings.Panel.ACTION_WIFI).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(panelIntent)
+                        } catch (_: Exception) {
+                            val settingsIntent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(settingsIntent)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Could not enable Wi-Fi on app launch: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun resolveBestTargetEndpoint(target: DiscoveredPeer): Pair<String, Int>? = withContext(Dispatchers.IO) {
         val candidateEndpoints = mutableListOf<Pair<String, Int>>()
 
-        // 1. USB ADB Reverse & USB Fast-Path (Highest priority: 3+ Gbps line rate)
-        candidateEndpoints.add("127.0.0.1" to 54321)
-        candidateEndpoints.add("127.0.0.1" to 54325)
-
-        // USB Tethering Gateways (192.168.42.x)
-        candidateEndpoints.add("192.168.42.1" to 54321)
-        candidateEndpoints.add("192.168.42.129" to 54321)
+        // 1. Known Target IP from discovery / pairing
+        if (target.ipAddress.isNotEmpty() && target.ipAddress != "127.0.0.1" && target.ipAddress != "0.0.0.0") {
+            candidateEndpoints.add(target.ipAddress to target.port)
+        }
 
         // 2. Direct 5GHz Wi-Fi Hotspot Gateways
         candidateEndpoints.add("192.168.137.1" to 54321) // PC 5GHz Hotspot Gateway
         candidateEndpoints.add("192.168.49.1" to 54321)  // Wi-Fi Direct Autonomous Group
         candidateEndpoints.add("192.168.43.1" to 54321)  // Phone Hotspot Gateway
 
-        // 3. Known Target IP from discovery / pairing
-        if (target.ipAddress.isNotEmpty() && target.ipAddress != "127.0.0.1") {
-            candidateEndpoints.add(target.ipAddress to target.port)
-        }
+        // 3. USB Tethering Gateways (192.168.42.x)
+        candidateEndpoints.add("192.168.42.1" to 54321)
+        candidateEndpoints.add("192.168.42.129" to 54321)
+
+        // 4. USB ADB Reverse port 54325 (NEVER 54321 which is Android's own server port)
+        candidateEndpoints.add("127.0.0.1" to 54325)
 
         for ((ip, port) in candidateEndpoints) {
             try {
                 val probeUrl = java.net.URL("http://$ip:$port/api/v1/info")
                 val conn = probeUrl.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 250
-                conn.readTimeout = 300
+                conn.connectTimeout = 300
+                conn.readTimeout = 400
                 conn.requestMethod = "GET"
                 val code = conn.responseCode
-                conn.disconnect()
                 if (code in 200..299) {
-                    android.util.Log.i("MainActivity", "Selected fastest transport endpoint: http://$ip:$port")
+                    val body = conn.inputStream.bufferedReader().readText()
+                    conn.disconnect()
+                    val json = org.json.JSONObject(body)
+                    val devId = json.optString("device_id", "")
+                    val osName = json.optString("os_name", "")
+
+                    // CRITICAL: Prevent loopback self-transfer!
+                    // If device_id is this phone's own ID or OS is Android, this is the phone itself!
+                    if (devId == com.sharedash.app.DeviceIdentity.id || osName.equals("Android", ignoreCase = true)) {
+                        continue
+                    }
+
+                    Log.i("MainActivity", "Selected verified PC transport endpoint: http://$ip:$port ($osName, $devId)")
                     return@withContext (ip to port)
                 }
+                conn.disconnect()
             } catch (_: Exception) {}
         }
 
-        (target.ipAddress.ifEmpty { "127.0.0.1" } to target.port)
+        null
     }
 
     private fun executeRealTransfer(
@@ -954,7 +1154,28 @@ class MainActivity : ComponentActivity() {
         activeSendJob?.cancel()
         httpServer?.resetCancellation()
         activeSendJob = lifecycleScope.launch(Dispatchers.IO) {
-            val (resolvedIp, resolvedPort) = resolveBestTargetEndpoint(target)
+            val endpoint = resolveBestTargetEndpoint(target)
+            if (endpoint == null) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Cannot reach PC. Ensure ShareDash is open on PC.", Toast.LENGTH_LONG).show()
+                    onUpdate(
+                        SchedulerTelemetry(
+                            transferId = transferId,
+                            title = firstFileName,
+                            status = "FAILED",
+                            aggregateMbps = 0.0,
+                            totalBytes = 0L,
+                            completedBytes = 0L,
+                            progressPct = 0f,
+                            etaSeconds = 0,
+                            transports = emptyList(),
+                            chunkStates = emptyList()
+                        )
+                    )
+                }
+                return@launch
+            }
+            val (resolvedIp, resolvedPort) = endpoint
 
             // Start Foreground Service safely
             try {
@@ -984,7 +1205,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val isUsb = resolvedIp == "127.0.0.1" || resolvedIp.startsWith("192.168.42.") || resolvedIp.startsWith("10.") || target.supportedBridges.any { it.contains("USB", true) }
+            val isUsb = resolvedIp.startsWith("192.168.42.") || resolvedIp.startsWith("10.") || target.supportedBridges.any { it.contains("USB", true) }
             val effectiveTotalBytes = totalBytes.coerceAtLeast(1024L)
             val chunkSize = when {
                 effectiveTotalBytes < 5 * 1024 * 1024 -> 256 * 1024L // 256 KB
@@ -996,7 +1217,7 @@ class MainActivity : ComponentActivity() {
 
             val initialChunks = (0 until totalChunks).map { idx ->
                 val transportBadge = if (isUsb) {
-                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
                 } else {
                     if (idx % 2 == 0) "Wi-Fi Direct" else "Local Wi-Fi"
                 }
@@ -1087,7 +1308,7 @@ class MainActivity : ComponentActivity() {
                                         else -> ChunkState.PENDING
                                     }
                                     val transportBadge = if (isUsb) {
-                                        if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                                        if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
                                     } else {
                                         if (idx % 2 == 0) "Wi-Fi Direct" else "Local Wi-Fi"
                                     }
@@ -1138,7 +1359,7 @@ class MainActivity : ComponentActivity() {
 
             val finalChunks = (0 until totalChunks).map { idx ->
                 val transportBadge = if (isUsb) {
-                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB 3.2 Cable"
+                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
                 } else {
                     if (idx % 2 == 0) "Wi-Fi Direct" else "Local Wi-Fi"
                 }
@@ -1179,7 +1400,20 @@ class MainActivity : ComponentActivity() {
                 transports = listOf(TransportStats("5GHz Wi-Fi", TransportKind.LAN, smoothMbps, 1.5, 0, true)),
                 chunkStates = finalChunks
             )
-            withContext(Dispatchers.Main) { onUpdate(finalTelem) }
+            withContext(Dispatchers.Main) {
+                onUpdate(finalTelem)
+                historyManager.addRecord(
+                    TransferRecord(
+                        fileName = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
+                        fileSize = effectiveTotalBytes,
+                        direction = TransferDirection.SENT,
+                        status = if (success) TransferStatus.COMPLETED else TransferStatus.FAILED,
+                        peerName = target.friendlyName,
+                        transportUsed = if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi",
+                        speedMbps = smoothMbps
+                    )
+                )
+            }
         }
     }
 
@@ -1463,6 +1697,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        ensureWifiEnabled()
         checkUsbState()
         if (_isUsbTetheringActive.value) {
             onUsbConnectedCallback?.invoke()

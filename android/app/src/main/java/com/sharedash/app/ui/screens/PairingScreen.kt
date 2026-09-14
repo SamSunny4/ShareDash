@@ -101,36 +101,5 @@ fun PairingScreen(
             color = TextSecondary,
             textAlign = TextAlign.Center
         )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "OR ENTER 6-DIGIT PIN",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextMuted,
-            letterSpacing = 0.5.sp
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        OutlinedTextField(
-            value = pinText,
-            onValueChange = { if (it.length <= 6) pinText = it },
-            placeholder = { Text("000000", fontFamily = FontFamily.Monospace) },
-            singleLine = true,
-            modifier = Modifier.width(180.dp)
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = { if (pinText.length == 6) onPairWithPin(pinText) },
-            enabled = pinText.length == 6,
-            colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Text("Connect & Pair", fontWeight = FontWeight.Bold)
-        }
     }
 }

@@ -139,42 +139,14 @@ fun ConnectingDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = if (isConnected) "Secure high-speed connection established" else "Confirm the 6-digit PIN matches on your PC screen",
-                    fontSize = 12.sp,
+                    text = if (isConnected) "Secure high-speed connection established"
+                    else if (step == 2) "Incoming connection request from $targetName. Accept to connect."
+                    else "Establishing secure connection with $targetName...",
+                    fontSize = 13.sp,
                     color = TextSecondary,
                     textAlign = TextAlign.Center,
-                    lineHeight = 16.sp
+                    lineHeight = 17.sp
                 )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // ═══════════════════════════════════════════════════════════
-                //  6-DIGIT PIN SLOTS (SUNKEN NEOMORPHIC WELLS)
-                // ═══════════════════════════════════════════════════════════
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
-                ) {
-                    digits.forEach { digit ->
-                        NeoInset(
-                            modifier = Modifier.size(44.dp),
-                            cornerRadius = 12.dp
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = digit.toString(),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (isConnected) NeoGreen else NeoCyan,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 

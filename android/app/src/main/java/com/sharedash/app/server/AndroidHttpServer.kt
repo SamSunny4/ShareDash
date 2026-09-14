@@ -58,6 +58,7 @@ class AndroidHttpServer(
     private val activeSockets = java.util.concurrent.ConcurrentHashMap.newKeySet<Socket>()
     private val activeFilesToCleanup = java.util.concurrent.ConcurrentHashMap.newKeySet<File>()
     private val isCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val cancelledTransferIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
 
@@ -65,7 +66,9 @@ class AndroidHttpServer(
         isCancelled.set(true)
         Log.i(TAG, "Cancelling all active incoming transfers on Android...")
 
+        activeChunkTransfers.keys.forEach { cancelledTransferIds.add(it) }
         activeChunkTransfers.values.forEach { session ->
+            cancelledTransferIds.add(session.transferId)
             try {
                 session.channel.close()
                 session.raf.close()
@@ -89,6 +92,8 @@ class AndroidHttpServer(
 
     fun resetCancellation() {
         isCancelled.set(false)
+        cancelledTransferIds.clear()
+        Log.i(TAG, "Reset server cancellation state - ready for new transfers")
     }
 
     private fun acquireHighPerfLocks() {
@@ -501,7 +506,7 @@ class AndroidHttpServer(
         var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
-        if (isCancelled.get()) {
+        if (cancelledTransferIds.contains(transferId) || cancelledTransferIds.contains(fileName)) {
             Log.i(TAG, "Rejecting chunk #$chunkId for transfer $transferId: transfer was cancelled.")
             val resp = JSONObject().apply {
                 put("success", false)
@@ -512,8 +517,13 @@ class AndroidHttpServer(
             return
         }
 
+        // Fresh transfer - clear blanket cancel flag
+        isCancelled.set(false)
+
         val sessionKey = if (transferId.isNotBlank()) transferId else fileName
+        var isNewSession = false
         val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
+            isNewSession = true
             acquireHighPerfLocks()
             val targetFile = File(downloadDir, fileName)
             val raf = java.io.RandomAccessFile(targetFile, "rw")
@@ -521,6 +531,11 @@ class AndroidHttpServer(
                 try { raf.setLength(fileSize) } catch (_: Exception) {}
             }
             ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
+        }
+
+        // Fire immediate transfer-start progress so Android UI flips to TransferScreen on chunk 0
+        if (isNewSession || session.receivedChunks.isEmpty()) {
+            onTransferProgress(session.fileName, session.totalBytesStreamed.get(), session.totalBytes, 0.0)
         }
 
         // Direct stream from socket to FileChannel in 1MB increments with in-flight CRC32 (zero heap garbage)
@@ -531,7 +546,7 @@ class AndroidHttpServer(
 
         try {
             while (remaining > 0) {
-                if (isCancelled.get()) {
+                if (isCancelled.get() || cancelledTransferIds.contains(transferId) || cancelledTransferIds.contains(sessionKey)) {
                     try { session.channel.close() } catch (_: Exception) {}
                     try { session.raf.close() } catch (_: Exception) {}
                     try { session.targetFile.delete() } catch (_: Exception) {}
@@ -554,10 +569,19 @@ class AndroidHttpServer(
                 session.channel.write(byteBuffer, currentOffset)
                 currentOffset += read
                 remaining -= read
+
+                // Streaming in-flight real-time progress update
+                val bytesNow = session.totalBytesStreamed.addAndGet(read.toLong())
+                val now = System.currentTimeMillis()
+                val lastTime = session.lastProgressReportTime.get()
+                if (now - lastTime >= 40L || remaining <= 0) {
+                    if (session.lastProgressReportTime.compareAndSet(lastTime, now)) {
+                        val elapsedSec = (now - session.startTime).coerceAtLeast(1) / 1000.0
+                        val speedMbps = ((bytesNow * 8.0) / 1_000_000.0) / elapsedSec
+                        onTransferProgress(session.fileName, bytesNow, session.totalBytes, speedMbps)
+                    }
+                }
             }
-            // Update cumulative bytes ONCE after the entire chunk is streamed (not per-read)
-            val bytesThisChunk = (currentOffset - chunkOffset)
-            session.totalBytesStreamed.addAndGet(bytesThisChunk)
             session.receivedChunks.add(chunkId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed streaming chunk #$chunkId at offset $chunkOffset: ${e.message}")
@@ -574,6 +598,8 @@ class AndroidHttpServer(
             val actualCrc32 = String.format("%08x", crcHasher.value)
             if (actualCrc32 != expectedCrc32) {
                 Log.w(TAG, "Chunk #$chunkId CRC32 mismatch! Expected $expectedCrc32, got $actualCrc32")
+                val bytesThisChunk = (currentOffset - chunkOffset)
+                session.totalBytesStreamed.addAndGet(-bytesThisChunk)
                 val resp = JSONObject().apply {
                     put("success", false)
                     put("error", "CORRUPT_CHUNK")
@@ -593,7 +619,8 @@ class AndroidHttpServer(
         val speedMbps = ((totalBytesWritten * 8.0) / 1_000_000.0) / elapsedSec
         onTransferProgress(session.fileName, totalBytesWritten, session.totalBytes, speedMbps)
 
-        if (completedCount >= total) {
+        val isAllBytesReceived = session.totalBytes > 0L && session.totalBytesStreamed.get() >= session.totalBytes
+        if (completedCount >= total || isAllBytesReceived) {
             try {
                 session.channel.force(true)
                 session.channel.close()
@@ -601,7 +628,7 @@ class AndroidHttpServer(
             } catch (_: Exception) {}
             activeChunkTransfers.remove(sessionKey)
             releaseHighPerfLocksIfIdle()
-            Log.i(TAG, "Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved")
+            Log.i(TAG, "Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved (${session.totalBytesStreamed.get()}/${session.totalBytes} bytes)")
             onFileReceived(session.fileName, session.targetFile.length())
         }
 
@@ -621,7 +648,7 @@ class AndroidHttpServer(
         output: BufferedOutputStream,
         isKeepAlive: Boolean = true
     ) {
-        if (isCancelled.get()) {
+        if (cancelledTransferIds.contains(headers["x-file-name"] ?: "") || cancelledTransferIds.contains("all")) {
             Log.i(TAG, "Rejecting incoming file upload: transfer was cancelled.")
             val resp = JSONObject().apply {
                 put("success", false)
@@ -632,6 +659,8 @@ class AndroidHttpServer(
             return
         }
 
+        isCancelled.set(false)
+
         val downloadDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "ShareDash"
@@ -641,6 +670,9 @@ class AndroidHttpServer(
         val contentType = headers["content-type"] ?: ""
         var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
             ?: "received_file_${System.currentTimeMillis()}.bin"
+
+        // Immediate start callback
+        onTransferProgress(fileName, 0L, contentLength.toLong().coerceAtLeast(0L), 0.0)
 
         val startTime = System.currentTimeMillis()
         var lastSpeedCalcTime = startTime

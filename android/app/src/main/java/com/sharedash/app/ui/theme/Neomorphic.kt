@@ -33,12 +33,16 @@ import androidx.compose.ui.unit.dp
 fun NeoCard(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 20.dp,
-    backgroundColor: Color = NeoCard,
-    borderColor: Color = NeoLightShadow.copy(alpha = 0.35f),
+    backgroundColor: Color = Color.Unspecified,
+    borderColor: Color = Color.Unspecified,
     elevation: Dp = 8.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val themeColors = LocalShareDashColors.current
+    val actualBg = if (backgroundColor != Color.Unspecified) backgroundColor else themeColors.card
+    val actualBorder = if (borderColor != Color.Unspecified) borderColor else themeColors.lightShadow.copy(alpha = 0.35f)
+
     val shape = RoundedCornerShape(cornerRadius)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -50,22 +54,22 @@ fun NeoCard(
             .shadow(
                 elevation = if (isPressed && onClick != null) 2.dp else elevation,
                 shape = shape,
-                ambientColor = NeoDarkShadow,
-                spotColor = NeoDarkShadow
+                ambientColor = themeColors.darkShadow,
+                spotColor = themeColors.darkShadow
             )
             .clip(shape)
             .background(
                 Brush.linearGradient(
                     colors = if (isPressed && onClick != null) {
-                        listOf(NeoCardPressed, NeoCard)
+                        listOf(themeColors.cardPressed, actualBg)
                     } else {
-                        listOf(NeoLightShadow.copy(alpha = 0.25f), backgroundColor, backgroundColor)
+                        listOf(themeColors.lightShadow.copy(alpha = 0.25f), actualBg, actualBg)
                     },
                     start = Offset(0f, 0f),
                     end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
                 )
             )
-            .border(1.dp, borderColor, shape)
+            .border(1.dp, actualBorder, shape)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -86,40 +90,44 @@ fun NeoCard(
 fun NeoInset(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 14.dp,
-    backgroundColor: Color = NeoCardPressed,
-    borderColor: Color = NeoDarkShadow.copy(alpha = 0.6f),
+    backgroundColor: Color = Color.Unspecified,
+    borderColor: Color = Color.Unspecified,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val themeColors = LocalShareDashColors.current
+    val actualBg = if (backgroundColor != Color.Unspecified) backgroundColor else themeColors.cardPressed
+    val actualBorder = if (borderColor != Color.Unspecified) borderColor else themeColors.darkShadow.copy(alpha = 0.6f)
+
     val shape = RoundedCornerShape(cornerRadius)
 
     Box(
         modifier = modifier
             .clip(shape)
-            .background(backgroundColor)
-            .border(1.dp, borderColor, shape)
+            .background(actualBg)
+            .border(1.dp, actualBorder, shape)
             .drawBehind {
                 // Top-left inner drop shadow
                 drawLine(
-                    color = NeoDarkShadow.copy(alpha = 0.8f),
+                    color = themeColors.darkShadow.copy(alpha = 0.8f),
                     start = Offset(0f, 0f),
                     end = Offset(size.width, 0f),
                     strokeWidth = 3.dp.toPx()
                 )
                 drawLine(
-                    color = NeoDarkShadow.copy(alpha = 0.8f),
+                    color = themeColors.darkShadow.copy(alpha = 0.8f),
                     start = Offset(0f, 0f),
                     end = Offset(0f, size.height),
                     strokeWidth = 3.dp.toPx()
                 )
                 // Bottom-right inner highlight
                 drawLine(
-                    color = NeoLightShadow.copy(alpha = 0.2f),
+                    color = themeColors.lightShadow.copy(alpha = 0.2f),
                     start = Offset(0f, size.height),
                     end = Offset(size.width, size.height),
                     strokeWidth = 2.dp.toPx()
                 )
                 drawLine(
-                    color = NeoLightShadow.copy(alpha = 0.2f),
+                    color = themeColors.lightShadow.copy(alpha = 0.2f),
                     start = Offset(size.width, 0f),
                     end = Offset(size.width, size.height),
                     strokeWidth = 2.dp.toPx()

@@ -37,6 +37,14 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -86,11 +94,44 @@ import kotlinx.coroutines.delay
 enum class TransferUiStage {
     TRANSFERRING,
     VERIFYING,
-    COMPLETED
+    COMPLETED,
+    FAILED
 }
 
 @Composable
 fun TransferScreen(
+    targetName: String,
+    telemetry: SchedulerTelemetry?,
+    onCancel: () -> Unit,
+    onFinish: () -> Unit,
+    onSendAnother: () -> Unit = {},
+    onPickFiles: () -> Unit = {},
+    onPickFolder: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    if (telemetry != null) {
+        ActiveTransferScreen(
+            targetName = targetName,
+            telemetry = telemetry,
+            onCancel = onCancel,
+            onFinish = onFinish,
+            onSendAnother = onSendAnother,
+            modifier = modifier
+        )
+    } else {
+        TransferIdleScreen(
+            targetName = targetName,
+            onPickFiles = onPickFiles,
+            onPickFolder = onPickFolder,
+            onNavigateToHistory = onNavigateToHistory,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun ActiveTransferScreen(
     targetName: String,
     telemetry: SchedulerTelemetry,
     onCancel: () -> Unit,
@@ -101,6 +142,7 @@ fun TransferScreen(
     val context = LocalContext.current
     val isTelemetryCompleted = telemetry.status.equals("COMPLETED", ignoreCase = true)
     val isTelemetryVerifying = telemetry.status.equals("VERIFYING", ignoreCase = true)
+    val isTelemetryFailed = telemetry.status.equals("FAILED", ignoreCase = true)
 
     // Normalize progress 0.0f .. 1.0f
     val normalizedProgress = if (telemetry.progressPct > 1.0f) {
@@ -111,13 +153,22 @@ fun TransferScreen(
 
     val isDoneOrNearDone = isTelemetryCompleted || isTelemetryVerifying || normalizedProgress >= 0.999f
 
-    var uiStage by remember { mutableStateOf(TransferUiStage.TRANSFERRING) }
+    var uiStage by remember { mutableStateOf(if (isTelemetryFailed) TransferUiStage.FAILED else TransferUiStage.TRANSFERRING) }
 
     // Synchronize verification delay for a smooth, flicker-free visual experience
-    LaunchedEffect(isDoneOrNearDone) {
-        if (isDoneOrNearDone && uiStage == TransferUiStage.TRANSFERRING) {
-            uiStage = TransferUiStage.VERIFYING
-            // Show the quick circular verification animation smoothly
+    LaunchedEffect(isTelemetryCompleted, isDoneOrNearDone, isTelemetryFailed) {
+        if (isTelemetryFailed) {
+            uiStage = TransferUiStage.FAILED
+        } else if (isTelemetryCompleted) {
+            if (uiStage == TransferUiStage.TRANSFERRING) {
+                uiStage = TransferUiStage.VERIFYING
+                delay(400)
+            }
+            uiStage = TransferUiStage.COMPLETED
+        } else if (isDoneOrNearDone) {
+            if (uiStage == TransferUiStage.TRANSFERRING) {
+                uiStage = TransferUiStage.VERIFYING
+            }
             delay(900)
             uiStage = TransferUiStage.COMPLETED
         }
@@ -298,12 +349,13 @@ fun TransferScreen(
                             ) {}
 
                             // Dual-Colored Circular Progress Arcs / Radar Sweep
+                            val arcTrackColor = NeoDarkShadow.copy(alpha = 0.6f)
                             Canvas(modifier = Modifier.size(180.dp)) {
                                 val strokeW = 14.dp.toPx()
 
                                 // Background Track
                                 drawArc(
-                                    color = NeoDarkShadow.copy(alpha = 0.6f),
+                                    color = arcTrackColor,
                                     startAngle = -90f,
                                     sweepAngle = 360f,
                                     useCenter = false,
@@ -875,7 +927,451 @@ fun TransferScreen(
                         }
                     }
                 }
+
+                TransferUiStage.FAILED -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Top Bar
+                        NeoCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 20.dp,
+                            elevation = 6.dp
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(NeoRed.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = null,
+                                            tint = NeoRed,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = "Transfer Failed",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NeoRed
+                                        )
+                                        Text(
+                                            text = "Connection lost or PC shutdown",
+                                            fontSize = 12.sp,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+                                NeoButton(
+                                    onClick = onFinish,
+                                    cornerRadius = 12.dp,
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        // Hero Error Card
+                        NeoCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 24.dp,
+                            elevation = 8.dp
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                NeoInset(
+                                    modifier = Modifier.size(90.dp),
+                                    cornerRadius = 45.dp
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Failed",
+                                            tint = NeoRed,
+                                            modifier = Modifier.size(44.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Text(
+                                    text = telemetry.title.ifEmpty { "File Transfer" },
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = "Unable to reach $targetName. The PC may be shutdown or disconnected from the network.",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        NeoButton(
+                            onClick = onFinish,
+                            cornerRadius = 16.dp,
+                            accentColor = NeoRed,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 13.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Return to Home",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        // Padding at bottom for floating bottom pill bar
+        Spacer(modifier = Modifier.height(85.dp))
+    }
+}
+
+@Composable
+private fun TransferIdleScreen(
+    targetName: String,
+    onPickFiles: () -> Unit,
+    onPickFolder: () -> Unit,
+    onNavigateToHistory: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(NeoBg)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // ═══════════════════════════════════════════════════════════════
+        //  HEADER
+        // ═══════════════════════════════════════════════════════════════
+        NeoCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 22.dp,
+            elevation = 6.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(NeoCyan, NeoBlue)
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = "Transfer",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Transfer Hub",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Ready to stream files at line speed",
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                NeoButton(
+                    onClick = onNavigateToHistory,
+                    cornerRadius = 14.dp,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "History",
+                        tint = NeoCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ═══════════════════════════════════════════════════════════════
+        //  HERO READY / TARGET STATUS
+        // ═══════════════════════════════════════════════════════════════
+        NeoCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 24.dp,
+            elevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier.size(90.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    NeoInset(
+                        modifier = Modifier.size(90.dp),
+                        cornerRadius = 45.dp
+                    ) {}
+
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(NeoBlue, NeoCyan)
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Select Content to Transfer",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Target: $targetName\nFiles are automatically split into 256KB-8MB chunks and sent over USB & Wi-Fi simultaneously.",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 17.sp
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Big Primary Send CTA
+                NeoButton(
+                    onClick = onPickFiles,
+                    cornerRadius = 18.dp,
+                    accentColor = NeoBlue,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Choose Files & Videos",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ═══════════════════════════════════════════════════════════════
+        //  CATEGORY GRID
+        // ═══════════════════════════════════════════════════════════════
+        Text(
+            text = "Categories",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextSecondary,
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Start
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TransferCategoryItem(
+                icon = Icons.Default.PhotoLibrary,
+                title = "Gallery",
+                subtitle = "Photos & Videos",
+                accentColor = NeoPurple,
+                onClick = onPickFiles,
+                modifier = Modifier.weight(1f)
+            )
+
+            TransferCategoryItem(
+                icon = Icons.Default.Folder,
+                title = "Folders",
+                subtitle = "Directories & Trees",
+                accentColor = NeoCyan,
+                onClick = onPickFolder,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TransferCategoryItem(
+                icon = Icons.Default.Description,
+                title = "Documents",
+                subtitle = "PDFs, Docs, Zips",
+                accentColor = NeoGreen,
+                onClick = onPickFiles,
+                modifier = Modifier.weight(1f)
+            )
+
+            TransferCategoryItem(
+                icon = Icons.Default.History,
+                title = "History",
+                subtitle = "Past Transfers",
+                accentColor = NeoBlue,
+                onClick = onNavigateToHistory,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Bottom padding for floating bottom pill bar
+        Spacer(modifier = Modifier.height(85.dp))
+    }
+}
+
+@Composable
+private fun TransferCategoryItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    accentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    NeoCard(
+        modifier = modifier,
+        cornerRadius = 18.dp,
+        onClick = onClick
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = TextMuted
+            )
         }
     }
 }

@@ -160,7 +160,7 @@ class UdpDiscoveryManager(
 
                     val bridges = mutableListOf("Wi-Fi Direct", "LAN")
                     if (ip == "127.0.0.1" || ip.startsWith("192.168.42.")) {
-                        bridges.add(0, "USB 3.2")
+                        bridges.add(0, "USB Fast-Path")
                     }
 
                     val peer = DiscoveredPeer(

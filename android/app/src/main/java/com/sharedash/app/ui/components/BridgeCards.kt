@@ -100,8 +100,8 @@ fun SmartBridgeStrip(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             BridgeBadge(
-                title = "USB 3.2",
-                sub = if (isUsbConnected) "3.2 Gbps Ready" else "Plug in cable",
+                title = "USB",
+                sub = if (isUsbConnected) "Fast-Path Ready" else "Plug in cable",
                 icon = Icons.Default.Cable,
                 color = UsbTeal,
                 isActive = isUsbConnected,
@@ -171,9 +171,9 @@ fun TransportRecommendationCard(
         ) {
             RecommendationRow(
                 rank = "#1",
-                title = "USB 3.2 Fast-Path",
-                speed = "3.2 Gbps",
-                desc = if (isUsbConnected) "Active & Aggregated" else "Plug in USB-C cable for max wire speed",
+                title = "USB Fast-Path",
+                speed = "High-Speed",
+                desc = if (isUsbConnected) "Active & Aggregated" else "Plug in USB cable for max wire speed",
                 isActive = isUsbConnected,
                 color = UsbTeal,
                 onClick = if (!isUsbConnected) onOpenUsbPrompt else null

@@ -88,3 +88,28 @@ data class SchedulerTelemetry(
     val transports: List<TransportStats>,
     val chunkStates: List<ChunkVisualItem>
 )
+
+enum class TransferDirection {
+    SENT,
+    RECEIVED
+}
+
+enum class TransferStatus {
+    COMPLETED,
+    FAILED,
+    CANCELLED,
+    IN_PROGRESS
+}
+
+data class TransferRecord(
+    val id: String = UUID.randomUUID().toString(),
+    val fileName: String,
+    val fileSize: Long,
+    val timestamp: Long = System.currentTimeMillis(),
+    val direction: TransferDirection,
+    val status: TransferStatus,
+    val peerName: String,
+    val transportUsed: String,
+    val speedMbps: Double = 0.0,
+    val filePath: String? = null
+)
