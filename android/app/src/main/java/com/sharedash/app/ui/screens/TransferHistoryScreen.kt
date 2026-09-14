@@ -29,14 +29,12 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
@@ -73,9 +71,7 @@ import com.sharedash.app.ui.theme.NeoCardPressed
 import com.sharedash.app.ui.theme.NeoCyan
 import com.sharedash.app.ui.theme.NeoGreen
 import com.sharedash.app.ui.theme.NeoInset
-import com.sharedash.app.ui.theme.NeoPurple
 import com.sharedash.app.ui.theme.NeoRed
-import com.sharedash.app.ui.theme.NeoYellow
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary
@@ -95,6 +91,7 @@ fun TransferHistoryScreen(
     var selectedFilter by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
+    var selectedRecordId by remember { mutableStateOf<String?>(null) }
 
     val filteredRecords = remember(records, selectedFilter, searchQuery) {
         records.filter { record ->
@@ -111,6 +108,10 @@ fun TransferHistoryScreen(
             }
             matchesFilter && matchesSearch
         }
+    }
+
+    val selectedRecord = remember(selectedRecordId, records) {
+        records.find { it.id == selectedRecordId }
     }
 
     val totalBytesReceived = remember(records) {
@@ -162,7 +163,7 @@ fun TransferHistoryScreen(
         modifier = modifier
             .fillMaxSize()
             .background(NeoBg)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // ═══════════════════════════════════════════════════════════════
@@ -170,25 +171,23 @@ fun TransferHistoryScreen(
         // ═══════════════════════════════════════════════════════════════
         NeoCard(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 22.dp,
+            cornerRadius = 20.dp,
             elevation = 6.dp
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                Brush.linearGradient(
-                                    colors = listOf(NeoBlue, NeoCyan)
-                                )
+                                Brush.linearGradient(colors = listOf(NeoBlue, NeoCyan))
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -196,20 +195,20 @@ fun TransferHistoryScreen(
                             imageVector = Icons.Default.History,
                             contentDescription = "History",
                             tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "Transfer History",
-                            fontSize = 17.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         )
                         Text(
-                            text = "${records.size} total records",
-                            fontSize = 12.sp,
+                            text = "${records.size} records",
+                            fontSize = 11.sp,
                             color = TextSecondary
                         )
                     }
@@ -219,388 +218,333 @@ fun TransferHistoryScreen(
                     if (records.isNotEmpty()) {
                         NeoButton(
                             onClick = { showClearDialog = true },
-                            cornerRadius = 12.dp,
-                            modifier = Modifier.size(40.dp)
+                            cornerRadius = 10.dp,
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Clear History",
                                 tint = NeoRed,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                     }
 
                     NeoButton(
                         onClick = onOpenDownloadsFolder,
-                        cornerRadius = 12.dp,
-                        modifier = Modifier.size(40.dp)
+                        cornerRadius = 10.dp,
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.FolderOpen,
                             contentDescription = "Open Downloads",
                             tint = NeoCyan,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // ═══════════════════════════════════════════════════════════════
-        //  2. STATS SUMMARY ROW
+        //  2. COMPACT STATS ROW
         // ═══════════════════════════════════════════════════════════════
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            HistoryStatCard(
-                title = "Total Received",
-                value = formatFileSize(totalBytesReceived),
-                accentColor = NeoGreen,
-                icon = Icons.Default.ArrowDownward,
-                modifier = Modifier.weight(1f)
-            )
-
-            HistoryStatCard(
-                title = "Total Sent",
-                value = formatFileSize(totalBytesSent),
-                accentColor = NeoBlue,
-                icon = Icons.Default.ArrowUpward,
-                modifier = Modifier.weight(1f)
-            )
+            NeoCard(modifier = Modifier.weight(1f), cornerRadius = 14.dp, elevation = 3.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = null, tint = NeoGreen, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text(text = "Received", fontSize = 10.sp, color = TextMuted)
+                        Text(text = formatFileSize(totalBytesReceived), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    }
+                }
+            }
+            NeoCard(modifier = Modifier.weight(1f), cornerRadius = 14.dp, elevation = 3.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(imageVector = Icons.Default.ArrowUpward, contentDescription = null, tint = NeoBlue, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                        Text(text = "Sent", fontSize = 10.sp, color = TextMuted)
+                        Text(text = formatFileSize(totalBytesSent), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    }
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // ═══════════════════════════════════════════════════════════════
-        //  3. SEARCH FIELD
+        //  3. FILTER CHIPS + NARROW SEARCH (same row)
         // ═══════════════════════════════════════════════════════════════
-        NeoInset(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 16.dp,
-            backgroundColor = NeoCardPressed
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = TextMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = {
-                        Text(
-                            text = "Search file or device...",
-                            fontSize = 13.sp,
-                            color = TextMuted
-                        )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        cursorColor = NeoCyan
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-
-                if (searchQuery.isNotEmpty()) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Clear",
-                        tint = TextMuted,
+                listOf("ALL" to "All", "RECEIVED" to "↓", "SENT" to "↑", "COMPLETED" to "✓").forEach { (filterKey, label) ->
+                    val isSelected = selectedFilter == filterKey
+                    Box(
                         modifier = Modifier
-                            .size(18.dp)
-                            .clickable { searchQuery = "" }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // ═══════════════════════════════════════════════════════════════
-        //  4. FILTER CHIPS
-        // ═══════════════════════════════════════════════════════════════
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ALL" to "All", "RECEIVED" to "Received", "SENT" to "Sent", "COMPLETED" to "Completed").forEach { (filterKey, label) ->
-                val isSelected = selectedFilter == filterKey
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            if (isSelected) Brush.linearGradient(listOf(NeoBlue, NeoCyan))
-                            else Brush.linearGradient(listOf(NeoCard, NeoCard))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isSelected) Brush.linearGradient(listOf(NeoBlue, NeoCyan))
+                                else Brush.linearGradient(listOf(NeoCard, NeoCard))
+                            )
+                            .clickable { selectedFilter = filterKey }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) Color.White else TextSecondary
                         )
-                        .clickable { selectedFilter = filterKey }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                    }
+                }
+            }
+
+            // Narrow search box
+            NeoInset(modifier = Modifier.width(130.dp), cornerRadius = 10.dp, backgroundColor = NeoCardPressed) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = label,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) Color.White else TextSecondary
+                    Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = TextMuted, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text(text = "Search...", fontSize = 11.sp, color = TextMuted) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            cursorColor = NeoCyan
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
                     )
+                    if (searchQuery.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = TextMuted,
+                            modifier = Modifier.size(14.dp).clickable { searchQuery = "" }
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ═══════════════════════════════════════════════════════════════
+        //  4. SELECTED RECORD DETAIL PANEL
+        // ═══════════════════════════════════════════════════════════════
+        AnimatedVisibility(visible = selectedRecord != null, enter = fadeIn(), exit = fadeOut()) {
+            selectedRecord?.let { rec ->
+                val isReceived = rec.direction == TransferDirection.RECEIVED
+                val formattedDate = remember(rec.timestamp) {
+                    SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(rec.timestamp))
+                }
+                NeoCard(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    cornerRadius = 16.dp,
+                    elevation = 6.dp,
+                    borderColor = if (isReceived) NeoGreen.copy(alpha = 0.4f) else NeoBlue.copy(alpha = 0.4f)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = rec.fileName,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = buildString {
+                                    append(formatFileSize(rec.fileSize))
+                                    append(" · ")
+                                    append(rec.peerName)
+                                    append(" · ")
+                                    append(formattedDate)
+                                    append(" · ")
+                                    append(rec.transportUsed)
+                                    if (rec.speedMbps > 0) append(" · %.1f MB/s".format(rec.speedMbps))
+                                },
+                                fontSize = 11.sp,
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            NeoButton(
+                                onClick = { openTransferredFile(context, rec) },
+                                cornerRadius = 10.dp,
+                                accentColor = if (isReceived) NeoGreen else NeoBlue
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "Open", tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = TextMuted,
+                                modifier = Modifier.size(16.dp).clickable { selectedRecordId = null }
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════
         //  5. RECORDS LIST
         // ═══════════════════════════════════════════════════════════════
         if (filteredRecords.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
-                        modifier = Modifier
-                            .size(70.dp)
-                            .clip(CircleShape)
-                            .background(NeoCardPressed),
+                        modifier = Modifier.size(60.dp).clip(CircleShape).background(NeoCardPressed),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = null,
-                            tint = TextMuted,
-                            modifier = Modifier.size(36.dp)
-                        )
+                        Icon(imageVector = Icons.Default.History, contentDescription = null, tint = TextMuted, modifier = Modifier.size(30.dp))
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = if (searchQuery.isNotEmpty()) "No matching transfers" else "No Transfer History",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (searchQuery.isNotEmpty()) "Try a different search keyword" else "Files sent or received will appear here automatically",
-                        fontSize = 12.sp,
-                        color = TextMuted,
-                        textAlign = TextAlign.Center
+                        fontSize = 12.sp, color = TextMuted, textAlign = TextAlign.Center
                     )
                 }
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(filteredRecords, key = { it.id }) { record ->
-                    TransferRecordCard(
+                    val isSelected = record.id == selectedRecordId
+                    CompactTransferRecordRow(
                         record = record,
-                        onClick = {
-                            openTransferredFile(context, record)
-                        },
+                        isSelected = isSelected,
+                        onClick = { selectedRecordId = if (isSelected) null else record.id },
                         onDelete = {
+                            if (selectedRecordId == record.id) selectedRecordId = null
                             onDeleteRecord(record.id)
                         }
                     )
                 }
-
-                item {
-                    // Extra spacing at bottom so floating bottom pill bar does not cover items
-                    Spacer(modifier = Modifier.height(85.dp))
-                }
+                item { Spacer(modifier = Modifier.height(85.dp)) }
             }
         }
     }
 }
 
 @Composable
-private fun HistoryStatCard(
-    title: String,
-    value: String,
-    accentColor: Color,
-    icon: ImageVector,
-    modifier: Modifier = Modifier
-) {
-    NeoCard(
-        modifier = modifier,
-        cornerRadius = 18.dp,
-        elevation = 4.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(accentColor.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 11.sp,
-                    color = TextMuted
-                )
-                Text(
-                    text = value,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TransferRecordCard(
+private fun CompactTransferRecordRow(
     record: TransferRecord,
+    isSelected: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val fileIcon = getFileIcon(record.fileName)
     val isReceived = record.direction == TransferDirection.RECEIVED
+    val accentColor = if (isReceived) NeoGreen else NeoBlue
     val formattedDate = remember(record.timestamp) {
-        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        sdf.format(Date(record.timestamp))
+        SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(record.timestamp))
     }
 
     NeoCard(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        cornerRadius = 18.dp,
-        elevation = 4.dp
+        modifier = modifier.fillMaxWidth().clickable { onClick() },
+        cornerRadius = 14.dp,
+        elevation = if (isSelected) 6.dp else 3.dp,
+        borderColor = if (isSelected) accentColor.copy(alpha = 0.5f) else Color.Transparent
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // File Type Icon
+            // File type icon (compact)
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        if (isReceived) NeoGreen.copy(alpha = 0.14f)
-                        else NeoBlue.copy(alpha = 0.14f)
-                    ),
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = fileIcon,
-                    contentDescription = null,
-                    tint = if (isReceived) NeoGreen else NeoBlue,
-                    modifier = Modifier.size(22.dp)
-                )
+                Icon(imageVector = fileIcon, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
-            // Main Info
+            // Main info (compact - just name + brief meta)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = record.fileName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-
-                Spacer(modifier = Modifier.height(3.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (isReceived) "↓ Recv" else "↑ Sent",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isReceived) NeoGreen else NeoBlue
-                    )
-                    Text(
-                        text = " · ${formatFileSize(record.fileSize)} · $formattedDate",
-                        fontSize = 11.sp,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Transport & Speed Badge
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(NeoCyan.copy(alpha = 0.12f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = record.transportUsed,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = NeoCyan
-                        )
-                    }
-
-                    if (record.speedMbps > 0.0) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "%.1f MB/s".format(record.speedMbps),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeoGreen
-                        )
-                    }
-                }
+                Text(
+                    text = "${if (isReceived) "↓" else "↑"} ${formatFileSize(record.fileSize)} · $formattedDate",
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    maxLines = 1
+                )
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Delete record icon button
+            // Delete button
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Delete record",
-                tint = TextMuted.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable { onDelete() }
+                tint = TextMuted.copy(alpha = 0.5f),
+                modifier = Modifier.size(16.dp).clickable { onDelete() }
             )
         }
     }

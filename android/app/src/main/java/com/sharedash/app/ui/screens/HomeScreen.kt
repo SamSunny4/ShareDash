@@ -116,7 +116,7 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .background(NeoBg)
-            .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 16.dp)
+            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 16.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -345,7 +345,7 @@ fun HomeScreen(
                     // Waiting for USB connection and tethering text
                     if (isUsbTetheringActive) {
                         Text(
-                            text = "USB Tethering Link Established!",
+                            text = "Connected",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = NeoGreen,
@@ -353,7 +353,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Connected at line speed. Ready to stream files directly to ShareDash PC.",
+                            text = "USB tethering active. Ready to transfer at line speed.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -455,66 +455,68 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // ═══════════════════════════════════════════════════════════════
-            //  4. SKIP USB BUTTON (WIRELESS BYPASS)
+            //  4. SKIP USB BUTTON (WIRELESS BYPASS) - hidden when USB active
             // ═══════════════════════════════════════════════════════════════
-            NeoCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 20.dp,
-                elevation = 4.dp,
-                onClick = onSkipUsb
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+            if (!isUsbCablePlugged && !isUsbTetheringActive) {
+                NeoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 20.dp,
+                    elevation = 4.dp,
+                    onClick = onSkipUsb
                 ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(NeoBlue.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Wifi,
-                                contentDescription = "Wireless",
-                                tint = NeoBlue,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(NeoBlue.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Wifi,
+                                    contentDescription = "Wireless",
+                                    tint = NeoBlue,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Skip USB",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "Continue wirelessly via Wi-Fi Direct or LAN",
+                                    fontSize = 11.sp,
+                                    color = TextMuted
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Skip USB",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Continue wirelessly via Wi-Fi Direct or LAN",
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
-                        }
-                    }
 
-                    NeoButton(
-                        onClick = onSkipUsb,
-                        cornerRadius = 12.dp
-                    ) {
-                        Text(
-                            text = "Skip →",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeoCyan,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
+                        NeoButton(
+                            onClick = onSkipUsb,
+                            cornerRadius = 12.dp
+                        ) {
+                            Text(
+                                text = "Skip →",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeoCyan,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }

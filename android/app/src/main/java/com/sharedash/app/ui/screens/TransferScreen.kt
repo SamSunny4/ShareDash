@@ -221,7 +221,7 @@ private fun ActiveTransferScreen(
         peakSpeedMbS = speedMbS
     }
 
-    // Verification rotation & pulse transition
+    // Verification rotation & pulse transition - only animated during VERIFYING stage
     val infiniteTransition = rememberInfiniteTransition(label = "verifySweep")
     val verifyRotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -241,6 +241,9 @@ private fun ActiveTransferScreen(
         ),
         label = "verifyPulse"
     )
+    // Only apply rotation when actually in VERIFYING stage
+    val activeVerifyRotation = if (uiStage == TransferUiStage.VERIFYING) verifyRotation else 0f
+    val activeVerifyPulse = if (uiStage == TransferUiStage.VERIFYING) verifyPulse else 1f
 
     Column(
         modifier = modifier
@@ -295,7 +298,7 @@ private fun ActiveTransferScreen(
                                             tint = if (currentStage == TransferUiStage.VERIFYING) NeoCyan else NeoBlue,
                                             modifier = Modifier
                                                 .size(24.dp)
-                                                .then(if (currentStage == TransferUiStage.VERIFYING) Modifier.rotate(verifyRotation) else Modifier)
+                                                .then(if (currentStage == TransferUiStage.VERIFYING) Modifier.rotate(activeVerifyRotation) else Modifier)
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
@@ -363,8 +366,7 @@ private fun ActiveTransferScreen(
                                 )
 
                                 if (currentStage == TransferUiStage.VERIFYING) {
-                                    // Full glowing radar sweep for verification
-                                    rotate(verifyRotation) {
+                                    rotate(activeVerifyRotation) {
                                         drawArc(
                                             brush = Brush.sweepGradient(
                                                 listOf(
@@ -423,7 +425,7 @@ private fun ActiveTransferScreen(
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
-                                            .scale(verifyPulse)
+                                            .scale(activeVerifyPulse)
                                             .clip(RoundedCornerShape(10.dp))
                                             .background(NeoCyan.copy(alpha = 0.2f))
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
@@ -434,7 +436,7 @@ private fun ActiveTransferScreen(
                                             tint = NeoCyan,
                                             modifier = Modifier
                                                 .size(13.dp)
-                                                .rotate(verifyRotation)
+                                                .rotate(activeVerifyRotation)
                                         )
                                         Spacer(modifier = Modifier.width(5.dp))
                                         Text(
@@ -703,27 +705,12 @@ private fun ActiveTransferScreen(
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(NeoGreen.copy(alpha = 0.15f))
-                                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VerifiedUser,
-                                        contentDescription = null,
-                                        tint = NeoGreen,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "100.00% Verified · Zero Loss",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = NeoGreen
-                                    )
-                                }
+                                Text(
+                                    text = "Saved to Downloads/ShareDash",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
 

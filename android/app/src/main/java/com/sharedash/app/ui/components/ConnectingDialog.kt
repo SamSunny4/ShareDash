@@ -55,9 +55,9 @@ import com.sharedash.app.ui.theme.TextSecondary
 @Composable
 fun ConnectingDialog(
     targetName: String,
-    pin: String,
+    pin: String = "",
     step: Int,
-    onConfirm: () -> Unit,
+    onConfirm: () -> Unit = {},
     onCancel: () -> Unit
 ) {
     val transition = rememberInfiniteTransition(label = "pulseRing")
@@ -75,7 +75,6 @@ fun ConnectingDialog(
     )
 
     val isConnected = step >= 3
-    val digits = pin.padEnd(6, '0').take(6)
 
     Dialog(onDismissRequest = onCancel) {
         NeoCard(
@@ -92,7 +91,7 @@ fun ConnectingDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // ═══════════════════════════════════════════════════════════
-                //  ANIMATED LOCK BADGE
+                //  ANIMATED BADGE
                 // ═══════════════════════════════════════════════════════════
                 Box(
                     modifier = Modifier.size(90.dp),
@@ -129,7 +128,7 @@ fun ConnectingDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = if (isConnected) "Connected!" else "Pairing with $targetName",
+                    text = if (isConnected) "Connected!" else "Connecting to $targetName",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
@@ -140,8 +139,7 @@ fun ConnectingDialog(
 
                 Text(
                     text = if (isConnected) "Secure high-speed connection established"
-                    else if (step == 2) "Incoming connection request from $targetName. Accept to connect."
-                    else "Establishing secure connection with $targetName...",
+                    else "Establishing secure connection...",
                     fontSize = 13.sp,
                     color = TextSecondary,
                     textAlign = TextAlign.Center,
@@ -150,44 +148,8 @@ fun ConnectingDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // ═══════════════════════════════════════════════════════════
-                //  ACTION BUTTONS
-                // ═══════════════════════════════════════════════════════════
-                if (step == 2) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        NeoButton(
-                            onClick = onCancel,
-                            cornerRadius = 16.dp,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Decline",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeoRed,
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-                        }
-
-                        NeoButton(
-                            onClick = onConfirm,
-                            cornerRadius = 16.dp,
-                            accentColor = NeoGreen,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Accept",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-                        }
-                    }
-                } else if (!isConnected) {
+                // Show cancel only while connecting (not when connected)
+                if (!isConnected) {
                     NeoButton(
                         onClick = onCancel,
                         cornerRadius = 16.dp,

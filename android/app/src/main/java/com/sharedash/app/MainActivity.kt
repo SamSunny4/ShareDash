@@ -489,6 +489,7 @@ class MainActivity : ComponentActivity() {
 
                 onIncomingPairCallback = { initiatorId, initiatorName, initiatorIp, pin, appVer ->
                     lifecycleScope.launch(Dispatchers.Main) {
+                        // Auto-accept incoming connections - no confirmation required
                         activeTarget = DiscoveredPeer(
                             deviceId = initiatorId,
                             friendlyName = initiatorName,
@@ -497,9 +498,9 @@ class MainActivity : ComponentActivity() {
                             port = 54321,
                             appVersion = appVer
                         )
-                        pairingPin = pin
-                        pairingStep = 2
-                        isPairingDialogOpen = true
+                        // Immediately accept without showing dialog
+                        pairingCoordinator.respondToPairRequest(initiatorIp, 54321, true)
+                        Toast.makeText(this@MainActivity, "Connected to $initiatorName", Toast.LENGTH_SHORT).show()
                     }
                 }
 
@@ -921,6 +922,14 @@ class MainActivity : ComponentActivity() {
                     // Persistent Floating Active Transfer Bar (accessible from any screen except Transfer tab)
                     activeTelemetry?.let { telem ->
                         if (currentNavTab != NavTab.TRANSFER && telem.status != "CANCELLED") {
+                            // Auto-dismiss completed/failed banner after 3 seconds
+                            val isFinished = telem.status == "COMPLETED" || telem.status == "FAILED"
+                            LaunchedEffect(telem.transferId, isFinished) {
+                                if (isFinished) {
+                                    delay(3000)
+                                    activeTelemetry = null
+                                }
+                            }
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)

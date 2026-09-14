@@ -21,14 +21,14 @@ data class ShareDashColors(
 )
 
 val DarkShareDashColors = ShareDashColors(
-    bg = Color(0xFF161A22),
-    card = Color(0xFF202632),
-    cardPressed = Color(0xFF14171E),
-    lightShadow = Color(0xFF2C3444),
-    darkShadow = Color(0xFF0C0E13),
-    textPrimary = Color(0xFFF8FAFC),
-    textSecondary = Color(0xFF94A3B8),
-    textMuted = Color(0xFF64748B),
+    bg = Color(0xFF080A0F),
+    card = Color(0xFF111318),
+    cardPressed = Color(0xFF0A0C10),
+    lightShadow = Color(0xFF1C2130),
+    darkShadow = Color(0xFF030406),
+    textPrimary = Color(0xFFF0F4FF),
+    textSecondary = Color(0xFF8899BB),
+    textMuted = Color(0xFF4A5A78),
     isDark = true
 )
 
