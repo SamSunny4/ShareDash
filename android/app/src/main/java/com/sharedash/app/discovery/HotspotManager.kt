@@ -73,6 +73,39 @@ class HotspotManager(private val context: Context) {
     }
 
     /**
+     * Retrieves the connected Wi-Fi SSID, stripping quotes.
+     * Returns null if not connected, or if SSID is unknown/empty.
+     */
+    fun getConnectedWifiSsid(): String? {
+        return try {
+            @Suppress("DEPRECATION")
+            val info = wifiManager?.connectionInfo
+            val rawSsid = info?.ssid?.replace("\"", "")?.trim()
+            if (!rawSsid.isNullOrEmpty() && rawSsid != "<unknown ssid>" && rawSsid != "0x") {
+                rawSsid
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Checks if connected to an external Wi-Fi network (i.e. not ShareDash Hotspot or Direct group).
+     */
+    fun isConnectedToExternalWifi(): Boolean {
+        if (!isWifiConnected()) return false
+        val ssid = getConnectedWifiSsid() ?: return true
+        val lower = ssid.lowercase()
+        // Exclude ShareDash's own Hotspot or Wi-Fi Direct groups
+        if (lower.startsWith("sharedash") || lower.startsWith("direct-")) {
+            return false
+        }
+        return true
+    }
+
+    /**
      * Disconnects active client Wi-Fi before initiating Wi-Fi Direct.
      * Prevents Multi-Channel Concurrency (MCC) / Single Channel Concurrency (SCC) radio time-slicing
      * and 2.4GHz downgrades, dedicating 100% of RF chains and MIMO antennas to 5GHz P2P throughput.

@@ -259,7 +259,7 @@ fun UsbFirstScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Please enable USB Tethering to activate 3+ Gbps transfer with your PC.",
+                        text = "Please enable USB Tethering to activate 3+ Gbps transfer with your PC or another phone.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         textAlign = TextAlign.Center,
@@ -303,7 +303,7 @@ fun UsbFirstScreen(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Plug a USB-C cable into your PC and enable USB Tethering for maximum line speed.",
+                        text = "Plug a USB-C cable into your PC or another phone and enable USB Tethering for maximum line speed.",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         textAlign = TextAlign.Center,

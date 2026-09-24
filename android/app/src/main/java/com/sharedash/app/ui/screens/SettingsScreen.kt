@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -95,6 +96,7 @@ fun SettingsScreen(
     onOpenTetheringSettings: () -> Unit,
     themeMode: String = com.sharedash.app.storage.SettingsManager.THEME_SYSTEM,
     onThemeModeChange: (String) -> Unit = {},
+    hasActiveTransfer: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -419,7 +421,9 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         NeoCard(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (hasActiveTransfer) 0.5f else 1.0f),
             cornerRadius = 20.dp,
             elevation = 4.dp
         ) {
@@ -450,8 +454,10 @@ fun SettingsScreen(
 
                     NeoButton(
                         onClick = {
-                            val newMode = if (connectionMode == SettingsManager.MODE_PHONE_TO_PC) SettingsManager.MODE_PHONE_TO_PHONE else SettingsManager.MODE_PHONE_TO_PC
-                            onConnectionModeChange(newMode)
+                            if (!hasActiveTransfer) {
+                                val newMode = if (connectionMode == SettingsManager.MODE_PHONE_TO_PC) SettingsManager.MODE_PHONE_TO_PHONE else SettingsManager.MODE_PHONE_TO_PC
+                                onConnectionModeChange(newMode)
+                            }
                         },
                         cornerRadius = 12.dp
                     ) {
@@ -489,7 +495,8 @@ fun SettingsScreen(
 
                     Switch(
                         checked = preferUsb,
-                        onCheckedChange = onPreferUsbChange,
+                        onCheckedChange = if (hasActiveTransfer) null else onPreferUsbChange,
+                        enabled = !hasActiveTransfer,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = NeoGreen,
@@ -523,7 +530,8 @@ fun SettingsScreen(
 
                     Switch(
                         checked = prefer5GHz,
-                        onCheckedChange = onPrefer5GHzChange,
+                        onCheckedChange = if (hasActiveTransfer) null else onPrefer5GHzChange,
+                        enabled = !hasActiveTransfer,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = NeoCyan,

@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiTethering
@@ -47,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -95,6 +98,7 @@ fun HomeScreen(
     onStartHotspot: () -> Unit = {},
     onStopHotspot: () -> Unit = {},
     deviceName: String = "My Phone",
+    hasActiveTransfer: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val transition = rememberInfiniteTransition(label = "usbPulse")
@@ -208,10 +212,43 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // ═══════════════════════════════════════════════════════════════
+        //  ACTIVE TRANSFER NOTICE BANNER
+        // ═══════════════════════════════════════════════════════════════
+        if (hasActiveTransfer) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NeoGreen.copy(alpha = 0.12f))
+                    .border(1.dp, NeoGreen.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = NeoGreen,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Transfer in progress — Connection options locked",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         //  2. MODE SELECTOR: PHONE TO PC vs PHONE TO PHONE
         // ═══════════════════════════════════════════════════════════════
         NeoInset(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (hasActiveTransfer) 0.5f else 1.0f),
             cornerRadius = 18.dp,
             backgroundColor = NeoCardPressed
         ) {
@@ -232,7 +269,7 @@ fun HomeScreen(
                             if (isPhoneToPc) Modifier.background(Brush.linearGradient(listOf(NeoBlue, NeoCyan)))
                             else Modifier
                         )
-                        .clickable { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PC) }
+                        .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PC) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -262,7 +299,7 @@ fun HomeScreen(
                             if (!isPhoneToPc) Modifier.background(Brush.linearGradient(listOf(NeoPurple, NeoBlue)))
                             else Modifier
                         )
-                        .clickable { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PHONE) }
+                        .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PHONE) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -521,7 +558,64 @@ fun HomeScreen(
                 }
             }
         } else {
-            // PHONE TO PHONE MODE: WIRELESS HOTSPOT & WI-FI DIRECT
+            // PHONE TO PHONE MODE: DUAL-LINK USB CABLE + 5GHz WI-FI DIRECT / HOTSPOT
+
+            // 1. DUAL-LINK MULTIPATH READY BANNER (when USB tethering is active)
+            if (isUsbTetheringActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    NeoCyan.copy(alpha = 0.2f),
+                                    NeoPurple.copy(alpha = 0.2f)
+                                )
+                            )
+                        )
+                        .border(
+                            1.5.dp,
+                            Brush.linearGradient(listOf(NeoCyan, NeoPurple)),
+                            RoundedCornerShape(18.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(NeoCyan.copy(alpha = 0.25f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ElectricBolt,
+                                contentDescription = null,
+                                tint = NeoCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "🚀 Simultaneous USB + Wi-Fi Multipath Active",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeoCyan
+                            )
+                            Text(
+                                text = "Transferring concurrently through USB cable & Wi-Fi just like PC!",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            // 2. HERO PHONE-TO-PHONE CONNECTION CARD
             NeoCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 24.dp,
@@ -533,30 +627,44 @@ fun HomeScreen(
                         .padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Status Badge Pill
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(NeoPurple.copy(alpha = 0.15f))
+                            .background(
+                                if (isUsbTetheringActive) NeoCyan.copy(alpha = 0.15f)
+                                else if (isUsbCablePlugged) NeoYellow.copy(alpha = 0.15f)
+                                else NeoPurple.copy(alpha = 0.15f)
+                            )
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.WifiTethering,
+                            imageVector = if (isUsbTetheringActive) Icons.Default.Usb
+                            else if (isUsbCablePlugged) Icons.Default.Cable
+                            else Icons.Default.PhoneAndroid,
                             contentDescription = null,
-                            tint = NeoPurple,
+                            tint = if (isUsbTetheringActive) NeoCyan
+                            else if (isUsbCablePlugged) NeoYellow
+                            else NeoPurple,
                             modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Direct Phone to Phone Link",
+                            text = if (isUsbTetheringActive) "⚡ USB Cable Linked + 📶 Wi-Fi Multipath"
+                            else if (isUsbCablePlugged) "🔌 USB Cable Plugged — Enable Tethering"
+                            else "📱 Phone to Phone: USB Cable + Wi-Fi",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = NeoPurple
+                            color = if (isUsbTetheringActive) NeoCyan
+                            else if (isUsbCablePlugged) NeoYellow
+                            else NeoPurple
                         )
                     }
 
                     Spacer(modifier = Modifier.height(18.dp))
 
+                    // Animated Glowing Center Hub
                     Box(
                         modifier = Modifier.size(105.dp),
                         contentAlignment = Alignment.Center
@@ -569,18 +677,22 @@ fun HomeScreen(
                         Box(
                             modifier = Modifier
                                 .size(74.dp)
-                                .scale(radarPulse)
+                                .scale(if (isUsbCablePlugged || isUsbTetheringActive) pulseScale else radarPulse)
                                 .clip(CircleShape)
                                 .background(
                                     Brush.linearGradient(
-                                        colors = listOf(NeoPurple, NeoBlue)
+                                        colors = if (isUsbTetheringActive) listOf(NeoGreen, NeoCyan)
+                                        else if (isUsbCablePlugged) listOf(NeoYellow, NeoPurple)
+                                        else listOf(NeoPurple, NeoBlue)
                                     )
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PhoneAndroid,
-                                contentDescription = "Phone",
+                                imageVector = if (isUsbTetheringActive) Icons.Default.Usb
+                                else if (isUsbCablePlugged) Icons.Default.Cable
+                                else Icons.Default.PhoneAndroid,
+                                contentDescription = "Phone Hub",
                                 tint = Color.White,
                                 modifier = Modifier.size(34.dp)
                             )
@@ -589,24 +701,116 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Text(
-                        text = "Connect to Nearby Android Phone",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Open ShareDash on both phones. Use high-speed 5GHz Direct Hotspot or Wi-Fi Direct.",
-                        fontSize = 13.sp,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 17.sp
-                    )
+                    if (isUsbTetheringActive) {
+                        Text(
+                            text = "USB Cable Linked & Ready",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeoGreen,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "USB tethering active between phones. Files will transfer simultaneously through USB cable and Wi-Fi for maximum line speed!",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 17.sp
+                        )
+                    } else if (isUsbCablePlugged) {
+                        Text(
+                            text = "USB-C Cable Detected!",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Turn on USB Tethering on either phone to activate maximum line-speed simultaneous transfer.",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 17.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // One-tap Enable USB Tethering button
+                        NeoButton(
+                            onClick = onEnableUsbTethering,
+                            cornerRadius = 16.dp,
+                            accentColor = NeoGreen,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Enable USB Tethering",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Phone to Phone Transfer",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Connect phones via USB-C cable and enable USB Tethering to transfer simultaneously through USB and Wi-Fi just like PC!",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 17.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Open USB Tethering Settings button
+                        NeoButton(
+                            onClick = onEnableUsbTethering,
+                            cornerRadius = 16.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cable,
+                                    contentDescription = null,
+                                    tint = NeoCyan,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Connect USB-C Cable / Tethering",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Hotspot Toggle Button
+                    // Hotspot Toggle Section
                     val isHotspotActive = hotspotState is HotspotState.Active
                     NeoButton(
                         onClick = if (isHotspotActive) onStopHotspot else onStartHotspot,

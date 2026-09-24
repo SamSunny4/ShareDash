@@ -1,10 +1,16 @@
 package com.sharedash.app.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -41,6 +48,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +60,8 @@ import com.sharedash.app.ui.theme.NeoCyan
 import com.sharedash.app.ui.theme.NeoDarkShadow
 import com.sharedash.app.ui.theme.NeoGreen
 import com.sharedash.app.ui.theme.NeoLightShadow
+import com.sharedash.app.ui.theme.NeoPurple
+import com.sharedash.app.ui.theme.NeoYellow
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary
@@ -73,46 +83,90 @@ fun BottomPillBar(
     val tabs = NavTab.values()
     val selectedIndex = tabs.indexOf(currentTab).coerceAtLeast(0)
 
+    val infiniteTransition = rememberInfiniteTransition(label = "transferBorderSweep")
+    val sweepRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "sweepAngle"
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Floating pill container with dual neomorphic shadow & subtle neon border
+        // Floating pill container with dual neomorphic shadow & dynamic animated transfer border
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(68.dp)
                 .shadow(
-                    elevation = 16.dp,
+                    elevation = if (hasActiveTransfer) 22.dp else 16.dp,
                     shape = RoundedCornerShape(34.dp),
-                    ambientColor = NeoDarkShadow,
-                    spotColor = Color.Black.copy(alpha = 0.6f)
+                    ambientColor = if (hasActiveTransfer) NeoCyan else NeoDarkShadow,
+                    spotColor = if (hasActiveTransfer) NeoBlue.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.6f)
                 )
                 .clip(RoundedCornerShape(34.dp))
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            NeoCard.copy(alpha = 0.95f),
-                            NeoBg.copy(alpha = 0.98f)
+        ) {
+            // Rotating Accent Sweep Gradient (circulates around the pill perimeter when transferring)
+            if (hasActiveTransfer) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(800.dp)
+                        .graphicsLayer { rotationZ = sweepRotation }
+                        .background(
+                            Brush.sweepGradient(
+                                colors = listOf(
+                                    NeoCyan,
+                                    NeoBlue,
+                                    NeoPurple,
+                                    NeoGreen,
+                                    NeoYellow,
+                                    NeoCyan
+                                )
+                            )
+                        )
+                )
+            }
+
+            // Inner pill container
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(if (hasActiveTransfer) 2.dp else 0.dp)
+                    .clip(RoundedCornerShape(if (hasActiveTransfer) 32.dp else 34.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                NeoCard.copy(alpha = 0.95f),
+                                NeoBg.copy(alpha = 0.98f)
+                            )
                         )
                     )
-                )
-                .border(
-                    width = 1.2.dp,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            NeoLightShadow.copy(alpha = 0.5f),
-                            NeoCyan.copy(alpha = 0.25f),
-                            NeoBlue.copy(alpha = 0.25f),
-                            NeoLightShadow.copy(alpha = 0.4f)
-                        )
-                    ),
-                    shape = RoundedCornerShape(34.dp)
-                )
-                .padding(6.dp)
-        ) {
+                    .then(
+                        if (!hasActiveTransfer) {
+                            Modifier.border(
+                                width = 1.2.dp,
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        NeoLightShadow.copy(alpha = 0.5f),
+                                        NeoCyan.copy(alpha = 0.25f),
+                                        NeoBlue.copy(alpha = 0.25f),
+                                        NeoLightShadow.copy(alpha = 0.4f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(34.dp)
+                            )
+                        } else Modifier
+                    )
+                    .padding(6.dp)
+            ) {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
                 val totalWidth = maxWidth
                 val tabWidth = totalWidth / tabs.size
@@ -219,6 +273,7 @@ fun BottomPillBar(
                         }
                     }
                 }
+            }
             }
         }
     }

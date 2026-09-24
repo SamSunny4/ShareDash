@@ -59,6 +59,7 @@ import com.sharedash.app.ui.theme.NeoCardPressed
 import com.sharedash.app.ui.theme.NeoCyan
 import com.sharedash.app.ui.theme.NeoDarkShadow
 import com.sharedash.app.ui.theme.NeoGreen
+import com.sharedash.app.ui.theme.NeoPurple
 import com.sharedash.app.ui.theme.NeoInset
 import com.sharedash.app.ui.theme.NeoLightShadow
 import com.sharedash.app.ui.theme.NeoRed
@@ -412,10 +413,11 @@ fun DiscoveryScreen(
                                     .background(NeoBlue.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
+                                val isPc = peer.osName.contains("Windows", ignoreCase = true)
                                 Icon(
-                                    imageVector = Icons.Default.Computer,
-                                    contentDescription = "PC",
-                                    tint = NeoBlue,
+                                    imageVector = if (isPc) Icons.Default.Computer else Icons.Default.PhoneAndroid,
+                                    contentDescription = if (isPc) "PC" else "Phone",
+                                    tint = if (isPc) NeoBlue else NeoPurple,
                                     modifier = Modifier.size(26.dp)
                                 )
                             }
