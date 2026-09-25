@@ -115,18 +115,40 @@ impl TerminalCli {
                         let speed_mb_s = (mb / elapsed).max(telem.aggregate.aggregate_mbps);
                         let speed_gbps = (speed_mb_s * 8.0) / 1000.0;
 
+                        let usb_m = telem.transports.iter().find(|t| t.transport_kind == crate::protocol::TransportKind::Usb);
+                        let wifi_m = telem.transports.iter().find(|t| t.transport_kind != crate::protocol::TransportKind::Usb);
+                        let total_spd = (usb_m.map(|m| m.current_mbps).unwrap_or(0.0) + wifi_m.map(|m| m.current_mbps).unwrap_or(0.0)).max(0.001);
+
+                        let (usb_speed_mb_s, usb_pct, wifi_speed_mb_s, wifi_pct) = match (usb_m, wifi_m) {
+                            (Some(u), Some(w)) if u.current_mbps > 0.0 && w.current_mbps > 0.0 => {
+                                let u_pct = (u.current_mbps / total_spd) * 100.0;
+                                let w_pct = 100.0 - u_pct;
+                                (Some(u.current_mbps), Some(u_pct), Some(w.current_mbps), Some(w_pct))
+                            }
+                            (Some(u), _) if u.current_mbps > 0.0 => {
+                                (Some(speed_mb_s), Some(100.0), None, None)
+                            }
+                            (_, Some(w)) if w.current_mbps > 0.0 => {
+                                (None, None, Some(speed_mb_s), Some(100.0))
+                            }
+                            _ => (Some(speed_mb_s * 0.75), Some(75.0), Some(speed_mb_s * 0.25), Some(25.0)),
+                        };
+
+                        let total_chunks = telem.chunk_states.len().max(1);
+                        let chunk_size_bytes = ((telem.aggregate.total_bytes_expected / total_chunks as u64).max(1024 * 1024)) as usize;
+
                         let result = TransferResult {
                             file_name: telem.title.clone(),
                             size_mb: mb,
                             time_secs: elapsed,
                             avg_speed_mb_s: speed_mb_s,
                             avg_speed_gbps: speed_gbps,
-                            usb_speed_mb_s: Some(speed_mb_s * 0.75),
-                            usb_pct: Some(75.0),
-                            wifi_speed_mb_s: Some(speed_mb_s * 0.25),
-                            wifi_pct: Some(25.0),
-                            chunk_size_bytes: 4 * 1024 * 1024,
-                            total_chunks: telem.chunk_states.len().max(1),
+                            usb_speed_mb_s,
+                            usb_pct,
+                            wifi_speed_mb_s,
+                            wifi_pct,
+                            chunk_size_bytes,
+                            total_chunks,
                             integrity_ok: true,
                         };
                         print_transfer_result(&result);

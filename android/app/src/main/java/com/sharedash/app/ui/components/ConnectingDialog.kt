@@ -1,5 +1,6 @@
 package com.sharedash.app.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -7,13 +8,17 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -74,19 +79,47 @@ fun ConnectingDialog(
     // ── Animation transitions ─────────────────────────────────────────
     val infiniteTransition = rememberInfiniteTransition(label = "connectingTransition")
 
-    // Pulsing halo for devices
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulseScale"
+    // Radar ripple wave for phone node (expanding outward)
+    val phoneRippleScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.48f,
+        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
+        label = "phoneRippleScale"
+    )
+    val phoneRippleAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
+        label = "phoneRippleAlpha"
     )
 
-    // Moving data beam packet between phone and PC (0f to 1f)
+    // Radar ripple wave for PC node (slightly offset in time)
+    val pcRippleScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.48f,
+        animationSpec = infiniteRepeatable(tween(1600, delayMillis = 350, easing = LinearEasing), RepeatMode.Restart),
+        label = "pcRippleScale"
+    )
+    val pcRippleAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(1600, delayMillis = 350, easing = LinearEasing), RepeatMode.Restart),
+        label = "pcRippleAlpha"
+    )
+
+    // Breathing pulse for device icons (natural, subtle, no rubber-banding)
+    val deviceBreathe by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "deviceBreathe"
+    )
+
+    // Moving data beam packet between phone and PC (0f to 1f across full track width)
     val beamOffsetPct by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(if (isConnected) 650 else 1000, easing = LinearEasing), RepeatMode.Restart),
         label = "beamOffset"
     )
 
@@ -118,20 +151,35 @@ fun ConnectingDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Phone Device Node
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(contentAlignment = Alignment.Center) {
+                            // Radiating radar ripple ring
                             Box(
                                 modifier = Modifier
                                     .size(62.dp)
-                                    .scale(pulseScale)
+                                    .scale(phoneRippleScale)
                                     .clip(CircleShape)
-                                    .background(NeoCyan.copy(alpha = 0.18f))
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = NeoCyan.copy(alpha = phoneRippleAlpha),
+                                        shape = CircleShape
+                                    )
                             )
+
+                            // Outer soft glow halo
+                            Box(
+                                modifier = Modifier
+                                    .size(62.dp)
+                                    .clip(CircleShape)
+                                    .background(NeoCyan.copy(alpha = 0.16f))
+                            )
+
+                            // Inset circular button with Phone icon
                             NeoInset(
                                 modifier = Modifier.size(52.dp),
                                 cornerRadius = 26.dp
@@ -144,7 +192,9 @@ fun ConnectingDialog(
                                         imageVector = Icons.Default.PhoneAndroid,
                                         contentDescription = "Phone",
                                         tint = NeoCyan,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .scale(deviceBreathe)
                                     )
                                 }
                             }
@@ -162,7 +212,7 @@ fun ConnectingDialog(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 8.dp),
+                            .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -201,48 +251,106 @@ fun ConnectingDialog(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Glowing animated track
-                            Box(
+                            // Glowing animated track spanning full highway length
+                            BoxWithConstraints(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(Color(0xFF1E2638))
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF101726))
+                                    .border(
+                                        width = 0.8.dp,
+                                        color = if (isConnected) NeoGreen.copy(alpha = 0.45f) else NeoCyan.copy(alpha = 0.25f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
                             ) {
-                                // Moving pulse packet
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.35f)
-                                        .fillMaxSize()
-                                        .offset(x = (beamOffsetPct * 70).dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                listOf(
-                                                    Color.Transparent,
-                                                    if (isConnected) NeoGreen else NeoCyan,
-                                                    Color.Transparent
+                                val trackWidth = maxWidth
+                                val packetWidth = (trackWidth * 0.32f).coerceIn(24.dp, 48.dp)
+                                val maxTravel = (trackWidth - packetWidth).coerceAtLeast(0.dp)
+                                val packetX = maxTravel * beamOffsetPct
+
+                                if (isConnected) {
+                                    // Connected: Glowing solid energized conduit bridge
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        NeoCyan.copy(alpha = 0.7f),
+                                                        NeoGreen,
+                                                        NeoCyan.copy(alpha = 0.7f)
+                                                    )
                                                 )
                                             )
-                                        )
-                                )
+                                    )
+                                    // High-velocity shimmer traversing across the active conduit
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(x = packetX)
+                                            .width(packetWidth)
+                                            .fillMaxHeight()
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        Color.White.copy(alpha = 0.9f),
+                                                        Color.Transparent
+                                                    )
+                                                )
+                                            )
+                                    )
+                                } else {
+                                    // Negotiating: Data beam packet travelling 100% of the distance from Phone to PC
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(x = packetX)
+                                            .width(packetWidth)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(
+                                                        Color.Transparent,
+                                                        NeoCyan,
+                                                        Color.White.copy(alpha = 0.9f),
+                                                        NeoCyan,
+                                                        Color.Transparent
+                                                    )
+                                                )
+                                            )
+                                    )
+                                }
                             }
                         }
                     }
 
                     // PC Device Node
+                    val pcColor = if (isConnected) NeoGreen else NeoBlue
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(contentAlignment = Alignment.Center) {
+                            // Radiating radar ripple ring
                             Box(
                                 modifier = Modifier
                                     .size(62.dp)
-                                    .scale(pulseScale)
+                                    .scale(pcRippleScale)
                                     .clip(CircleShape)
-                                    .background(
-                                        if (isConnected) NeoGreen.copy(alpha = 0.18f)
-                                        else NeoBlue.copy(alpha = 0.18f)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = pcColor.copy(alpha = pcRippleAlpha),
+                                        shape = CircleShape
                                     )
                             )
+
+                            // Outer soft glow halo
+                            Box(
+                                modifier = Modifier
+                                    .size(62.dp)
+                                    .clip(CircleShape)
+                                    .background(pcColor.copy(alpha = 0.16f))
+                            )
+
+                            // Inset circular button with PC icon
                             NeoInset(
                                 modifier = Modifier.size(52.dp),
                                 cornerRadius = 26.dp
@@ -254,8 +362,10 @@ fun ConnectingDialog(
                                     Icon(
                                         imageVector = if (isConnected) Icons.Default.Check else Icons.Default.Computer,
                                         contentDescription = "PC",
-                                        tint = if (isConnected) NeoGreen else NeoBlue,
-                                        modifier = Modifier.size(24.dp)
+                                        tint = pcColor,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .scale(if (isConnected) 1.08f else deviceBreathe)
                                     )
                                 }
                             }
@@ -265,7 +375,7 @@ fun ConnectingDialog(
                             text = targetName,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
+                            color = if (isConnected) NeoGreen else TextPrimary,
                             maxLines = 1
                         )
                     }
@@ -343,50 +453,60 @@ fun ConnectingDialog(
                             color = TextSecondary
                         )
 
-                        if (step >= 2) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "[PHASE 2] Capability Exchange",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeoCyan
-                            )
-                            Text(
-                                text = " • Transport: $transportType (480+ Mbps)",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = " • Wi-Fi PHY: 5GHz Wi-Fi 6 (1200 Mbps)",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
+                        AnimatedVisibility(
+                            visible = step >= 2,
+                            enter = fadeIn(tween(250)) + expandVertically(tween(250))
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "[PHASE 2] Capability Exchange",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeoCyan
+                                )
+                                Text(
+                                    text = " • Transport: $transportType (480+ Mbps)",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = " • Wi-Fi PHY: 5GHz Wi-Fi 6 (1200 Mbps)",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
+                                )
+                            }
                         }
 
-                        if (step >= 3) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "[PHASE 3] Security & Session Ready",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeoGreen
-                            )
-                            Text(
-                                text = " ✔ AES-256-GCM Ephemeral Handshake OK",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = NeoGreen
-                            )
-                            Text(
-                                text = " ✔ Multipath Fast-Path Ready",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = NeoGreen
-                            )
+                        AnimatedVisibility(
+                            visible = step >= 3,
+                            enter = fadeIn(tween(250)) + expandVertically(tween(250))
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "[PHASE 3] Security & Session Ready",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeoGreen
+                                )
+                                Text(
+                                    text = " ✔ AES-256-GCM Ephemeral Handshake OK",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = NeoGreen
+                                )
+                                Text(
+                                    text = " ✔ Multipath Fast-Path Ready",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = NeoGreen
+                                )
+                            }
                         }
 
                         // Terminal Blinking Cursor Line

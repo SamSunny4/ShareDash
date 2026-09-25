@@ -66,6 +66,28 @@ impl Server {
             tracing::warn!("Could not start BLE discovery: {}", e);
         }
 
+        // Maintain ADB reverse port 54325 whenever an Android phone is plugged in via USB
+        let adb_server_port = self.port;
+        tokio::spawn(async move {
+            loop {
+                if let Ok(output) = tokio::process::Command::new("adb").arg("devices").output().await {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let has_device = text.lines().skip(1).any(|l| l.contains("\tdevice"));
+                    if has_device {
+                        let _ = tokio::process::Command::new("adb")
+                            .args(["reverse", "tcp:54325", &format!("tcp:{}", adb_server_port)])
+                            .output()
+                            .await;
+                        let _ = tokio::process::Command::new("adb")
+                            .args(["forward", "tcp:54325", "tcp:54321"])
+                            .output()
+                            .await;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+        });
+
         let state = AppState {
             device_id: self.device_id,
             device_name: self.device_name,

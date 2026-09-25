@@ -108,8 +108,24 @@ pub struct DeviceInfoResponse {
 
 pub async fn get_device_info(State(state): State<AppState>) -> impl IntoResponse {
     let mut ips = Vec::new();
-    if let Ok(my_ip) = local_ip_address::local_ip() {
-        ips.push(my_ip.to_string());
+    let mut seen = std::collections::HashSet::new();
+
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let std::net::IpAddr::V4(v4) = ip {
+                if !v4.is_loopback() && !v4.is_unspecified() {
+                    let s = v4.to_string();
+                    if seen.insert(s.clone()) {
+                        ips.push(s);
+                    }
+                }
+            }
+        }
+    }
+    if ips.is_empty() {
+        if let Ok(my_ip) = local_ip_address::local_ip() {
+            ips.push(my_ip.to_string());
+        }
     }
 
     Json(DeviceInfoResponse {
@@ -1208,6 +1224,9 @@ pub struct ActiveIncomingChunkSession {
     pub file_handle: std::fs::File,
     pub received_chunks: std::collections::HashSet<u32>,
     pub start_time: Instant,
+    pub usb_bytes: u64,
+    pub wifi_bytes: u64,
+    pub chunk_transports: HashMap<u32, String>,
 }
 
 static ACTIVE_CHUNK_RECEIVERS: OnceLock<parking_lot::Mutex<HashMap<String, Arc<parking_lot::Mutex<ActiveIncomingChunkSession>>>>> = OnceLock::new();
@@ -1246,6 +1265,12 @@ pub async fn receive_transfer_chunk(
     let total_file_size: u64 = get_header("x-file-size").parse().unwrap_or(0);
     let expected_sha256 = get_header("x-chunk-sha256").to_lowercase();
     let expected_crc32 = get_header("x-chunk-crc32").to_lowercase();
+
+    // Transport recognition: read X-Transport-Kind / X-Transport
+    let transport_header = get_header("x-transport-kind").to_lowercase();
+    let transport_name_hdr = get_header("x-transport");
+    let is_usb_chunk = transport_header == "usb" || transport_name_hdr.to_lowercase().contains("usb");
+    let transport_badge = if is_usb_chunk { "🔌 USB Fast-Path" } else { "📶 5GHz Wi-Fi" };
 
     // Automatic retransmission trigger: CRC32 or SHA-256 verification
     if !expected_crc32.is_empty() {
@@ -1326,13 +1351,16 @@ pub async fn receive_transfer_chunk(
                 file_handle: file,
                 received_chunks: std::collections::HashSet::new(),
                 start_time: Instant::now(),
+                usb_bytes: 0,
+                wifi_bytes: 0,
+                chunk_transports: HashMap::new(),
             }));
             map.insert(transfer_id.clone(), s.clone());
             s
         }
     };
 
-    let (completed_count, total_count, is_all_done) = {
+    let (completed_count, total_count, is_all_done, total_received_bytes, usb_b, wifi_b) = {
         use std::io::{Seek, SeekFrom, Write};
         let mut guard = session.lock();
         if let Err(e) = guard.file_handle.seek(SeekFrom::Start(chunk_offset)) {
@@ -1347,45 +1375,71 @@ pub async fn receive_transfer_chunk(
                 Json(serde_json::json!({ "success": false, "error": format!("Write failed: {}", e), "chunk_id": chunk_id })),
             ));
         }
-        guard.received_chunks.insert(chunk_id);
+        if guard.received_chunks.insert(chunk_id) {
+            if is_usb_chunk {
+                guard.usb_bytes += body.len() as u64;
+            } else {
+                guard.wifi_bytes += body.len() as u64;
+            }
+            guard.chunk_transports.insert(chunk_id, transport_badge.to_string());
+        }
         let count = guard.received_chunks.len();
         let total = guard.total_chunks as usize;
-        (count, total, count >= total)
+        let tot_bytes = guard.usb_bytes + guard.wifi_bytes;
+        (count, total, count >= total, tot_bytes, guard.usb_bytes, guard.wifi_bytes)
     };
 
     let elapsed_sec = {
         let guard = session.lock();
         guard.start_time.elapsed().as_secs_f64().max(0.001)
     };
-    let bytes_so_far = (chunk_offset + body.len() as u64).min(total_file_size.max(body.len() as u64));
-    let mbps = ((bytes_so_far as f64) * 8.0) / (elapsed_sec * 1_000_000.0);
+    let bytes_so_far = total_received_bytes.min(total_file_size.max(total_received_bytes));
 
     let transfer_uuid = Uuid::parse_str(&transfer_id).unwrap_or_else(|_| Uuid::new_v4());
     let mut visual_chunks = Vec::new();
-    for i in 0..total_chunks {
-        let state_str = if i < completed_count as u32 {
-            "COMPLETED"
-        } else if i == chunk_id {
-            "IN_FLIGHT"
-        } else {
-            "PENDING"
-        };
-        visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
-            chunk_id: i,
-            state: state_str.to_string(),
-            transport_id: Some("🔌 USB / 📶 Wi-Fi".to_string()),
-        });
+    {
+        let guard = session.lock();
+        for i in 0..total_chunks {
+            let state_str = if guard.received_chunks.contains(&i) {
+                "COMPLETED"
+            } else if i == chunk_id {
+                "IN_FLIGHT"
+            } else {
+                "PENDING"
+            };
+            let chunk_t = guard.chunk_transports.get(&i).cloned().unwrap_or_else(|| {
+                if is_usb_chunk { "🔌 USB Fast-Path".to_string() } else { "📶 5GHz Wi-Fi".to_string() }
+            });
+            visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
+                chunk_id: i,
+                state: state_str.to_string(),
+                transport_id: Some(chunk_t),
+            });
+        }
     }
 
-    let mut usb_metric = crate::transport::r#trait::TransportMetrics::new("Fast-Path Multipath".to_string(), TransportKind::Usb);
-    usb_metric.current_mbps = mbps / 8.0;
-    usb_metric.rtt_ms = 0.5;
+    let mut metrics = Vec::new();
+    let usb_mb_s = (usb_b as f64) / (elapsed_sec * 1_000_000.0);
+    let wifi_mb_s = (wifi_b as f64) / (elapsed_sec * 1_000_000.0);
+
+    if usb_b > 0 {
+        let mut m = crate::transport::r#trait::TransportMetrics::new("USB Fast-Path".to_string(), TransportKind::Usb);
+        m.current_mbps = usb_mb_s;
+        m.rtt_ms = 0.4;
+        metrics.push(m);
+    }
+    if wifi_b > 0 || usb_b == 0 {
+        let mut m = crate::transport::r#trait::TransportMetrics::new("5GHz Wi-Fi".to_string(), TransportKind::WifiDirect);
+        m.current_mbps = wifi_mb_s;
+        m.rtt_ms = 2.0;
+        metrics.push(m);
+    }
 
     let telem = SchedulerTelemetry::new(
         transfer_uuid,
         file_name.clone(),
         if is_all_done { "COMPLETED".to_string() } else { "ACTIVE".to_string() },
-        vec![usb_metric],
+        metrics,
         total_file_size.max(bytes_so_far),
         bytes_so_far,
         elapsed_sec,

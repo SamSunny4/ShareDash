@@ -27,7 +27,8 @@ data class DiscoveredPeer(
     val supportedBridges: List<String> = listOf("Wi-Fi Direct", "LAN"),
     val rssi: Int = -50,
     val isBleDetected: Boolean = false,
-    val lastSeenTimestamp: Long = System.currentTimeMillis()
+    val lastSeenTimestamp: Long = System.currentTimeMillis(),
+    val candidateIps: List<String> = emptyList()
 )
 
 data class ChunkInfo(

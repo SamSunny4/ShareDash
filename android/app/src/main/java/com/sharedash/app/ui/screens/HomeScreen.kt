@@ -1,11 +1,16 @@
 package com.sharedash.app.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,12 +19,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -103,17 +110,24 @@ fun HomeScreen(
 ) {
     val transition = rememberInfiniteTransition(label = "usbPulse")
     val pulseScale by transition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.06f,
+        initialValue = 0.96f,
+        targetValue = 1.04f,
         animationSpec = infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "pulseScale"
     )
 
-    val radarPulse by transition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "radarPulse"
+    // Radar ripple waves radiating outward when scanning/searching for devices
+    val radarRippleScale by transition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.45f,
+        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
+        label = "radarRippleScale"
+    )
+    val radarRippleAlpha by transition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
+        label = "radarRippleAlpha"
     )
 
     Column(
@@ -252,71 +266,111 @@ fun HomeScreen(
             cornerRadius = 18.dp,
             backgroundColor = NeoCardPressed
         ) {
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(4.dp)
             ) {
                 val isPhoneToPc = connectionMode == SettingsManager.MODE_PHONE_TO_PC
+                val pillWidth = maxWidth / 2
 
-                // Option: Phone to PC
+                // Smooth sliding indicator pill
+                val pillOffset by animateDpAsState(
+                    targetValue = if (isPhoneToPc) 0.dp else pillWidth,
+                    animationSpec = spring(
+                        dampingRatio = 0.82f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "modePillOffset"
+                )
+
+                // The sliding active pill background
                 Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .offset(x = pillOffset)
+                        .width(pillWidth)
+                        .matchParentSize()
                         .clip(RoundedCornerShape(14.dp))
-                        .then(
-                            if (isPhoneToPc) Modifier.background(Brush.linearGradient(listOf(NeoBlue, NeoCyan)))
-                            else Modifier
+                        .background(
+                            Brush.linearGradient(
+                                if (isPhoneToPc) listOf(NeoBlue, NeoCyan)
+                                else listOf(NeoPurple, NeoBlue)
+                            )
                         )
-                        .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PC) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Computer,
-                            contentDescription = null,
-                            tint = if (isPhoneToPc) Color.White else TextMuted,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Phone to PC",
-                            fontSize = 13.sp,
-                            fontWeight = if (isPhoneToPc) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isPhoneToPc) Color.White else TextSecondary
-                        )
+                    val phoneToPcIconTint by animateColorAsState(
+                        targetValue = if (isPhoneToPc) Color.White else TextMuted,
+                        label = "phoneToPcIconTint"
+                    )
+                    val phoneToPcTextColor by animateColorAsState(
+                        targetValue = if (isPhoneToPc) Color.White else TextSecondary,
+                        label = "phoneToPcTextColor"
+                    )
+
+                    // Option: Phone to PC
+                    Box(
+                        modifier = Modifier
+                            .width(pillWidth)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PC) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Computer,
+                                contentDescription = null,
+                                tint = phoneToPcIconTint,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Phone to PC",
+                                fontSize = 13.sp,
+                                fontWeight = if (isPhoneToPc) FontWeight.Bold else FontWeight.Medium,
+                                color = phoneToPcTextColor
+                            )
+                        }
                     }
-                }
 
-                // Option: Phone to Phone
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .then(
-                            if (!isPhoneToPc) Modifier.background(Brush.linearGradient(listOf(NeoPurple, NeoBlue)))
-                            else Modifier
-                        )
-                        .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PHONE) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.PhoneAndroid,
-                            contentDescription = null,
-                            tint = if (!isPhoneToPc) Color.White else TextMuted,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Phone to Phone",
-                            fontSize = 13.sp,
-                            fontWeight = if (!isPhoneToPc) FontWeight.Bold else FontWeight.Medium,
-                            color = if (!isPhoneToPc) Color.White else TextSecondary
-                        )
+                    val phoneToPhoneIconTint by animateColorAsState(
+                        targetValue = if (!isPhoneToPc) Color.White else TextMuted,
+                        label = "phoneToPhoneIconTint"
+                    )
+                    val phoneToPhoneTextColor by animateColorAsState(
+                        targetValue = if (!isPhoneToPc) Color.White else TextSecondary,
+                        label = "phoneToPhoneTextColor"
+                    )
+
+                    // Option: Phone to Phone
+                    Box(
+                        modifier = Modifier
+                            .width(pillWidth)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(enabled = !hasActiveTransfer) { onConnectionModeChange(SettingsManager.MODE_PHONE_TO_PHONE) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.PhoneAndroid,
+                                contentDescription = null,
+                                tint = phoneToPhoneIconTint,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Phone to Phone",
+                                fontSize = 13.sp,
+                                fontWeight = if (!isPhoneToPc) FontWeight.Bold else FontWeight.Medium,
+                                color = phoneToPhoneTextColor
+                            )
+                        }
                     }
                 }
             }
@@ -352,10 +406,25 @@ fun HomeScreen(
                             cornerRadius = 53.dp
                         ) {}
 
+                        // Expanding radar ripple ring when waiting for USB connection
+                        if (!isUsbCablePlugged && !isUsbTetheringActive) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .scale(radarRippleScale)
+                                    .clip(CircleShape)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = NeoCyan.copy(alpha = radarRippleAlpha),
+                                        shape = CircleShape
+                                    )
+                            )
+                        }
+
                         Box(
                             modifier = Modifier
                                 .size(74.dp)
-                                .scale(if (isUsbCablePlugged || isUsbTetheringActive) pulseScale else radarPulse)
+                                .scale(if (isUsbCablePlugged || isUsbTetheringActive) pulseScale else 1.0f)
                                 .clip(CircleShape)
                                 .background(
                                     Brush.linearGradient(
@@ -674,10 +743,25 @@ fun HomeScreen(
                             cornerRadius = 53.dp
                         ) {}
 
+                        // Expanding radar ripple ring when waiting/searching
+                        if (!isUsbCablePlugged && !isUsbTetheringActive) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .scale(radarRippleScale)
+                                    .clip(CircleShape)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = NeoPurple.copy(alpha = radarRippleAlpha),
+                                        shape = CircleShape
+                                    )
+                            )
+                        }
+
                         Box(
                             modifier = Modifier
                                 .size(74.dp)
-                                .scale(if (isUsbCablePlugged || isUsbTetheringActive) pulseScale else radarPulse)
+                                .scale(if (isUsbCablePlugged || isUsbTetheringActive) pulseScale else 1.0f)
                                 .clip(CircleShape)
                                 .background(
                                     Brush.linearGradient(

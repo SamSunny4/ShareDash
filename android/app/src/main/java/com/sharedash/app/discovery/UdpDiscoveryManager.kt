@@ -191,26 +191,32 @@ class UdpDiscoveryManager(
     private suspend fun subnetHttpProbeLoop() = coroutineScope {
         val semaphore = Semaphore(32)
         while (isActive) {
-            // Check localhost USB bridge first (127.0.0.1:54321 / 10.0.2.2 for emulator)
+            // Check localhost USB bridge (127.0.0.1:54325 for ADB Reverse, 127.0.0.1:54321 / 10.0.2.2 for emulator)
+            probeIpAddress("127.0.0.1", 54325, "USB Cable")
             probeIpAddress("127.0.0.1", 54321, "USB Cable")
             probeIpAddress("10.0.2.2", 54321, "USB / Host")
             probeIpAddress("192.168.137.1", 54321, "PC 5GHz Hotspot")
             probeIpAddress("192.168.42.1", 54321, "USB Tethering Turbo")
             probeIpAddress("192.168.43.1", 54321, "Phone Hotspot")
 
-            // Probe default gateways and common Wi-Fi IP ranges
+            val (usbPrefixes, wifiPrefixes) = getInterfaceSubnetPrefixes()
+
+            // Probe default gateways and common Wi-Fi / USB Tethering IP ranges
             val myIps = getLocalIpAddresses()
             for (myIp in myIps) {
                 val parts = myIp.split(".")
                 if (parts.size == 4) {
                     val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                    val isUsbSubnet = usbPrefixes.contains(prefix) || (prefix.startsWith("10.") && !wifiPrefixes.contains(prefix))
+                    val badge = if (isUsbSubnet) "USB Cable" else "Wi-Fi LAN"
+                    
                     // Probe common PC host addresses on this subnet
                     for (i in 1..254) {
                         val targetIp = "$prefix.$i"
                         if (targetIp != myIp) {
                             launch {
                                 semaphore.withPermit {
-                                    probeIpAddress(targetIp, 54321, "Wi-Fi LAN")
+                                    probeIpAddress(targetIp, 54321, badge)
                                 }
                             }
                         }
@@ -262,21 +268,59 @@ class UdpDiscoveryManager(
                     return
                 }
 
+                // Extract all candidate IPs disclosed by the peer (e.g. USB tethering + Wi-Fi IPs)
+                val peerLocalIps = mutableListOf<String>()
+                val jsonIps = json.optJSONArray("local_ips")
+                if (jsonIps != null) {
+                    for (i in 0 until jsonIps.length()) {
+                        val peerIp = jsonIps.optString(i, "")
+                        if (peerIp.isNotEmpty() && peerIp != "127.0.0.1" && peerIp != "0.0.0.0") {
+                            peerLocalIps.add(peerIp)
+                        }
+                    }
+                }
+
+                val (usbPrefixes, wifiPrefixes) = getInterfaceSubnetPrefixes()
+                val isUsbDirect = transportBadge == "USB Cable" || port == 54325 ||
+                        usbPrefixes.any { ip.startsWith("$it.") } ||
+                        (ip.startsWith("10.") && !wifiPrefixes.any { ip.startsWith("$it.") }) ||
+                        ip.startsWith("192.168.42.") || ip.startsWith("192.168.44.") || ip.startsWith("169.254.")
+
+                val existing = peerMap[devId]
+                val combinedCandidateIps = (existing?.candidateIps.orEmpty() + peerLocalIps + listOf(ip))
+                    .distinct()
+                    .filter { it.isNotBlank() && it != "0.0.0.0" }
+
+                val hasAnyUsb = isUsbDirect || combinedCandidateIps.any { cand ->
+                    cand == "127.0.0.1" || usbPrefixes.any { cand.startsWith("$it.") } ||
+                    (cand.startsWith("10.") && !wifiPrefixes.any { cand.startsWith("$it.") }) ||
+                    cand.startsWith("192.168.42.") || cand.startsWith("192.168.44.") || cand.startsWith("169.254.")
+                }
+
+                val bridges = mutableListOf<String>()
+                if (hasAnyUsb) bridges.add("USB Cable")
+                bridges.add("Wi-Fi")
+                bridges.add("Wi-Fi Direct")
+
+                // Preferred IP: Prioritize USB address if directly reached via USB, otherwise keep current valid IP
+                val preferredIp = if (isUsbDirect && ip != "127.0.0.1") ip else (existing?.ipAddress ?: ip)
+
                 val peer = DiscoveredPeer(
                     deviceId = devId,
                     friendlyName = name,
                     osName = os,
-                    ipAddress = ip,
-                    port = port,
+                    ipAddress = preferredIp,
+                    port = if (isUsbDirect && port == 54325) 54325 else port,
                     appVersion = appVer,
                     isCompatible = isCompat,
-                    supportedBridges = listOf(transportBadge, "Wi-Fi"),
+                    supportedBridges = bridges.distinct(),
+                    candidateIps = combinedCandidateIps,
                     lastSeenTimestamp = System.currentTimeMillis()
                 )
 
                 peerMap[devId] = peer
                 _discoveredPeers.value = peerMap.values.toList()
-                Log.i(TAG, "Discovered remote device via HTTP Probe: $name at $ip:$port")
+                Log.i(TAG, "Discovered remote device via HTTP Probe: $name at $ip:$port (USB: $hasAnyUsb)")
 
                 // Immediately announce phone to PC's UDP discovery port 54320
                 try {
@@ -297,6 +341,30 @@ class UdpDiscoveryManager(
                 } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
+    }
+
+    fun getInterfaceSubnetPrefixes(): Pair<Set<String>, Set<String>> {
+        val usbPrefixes = mutableSetOf("192.168.42", "192.168.44")
+        val wifiPrefixes = mutableSetOf<String>()
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                val name = iface.name.lowercase()
+                val isUsb = name.contains("rndis") || name.contains("usb") || name.contains("ncm") || name.contains("geth") || (name.contains("eth") && !name.contains("wlan"))
+                val isWifi = name.contains("wlan") || name.contains("p2p") || name.contains("ap")
+                for (addr in iface.inetAddresses) {
+                    val host = addr.hostAddress ?: ""
+                    val parts = host.split(".")
+                    if (parts.size == 4) {
+                        val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                        if (isUsb) usbPrefixes.add(prefix)
+                        if (isWifi) wifiPrefixes.add(prefix)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return usbPrefixes to wifiPrefixes
     }
 
     fun getLocalIpAddresses(): List<String> {

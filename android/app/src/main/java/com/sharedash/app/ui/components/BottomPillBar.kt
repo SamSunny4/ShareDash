@@ -94,6 +94,18 @@ fun BottomPillBar(
         label = "sweepAngle"
     )
 
+    val transferAlpha by animateFloatAsState(
+        targetValue = if (hasActiveTransfer) 1f else 0f,
+        animationSpec = tween(durationMillis = 400),
+        label = "transferAlpha"
+    )
+
+    val elevation by animateDpAsState(
+        targetValue = if (hasActiveTransfer) 22.dp else 16.dp,
+        animationSpec = tween(durationMillis = 400),
+        label = "elevation"
+    )
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -106,20 +118,23 @@ fun BottomPillBar(
                 .fillMaxWidth()
                 .height(68.dp)
                 .shadow(
-                    elevation = if (hasActiveTransfer) 22.dp else 16.dp,
+                    elevation = elevation,
                     shape = RoundedCornerShape(34.dp),
                     ambientColor = if (hasActiveTransfer) NeoCyan else NeoDarkShadow,
                     spotColor = if (hasActiveTransfer) NeoBlue.copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.6f)
                 )
                 .clip(RoundedCornerShape(34.dp))
         ) {
-            // Rotating Accent Sweep Gradient (circulates around the pill perimeter when transferring)
-            if (hasActiveTransfer) {
+            // Rotating Accent Sweep Gradient (fades in smoothly when transferring without sudden layout pop)
+            if (transferAlpha > 0.01f) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(800.dp)
-                        .graphicsLayer { rotationZ = sweepRotation }
+                        .matchParentSize()
+                        .graphicsLayer {
+                            alpha = transferAlpha
+                            rotationZ = sweepRotation
+                        }
+                        .scale(2.5f)
                         .background(
                             Brush.sweepGradient(
                                 colors = listOf(
@@ -135,145 +150,147 @@ fun BottomPillBar(
                 )
             }
 
-            // Inner pill container
+            // Inner pill container: Constant 1.5dp padding preserves rock-solid geometry with 0 layout shift
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(if (hasActiveTransfer) 2.dp else 0.dp)
-                    .clip(RoundedCornerShape(if (hasActiveTransfer) 32.dp else 34.dp))
+                    .padding(1.5.dp)
+                    .clip(RoundedCornerShape(32.5.dp))
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                NeoCard.copy(alpha = 0.95f),
+                                NeoCard.copy(alpha = 0.96f),
                                 NeoBg.copy(alpha = 0.98f)
                             )
                         )
                     )
-                    .then(
-                        if (!hasActiveTransfer) {
-                            Modifier.border(
-                                width = 1.2.dp,
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        NeoLightShadow.copy(alpha = 0.5f),
-                                        NeoCyan.copy(alpha = 0.25f),
-                                        NeoBlue.copy(alpha = 0.25f),
-                                        NeoLightShadow.copy(alpha = 0.4f)
-                                    )
-                                ),
-                                shape = RoundedCornerShape(34.dp)
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                NeoLightShadow.copy(alpha = 0.5f * (1f - transferAlpha)),
+                                NeoCyan.copy(alpha = 0.25f * (1f - transferAlpha)),
+                                NeoBlue.copy(alpha = 0.25f * (1f - transferAlpha)),
+                                NeoLightShadow.copy(alpha = 0.4f * (1f - transferAlpha))
                             )
-                        } else Modifier
+                        ),
+                        shape = RoundedCornerShape(32.5.dp)
                     )
-                    .padding(6.dp)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
-            BoxWithConstraints(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
-                val totalWidth = maxWidth
-                val tabWidth = totalWidth / tabs.size
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val totalWidth = maxWidth
+                    val tabWidth = totalWidth / tabs.size
 
-                // Animated sliding background pill indicator
-                val indicatorOffset by animateDpAsState(
-                    targetValue = tabWidth * selectedIndex,
-                    animationSpec = spring(
-                        dampingRatio = 0.78f,
-                        stiffness = Spring.StiffnessMediumLow
-                    ),
-                    label = "pillIndicatorOffset"
-                )
+                    // Animated sliding background pill indicator
+                    val indicatorOffset by animateDpAsState(
+                        targetValue = tabWidth * selectedIndex,
+                        animationSpec = spring(
+                            dampingRatio = 0.82f,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "pillIndicatorOffset"
+                    )
 
-                // The glowing sliding pill
-                Box(
-                    modifier = Modifier
-                        .offset(x = indicatorOffset)
-                        .width(tabWidth)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    NeoBlue.copy(alpha = 0.22f),
-                                    NeoCyan.copy(alpha = 0.18f)
+                    // The glowing sliding pill
+                    Box(
+                        modifier = Modifier
+                            .offset(x = indicatorOffset)
+                            .width(tabWidth)
+                            .fillMaxHeight()
+                            .padding(horizontal = 3.dp, vertical = 2.dp)
+                            .clip(RoundedCornerShape(26.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        NeoBlue.copy(alpha = 0.28f),
+                                        NeoCyan.copy(alpha = 0.20f)
+                                    )
                                 )
                             )
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = NeoCyan.copy(alpha = 0.45f),
-                            shape = RoundedCornerShape(28.dp)
-                        )
-                )
-
-                // Navigation tabs row
-                Row(
-                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        val isSelected = tab == currentTab
-                        val iconColor by animateColorAsState(
-                            targetValue = if (isSelected) NeoCyan else TextMuted,
-                            label = "tabIconColor"
-                        )
-                        val textColor by animateColorAsState(
-                            targetValue = if (isSelected) TextPrimary else TextMuted,
-                            label = "tabTextColor"
-                        )
-                        val scale by animateFloatAsState(
-                            targetValue = if (isSelected) 1.08f else 1.0f,
-                            label = "tabScale"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .width(tabWidth)
-                                .fillMaxHeight()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { onTabSelected(tab) }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.scale(scale)
-                            ) {
-                                Box(contentAlignment = Alignment.TopEnd) {
-                                    Icon(
-                                        imageVector = tab.icon,
-                                        contentDescription = tab.title,
-                                        tint = iconColor,
-                                        modifier = Modifier.size(22.dp)
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    listOf(
+                                        NeoCyan.copy(alpha = 0.6f),
+                                        NeoBlue.copy(alpha = 0.35f)
                                     )
+                                ),
+                                shape = RoundedCornerShape(26.dp)
+                            )
+                    )
 
-                                    // Active transfer indicator badge
-                                    if (tab == NavTab.TRANSFER && hasActiveTransfer) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .offset(x = 3.dp, y = (-2).dp)
-                                                .clip(CircleShape)
-                                                .background(NeoGreen)
+                    // Navigation tabs row: Arrangement.Start guarantees exact coordinate alignment with indicator
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        tabs.forEachIndexed { index, tab ->
+                            val isSelected = tab == currentTab
+                            val iconColor by animateColorAsState(
+                                targetValue = if (isSelected) NeoCyan else TextMuted,
+                                label = "tabIconColor"
+                            )
+                            val textColor by animateColorAsState(
+                                targetValue = if (isSelected) TextPrimary else TextMuted,
+                                label = "tabTextColor"
+                            )
+                            val scale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.06f else 1.0f,
+                                label = "tabScale"
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .width(tabWidth)
+                                    .fillMaxHeight()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { onTabSelected(tab) }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.scale(scale)
+                                ) {
+                                    Box(contentAlignment = Alignment.TopEnd) {
+                                        Icon(
+                                            imageVector = tab.icon,
+                                            contentDescription = tab.title,
+                                            tint = iconColor,
+                                            modifier = Modifier.size(21.dp)
                                         )
+
+                                        // Active transfer indicator badge
+                                        if (tab == NavTab.TRANSFER && hasActiveTransfer) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .offset(x = 3.dp, y = (-2).dp)
+                                                    .clip(CircleShape)
+                                                    .background(NeoGreen)
+                                            )
+                                        }
                                     }
+
+                                    Spacer(modifier = Modifier.height(3.dp))
+
+                                    Text(
+                                        text = tab.title,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = textColor,
+                                        maxLines = 1
+                                    )
                                 }
-
-                                Spacer(modifier = Modifier.height(3.dp))
-
-                                Text(
-                                    text = tab.title,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = textColor,
-                                    maxLines = 1
-                                )
                             }
                         }
                     }
                 }
-            }
             }
         }
     }

@@ -91,6 +91,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -208,7 +209,12 @@ class MainActivity : ComponentActivity() {
             _isUsbCablePlugged.value = isPlugged
 
             val ips = udpManager.getLocalIpAddresses()
-            val isTether = ips.any { it.startsWith("192.168.42.") || it.startsWith("192.168.44.") } || hasUsbNet
+            val (usbPrefixes, wifiPrefixes) = udpManager.getInterfaceSubnetPrefixes()
+            val isTether = hasUsbNet || ips.any { ip ->
+                usbPrefixes.any { ip.startsWith("$it.") } ||
+                ip.startsWith("192.168.42.") || ip.startsWith("192.168.44.") ||
+                (ip.startsWith("10.") && !wifiPrefixes.any { ip.startsWith("$it.") })
+            }
             _isUsbTetheringActive.value = isTether
         } catch (_: Exception) {}
     }
@@ -219,8 +225,15 @@ class MainActivity : ComponentActivity() {
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 val name = iface.name.lowercase()
-                if (iface.isUp && (name.contains("rndis") || name.contains("usb") || name.contains("ncm") || name.contains("geth"))) {
-                    return true
+                val isUsbName = name.contains("rndis") || name.contains("usb") || name.contains("ncm") || name.contains("geth") || (name.contains("eth") && !name.contains("wlan"))
+                if (iface.isUp && isUsbName) {
+                    val addrs = iface.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val addr = addrs.nextElement()
+                        if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                            return true
+                        }
+                    }
                 }
             }
             false
@@ -852,11 +865,13 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
                             val myIps = udpManager.getLocalIpAddresses()
-                            when {
+                            val (usbPrefixes, _) = udpManager.getInterfaceSubnetPrefixes()
+                            peer.candidateIps.firstOrNull { it != "127.0.0.1" && it != "0.0.0.0" } ?: when {
                                 myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1"
                                 myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"
                                 myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"
                                 myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"
+                                usbPrefixes.isNotEmpty() -> "${usbPrefixes.first()}.1"
                                 else -> ""
                             }
                         } else {
@@ -1241,9 +1256,14 @@ class MainActivity : ComponentActivity() {
 
         val initialCandidates = mutableListOf<Pair<String, Int>>()
 
-        // 1. Known Target IP from discovery / pairing
+        // 1. Known Target IP & Disclosed Candidate IPs from discovery / pairing
         if (target.ipAddress.isNotEmpty() && target.ipAddress != "127.0.0.1" && target.ipAddress != "0.0.0.0") {
             initialCandidates.add(target.ipAddress to target.port)
+        }
+        for (cand in target.candidateIps) {
+            if (cand.isNotEmpty() && cand != "127.0.0.1" && cand != "0.0.0.0") {
+                initialCandidates.add(cand to 54321)
+            }
         }
 
         // 2. Direct 5GHz Wi-Fi Hotspot Gateways
@@ -1251,99 +1271,143 @@ class MainActivity : ComponentActivity() {
         initialCandidates.add("192.168.49.1" to 54321)  // Wi-Fi Direct Autonomous Group
         initialCandidates.add("192.168.43.1" to 54321)  // Phone Hotspot Gateway
 
-        // 3. USB Tethering Gateways (192.168.42.x)
-        initialCandidates.add("192.168.42.1" to 54321)
-        initialCandidates.add("192.168.42.129" to 54321)
+        // 3. USB Tethering Subnets (inspect all USB/RNDIS/NCM network interfaces)
+        val (detectedUsbPrefixes, detectedWifiPrefixes) = udpManager.getInterfaceSubnetPrefixes()
+        val usbSubnetPrefixes = detectedUsbPrefixes.toMutableSet()
+        val wifiSubnetPrefixes = detectedWifiPrefixes.toMutableSet()
 
-        // 4. ARP inspection for USB tethered clients when this device is the tethering host
+        // Read kernel ARP table for active USB tethering peers
         try {
             java.io.File("/proc/net/arp").forEachLine { line ->
-                val parts = line.split(Regex("\\s+"))
-                if (parts.size >= 6) {
-                    val ip = parts[0]
-                    val iface = parts[5]
-                    if (iface.startsWith("rndis") || iface.startsWith("usb") || iface.startsWith("ncm") || iface.startsWith("eth")) {
-                        if (ip.startsWith("192.168.42.")) {
-                            initialCandidates.add(ip to 54321)
-                        }
+                val tokens = line.split(Regex("\\s+"))
+                if (tokens.size >= 6 && tokens[3] != "00:00:00:00:00:00") {
+                    val arpIp = tokens[0]
+                    val dev = tokens[5].lowercase()
+                    if (dev.contains("rndis") || dev.contains("usb") || dev.contains("ncm") || dev.contains("eth")) {
+                        initialCandidates.add(arpIp to 54321)
                     }
                 }
             }
         } catch (_: Exception) {}
 
-        // 5. USB ADB Reverse port 54325 (PC USB fast path)
-        initialCandidates.add("127.0.0.1" to 54325)
-
-        val discoveredIpsFromPeer = mutableListOf<String>()
-
-        for ((ip, port) in initialCandidates) {
-            if (seenIps.contains(ip)) continue
-            try {
-                val probeUrl = java.net.URL("http://$ip:$port/api/v1/info")
-                val conn = probeUrl.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 350
-                conn.readTimeout = 400
-                conn.requestMethod = "GET"
-                val code = conn.responseCode
-                if (code in 200..299) {
-                    val body = conn.inputStream.bufferedReader().readText()
-                    conn.disconnect()
-                    val json = org.json.JSONObject(body)
-                    val devId = json.optString("device_id", "")
-
-                    // Loopback check: Prevent self-transfer, but allow remote Android phones and PCs!
-                    if (devId == DeviceIdentity.id) {
-                        continue
-                    }
-
-                    seenIps.add(ip)
-                    val isUsb = ip.startsWith("192.168.42.") || port == 54325 || ip.startsWith("10.0.")
-                    val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
-                    val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
-                    verified.add(TransportEndpoint(ip, port, name, kind))
-
-                    // Extract all peer local_ips to discover secondary transport interfaces (e.g. Wi-Fi IP disclosed over USB or vice versa)
-                    val peerLocalIps = json.optJSONArray("local_ips")
-                    if (peerLocalIps != null) {
-                        for (i in 0 until peerLocalIps.length()) {
-                            val peerIp = peerLocalIps.optString(i, "")
-                            if (peerIp.isNotEmpty() && peerIp != "127.0.0.1" && peerIp != "0.0.0.0" && !seenIps.contains(peerIp)) {
-                                discoveredIpsFromPeer.add(peerIp)
-                            }
-                        }
-                    }
-                } else {
-                    conn.disconnect()
-                }
-            } catch (_: Exception) {}
+        for (prefix in usbSubnetPrefixes) {
+            // Android USB Tethering DHCP server assigns PC client IP starting at .2, or .142 on Samsung One UI
+            initialCandidates.add("$prefix.2" to 54321)
+            initialCandidates.add("$prefix.1" to 54321)
+            initialCandidates.add("$prefix.142" to 54321)
+            initialCandidates.add("$prefix.129" to 54321)
+            initialCandidates.add("$prefix.100" to 54321)
+            initialCandidates.add("$prefix.254" to 54321)
+            initialCandidates.add("$prefix.3" to 54321)
+            initialCandidates.add("$prefix.4" to 54321)
         }
 
-        // Probe secondary transport interfaces disclosed by peer
-        for (peerIp in discoveredIpsFromPeer) {
-            if (seenIps.contains(peerIp)) continue
-            try {
-                val probeUrl = java.net.URL("http://$peerIp:54321/api/v1/info")
-                val conn = probeUrl.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 350
-                conn.readTimeout = 400
-                conn.requestMethod = "GET"
-                val code = conn.responseCode
-                if (code in 200..299) {
-                    val body = conn.inputStream.bufferedReader().readText()
-                    conn.disconnect()
-                    val json = org.json.JSONObject(body)
-                    val devId = json.optString("device_id", "")
-                    if (devId == DeviceIdentity.id) continue
+        // 4. USB ADB Reverse port 54325 (PC USB fast path)
+        initialCandidates.add("127.0.0.1" to 54325)
 
-                    seenIps.add(peerIp)
-                    val isUsb = peerIp.startsWith("192.168.42.") || peerIp.startsWith("10.0.")
-                    val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
-                    val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
-                    verified.add(TransportEndpoint(peerIp, 54321, name, kind))
-                } else {
-                    conn.disconnect()
+        val checkIsUsb: (String, Int) -> Boolean = { candIp, candPort ->
+            candPort == 54325 ||
+            (candIp == "127.0.0.1" && candPort == 54325) ||
+            usbSubnetPrefixes.any { candIp.startsWith("$it.") } ||
+            candIp.startsWith("192.168.42.") ||
+            candIp.startsWith("192.168.44.") ||
+            candIp.startsWith("169.254.") ||
+            (candIp.startsWith("10.") && !wifiSubnetPrefixes.any { candIp.startsWith("$it.") })
+        }
+
+        // Probe all initial candidate endpoints concurrently in parallel
+        val candidateList = initialCandidates.distinct()
+        val probeDeferreds = candidateList.map { (ip, port) ->
+            async(Dispatchers.IO) {
+                try {
+                    val probeUrl = java.net.URL("http://$ip:$port/api/v1/info")
+                    val conn = probeUrl.openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 350
+                    conn.readTimeout = 400
+                    conn.requestMethod = "GET"
+                    val code = conn.responseCode
+                    if (code in 200..299) {
+                        val body = conn.inputStream.bufferedReader().readText()
+                        conn.disconnect()
+                        val json = org.json.JSONObject(body)
+                        val devId = json.optString("device_id", "")
+
+                        // Loopback check: Prevent self-transfer, but allow remote Android phones and PCs!
+                        if (devId == DeviceIdentity.id) {
+                            return@async null
+                        }
+
+                        val isUsb = checkIsUsb(ip, port)
+                        val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
+                        val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
+
+                        val peerLocalIps = mutableListOf<String>()
+                        val jsonIps = json.optJSONArray("local_ips")
+                        if (jsonIps != null) {
+                            for (i in 0 until jsonIps.length()) {
+                                val peerIp = jsonIps.optString(i, "")
+                                if (peerIp.isNotEmpty() && peerIp != "127.0.0.1" && peerIp != "0.0.0.0") {
+                                    peerLocalIps.add(peerIp)
+                                }
+                            }
+                        }
+                        Triple(TransportEndpoint(ip, port, name, kind), peerLocalIps, ip)
+                    } else {
+                        conn.disconnect()
+                        null
+                    }
+                } catch (_: Exception) {
+                    null
                 }
-            } catch (_: Exception) {}
+            }
+        }
+
+        val initialResults = probeDeferreds.mapNotNull { it.await() }
+        val secondaryCandidateIps = mutableListOf<String>()
+        for ((endpoint, peerIps, ip) in initialResults) {
+            if (seenIps.add(ip)) {
+                verified.add(endpoint)
+                secondaryCandidateIps.addAll(peerIps)
+            }
+        }
+
+        // Secondary parallel probes for additional interface IPs disclosed by peer
+        val secondaryFiltered = secondaryCandidateIps.distinct().filter { !seenIps.contains(it) }
+        val secondaryDeferreds = secondaryFiltered.map { peerIp ->
+            async(Dispatchers.IO) {
+                try {
+                    val probeUrl = java.net.URL("http://$peerIp:54321/api/v1/info")
+                    val conn = probeUrl.openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 350
+                    conn.readTimeout = 400
+                    conn.requestMethod = "GET"
+                    val code = conn.responseCode
+                    if (code in 200..299) {
+                        val body = conn.inputStream.bufferedReader().readText()
+                        conn.disconnect()
+                        val json = org.json.JSONObject(body)
+                        val devId = json.optString("device_id", "")
+                        if (devId == DeviceIdentity.id) return@async null
+
+                        val isUsb = checkIsUsb(peerIp, 54321)
+                        val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
+                        val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
+                        TransportEndpoint(peerIp, 54321, name, kind)
+                    } else {
+                        conn.disconnect()
+                        null
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
+        val secondaryResults = secondaryDeferreds.mapNotNull { it.await() }
+        for (ep in secondaryResults) {
+            if (seenIps.add(ep.ip)) {
+                verified.add(ep)
+            }
         }
 
         Log.i("MainActivity", "Multipath endpoints resolved: ${verified.map { "${it.name} (${it.ip}:${it.port})" }}")
@@ -1433,6 +1497,8 @@ class MainActivity : ComponentActivity() {
             conn.setRequestProperty("X-Chunk-Length", chunkBytes.size.toString())
             conn.setRequestProperty("X-Chunk-Crc32", crcHex)
             conn.setRequestProperty("X-Total-Chunks", totalChunks.toString())
+            conn.setRequestProperty("X-Transport", endpoint.name)
+            conn.setRequestProperty("X-Transport-Kind", if (endpoint.kind == TransportKind.USB) "USB" else "WIFI")
 
             conn.outputStream.use { os ->
                 os.write(chunkBytes)
@@ -1551,17 +1617,35 @@ class MainActivity : ComponentActivity() {
                 val fileName = queryFileName(uri) ?: "file_$fileIdx.bin"
                 val fSize = fileSizes[fileIdx]
 
-                val chunkSize = when {
-                    fSize < 5 * 1024 * 1024 -> 256 * 1024L // 256 KB
-                    fSize < 50 * 1024 * 1024 -> 1024 * 1024L // 1 MB
-                    fSize < 500 * 1024 * 1024 -> 4 * 1024 * 1024L // 4 MB
-                    else -> 8 * 1024 * 1024L // 8 MB
+                // Dynamic Chunk Sizing: base chunk size scaled to total file size
+                val baseChunkSize: Long = when {
+                    fSize < 20 * 1024 * 1024L -> 2 * 1024 * 1024L // 2 MB for < 20 MB
+                    fSize < 100 * 1024 * 1024L -> 4 * 1024 * 1024L // 4 MB for 20 - 100 MB
+                    fSize < 500 * 1024 * 1024L -> 8 * 1024 * 1024L // 8 MB for 100 - 500 MB
+                    fSize < 2 * 1024 * 1024 * 1024L -> 16 * 1024 * 1024L // 16 MB for 500 MB - 2 GB
+                    else -> 32 * 1024 * 1024L // 32 MB for >= 2 GB (high throughput)
                 }
-                val totalChunks = maxOf(1, ((fSize + chunkSize - 1) / chunkSize).toInt())
 
-                for (chunkIdx in 0 until totalChunks) {
-                    val offset = chunkIdx * chunkSize
-                    val length = minOf(chunkSize, fSize - offset).toInt()
+                // Dynamic Tail-End Chunk Tapering: taper chunk sizes down towards end of file
+                val fileChunks = mutableListOf<Pair<Long, Int>>()
+                var currentOffset = 0L
+                while (currentOffset < fSize) {
+                    val remaining = fSize - currentOffset
+                    val chunkSize = when {
+                        remaining <= 16 * 1024 * 1024L && baseChunkSize > 4 * 1024 * 1024L -> 4 * 1024 * 1024L // Final 16 MB -> 4 MB micro-chunks
+                        remaining <= 48 * 1024 * 1024L && baseChunkSize > 8 * 1024 * 1024L -> 8 * 1024 * 1024L // Final 48 MB -> 8 MB chunks
+                        remaining <= 96 * 1024 * 1024L && baseChunkSize > 16 * 1024 * 1024L -> 16 * 1024 * 1024L // Final 96 MB -> 16 MB chunks
+                        else -> baseChunkSize
+                    }
+                    val length = minOf(chunkSize, remaining).toInt()
+                    fileChunks.add(currentOffset to length)
+                    currentOffset += length
+                }
+
+                val totalChunks = maxOf(1, fileChunks.size)
+
+                for (chunkIdx in fileChunks.indices) {
+                    val (offset, length) = fileChunks[chunkIdx]
                     val chunkMidBytes = cumulativeBytesSoFar + offset + (length / 2)
                     val visualIdx = ((chunkMidBytes.toDouble() / effectiveTotalBytes) * visualSlotCount).toInt().coerceIn(0, visualSlotCount - 1)
 
