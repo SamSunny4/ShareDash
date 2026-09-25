@@ -1221,9 +1221,10 @@ pub struct ActiveIncomingChunkSession {
     pub total_bytes: u64,
     pub total_chunks: u32,
     pub target_file_path: PathBuf,
-    pub file_handle: std::fs::File,
+    pub file_handle: Arc<std::fs::File>,
     pub received_chunks: std::collections::HashSet<u32>,
     pub start_time: Instant,
+    pub last_telemetry_time: Instant,
     pub usb_bytes: u64,
     pub wifi_bytes: u64,
     pub chunk_transports: HashMap<u32, String>,
@@ -1245,12 +1246,21 @@ pub async fn receive_transfer_chunk(
             .to_string()
     };
 
-    let file_name = get_header("x-file-name");
-    let file_name = if file_name.is_empty() {
+    let raw_file_name = get_header("x-file-name");
+    let file_name = if raw_file_name.is_empty() {
         "received_file.bin".to_string()
     } else {
-        file_name
+        std::path::Path::new(&raw_file_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("received_file.bin")
+            .to_string()
     };
+    let file_name: String = file_name
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .collect();
+    let file_name = if file_name.trim().is_empty() { "received_file.bin".to_string() } else { file_name };
 
     let transfer_id = get_header("x-transfer-id");
     let transfer_id = if transfer_id.is_empty() {
@@ -1306,10 +1316,11 @@ pub async fn receive_transfer_chunk(
     }
 
     let receivers_map = ACTIVE_CHUNK_RECEIVERS.get_or_init(|| parking_lot::Mutex::new(HashMap::new()));
-    let session = {
+    let (session, file_handle) = {
         let mut map = receivers_map.lock();
         if let Some(s) = map.get(&transfer_id) {
-            s.clone()
+            let f = s.lock().file_handle.clone();
+            (s.clone(), f)
         } else {
             let download_dir = std::env::var("USERPROFILE")
                 .map(|p| PathBuf::from(p).join("Downloads").join("ShareDash_Received"))
@@ -1317,7 +1328,7 @@ pub async fn receive_transfer_chunk(
             let _ = std::fs::create_dir_all(&download_dir);
             let target_path = download_dir.join(&file_name);
 
-            let file = match std::fs::OpenOptions::new()
+            let raw_file = match std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
@@ -1341,6 +1352,7 @@ pub async fn receive_transfer_chunk(
                     ));
                 }
             };
+            let file = Arc::new(raw_file);
 
             let s = Arc::new(parking_lot::Mutex::new(ActiveIncomingChunkSession {
                 transfer_id: transfer_id.clone(),
@@ -1348,33 +1360,52 @@ pub async fn receive_transfer_chunk(
                 total_bytes: total_file_size,
                 total_chunks,
                 target_file_path: target_path,
-                file_handle: file,
+                file_handle: file.clone(),
                 received_chunks: std::collections::HashSet::new(),
                 start_time: Instant::now(),
+                last_telemetry_time: Instant::now(),
                 usb_bytes: 0,
                 wifi_bytes: 0,
                 chunk_transports: HashMap::new(),
             }));
             map.insert(transfer_id.clone(), s.clone());
-            s
+            (s, file)
         }
     };
 
-    let (completed_count, total_count, is_all_done, total_received_bytes, usb_b, wifi_b) = {
-        use std::io::{Seek, SeekFrom, Write};
-        let mut guard = session.lock();
-        if let Err(e) = guard.file_handle.seek(SeekFrom::Start(chunk_offset)) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "success": false, "error": format!("Seek failed: {}", e), "chunk_id": chunk_id })),
-            ));
+    // Parallel lock-free positional disk write:
+    // Multiple USB and Wi-Fi worker streams write to disk concurrently without mutex serialization!
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        let mut written = 0;
+        while written < body.len() {
+            match file_handle.seek_write(&body[written..], chunk_offset + written as u64) {
+                Ok(0) => break,
+                Ok(n) => written += n,
+                Err(e) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "success": false, "error": format!("Seek write failed: {}", e), "chunk_id": chunk_id })),
+                    ));
+                }
+            }
         }
-        if let Err(e) = guard.file_handle.write_all(&body) {
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        if let Err(e) = file_handle.write_all_at(&body, chunk_offset) {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "success": false, "error": format!("Write failed: {}", e), "chunk_id": chunk_id })),
             ));
         }
+    }
+
+    // Microsecond atomic update of session chunk metadata
+    let (completed_count, total_count, is_all_done, total_received_bytes, usb_b, wifi_b, should_send_telem) = {
+        let mut guard = session.lock();
         if guard.received_chunks.insert(chunk_id) {
             if is_usb_chunk {
                 guard.usb_bytes += body.len() as u64;
@@ -1385,67 +1416,74 @@ pub async fn receive_transfer_chunk(
         }
         let count = guard.received_chunks.len();
         let total = guard.total_chunks as usize;
-        let tot_bytes = guard.usb_bytes + guard.wifi_bytes;
-        (count, total, count >= total, tot_bytes, guard.usb_bytes, guard.wifi_bytes)
-    };
-
-    let elapsed_sec = {
-        let guard = session.lock();
-        guard.start_time.elapsed().as_secs_f64().max(0.001)
-    };
-    let bytes_so_far = total_received_bytes.min(total_file_size.max(total_received_bytes));
-
-    let transfer_uuid = Uuid::parse_str(&transfer_id).unwrap_or_else(|_| Uuid::new_v4());
-    let mut visual_chunks = Vec::new();
-    {
-        let guard = session.lock();
-        for i in 0..total_chunks {
-            let state_str = if guard.received_chunks.contains(&i) {
-                "COMPLETED"
-            } else if i == chunk_id {
-                "IN_FLIGHT"
-            } else {
-                "PENDING"
-            };
-            let chunk_t = guard.chunk_transports.get(&i).cloned().unwrap_or_else(|| {
-                if is_usb_chunk { "🔌 USB Fast-Path".to_string() } else { "📶 5GHz Wi-Fi".to_string() }
-            });
-            visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
-                chunk_id: i,
-                state: state_str.to_string(),
-                transport_id: Some(chunk_t),
-            });
+        let tot_bytes: u64 = guard.usb_bytes + guard.wifi_bytes;
+        let done = count >= total;
+        let should_telem = done || guard.last_telemetry_time.elapsed().as_millis() >= 45;
+        if should_telem {
+            guard.last_telemetry_time = Instant::now();
         }
-    }
+        (count, total, done, tot_bytes, guard.usb_bytes, guard.wifi_bytes, should_telem)
+    };
 
-    let mut metrics = Vec::new();
-    let usb_mb_s = (usb_b as f64) / (elapsed_sec * 1_000_000.0);
-    let wifi_mb_s = (wifi_b as f64) / (elapsed_sec * 1_000_000.0);
+    if should_send_telem {
+        let elapsed_sec = {
+            let guard = session.lock();
+            guard.start_time.elapsed().as_secs_f64().max(0.001)
+        };
+        let bytes_so_far: u64 = total_received_bytes.min(total_file_size.max(total_received_bytes));
 
-    if usb_b > 0 {
-        let mut m = crate::transport::r#trait::TransportMetrics::new("USB Fast-Path".to_string(), TransportKind::Usb);
-        m.current_mbps = usb_mb_s;
-        m.rtt_ms = 0.4;
-        metrics.push(m);
-    }
-    if wifi_b > 0 || usb_b == 0 {
-        let mut m = crate::transport::r#trait::TransportMetrics::new("5GHz Wi-Fi".to_string(), TransportKind::WifiDirect);
-        m.current_mbps = wifi_mb_s;
-        m.rtt_ms = 2.0;
-        metrics.push(m);
-    }
+        let transfer_uuid = Uuid::parse_str(&transfer_id).unwrap_or_else(|_| Uuid::new_v4());
+        let mut visual_chunks = Vec::with_capacity(total_chunks as usize);
+        {
+            let guard = session.lock();
+            for i in 0..total_chunks {
+                let state_str = if guard.received_chunks.contains(&i) {
+                    "COMPLETED"
+                } else if i == chunk_id {
+                    "IN_FLIGHT"
+                } else {
+                    "PENDING"
+                };
+                let chunk_t = guard.chunk_transports.get(&i).cloned().unwrap_or_else(|| {
+                    if is_usb_chunk { "🔌 USB Fast-Path".to_string() } else { "📶 5GHz Wi-Fi".to_string() }
+                });
+                visual_chunks.push(crate::scheduler::metrics::ChunkVisualState {
+                    chunk_id: i,
+                    state: state_str.to_string(),
+                    transport_id: Some(chunk_t),
+                });
+            }
+        }
 
-    let telem = SchedulerTelemetry::new(
-        transfer_uuid,
-        file_name.clone(),
-        if is_all_done { "COMPLETED".to_string() } else { "ACTIVE".to_string() },
-        metrics,
-        total_file_size.max(bytes_so_far),
-        bytes_so_far,
-        elapsed_sec,
-        visual_chunks,
-    );
-    let _ = state.telemetry_tx.send(telem);
+        let mut metrics = Vec::new();
+        let usb_mb_s = (usb_b as f64) / (elapsed_sec * 1_000_000.0);
+        let wifi_mb_s = (wifi_b as f64) / (elapsed_sec * 1_000_000.0);
+
+        if usb_b > 0 {
+            let mut m = crate::transport::r#trait::TransportMetrics::new("USB Fast-Path".to_string(), TransportKind::Usb);
+            m.current_mbps = usb_mb_s;
+            m.rtt_ms = 0.4;
+            metrics.push(m);
+        }
+        if wifi_b > 0 || usb_b == 0 {
+            let mut m = crate::transport::r#trait::TransportMetrics::new("5GHz Wi-Fi".to_string(), TransportKind::WifiDirect);
+            m.current_mbps = wifi_mb_s;
+            m.rtt_ms = 2.0;
+            metrics.push(m);
+        }
+
+        let telem = SchedulerTelemetry::new(
+            transfer_uuid,
+            file_name.clone(),
+            if is_all_done { "COMPLETED".to_string() } else { "ACTIVE".to_string() },
+            metrics,
+            total_file_size.max(bytes_so_far),
+            bytes_so_far,
+            elapsed_sec,
+            visual_chunks,
+        );
+        let _ = state.telemetry_tx.send(telem);
+    }
 
     if is_all_done {
         receivers_map.lock().remove(&transfer_id);
