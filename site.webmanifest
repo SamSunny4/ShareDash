@@ -1,0 +1,16 @@
+{
+  "name": "ShareDash - Multipath File Transfer Engine",
+  "short_name": "ShareDash",
+  "description": "Next-Generation Zero-LAN / Zero-Internet Multipath File Transfer Engine for Windows & Android aggregating USB 3.x and 5GHz Wi-Fi.",
+  "start_url": "/ShareDash/",
+  "display": "standalone",
+  "background_color": "#080b11",
+  "theme_color": "#06b6d4",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

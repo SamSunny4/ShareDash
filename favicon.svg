@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1329"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+    <linearGradient id="cyanBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe"/>
+      <stop offset="100%" stop-color="#4facfe"/>
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="boltGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#c084fc"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect width="128" height="128" rx="28" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Multipath Connector Lines with Glow -->
+  <path d="M42 64 L86 40" stroke="url(#cyanBlueGrad)" stroke-width="6" stroke-linecap="round" filter="url(#glow)" opacity="0.9"/>
+  <path d="M42 64 L86 88" stroke="url(#emeraldGrad)" stroke-width="6" stroke-linecap="round" filter="url(#glow)" opacity="0.9"/>
+
+  <!-- Aggregation Central Hub -->
+  <circle cx="42" cy="64" r="16" fill="#0f172a" stroke="url(#cyanBlueGrad)" stroke-width="4"/>
+  <circle cx="42" cy="64" r="7" fill="#38bdf8" filter="url(#glow)"/>
+
+  <!-- USB Fast-Path Node -->
+  <circle cx="86" cy="40" r="13" fill="#0f172a" stroke="#00f2fe" stroke-width="3.5"/>
+  <circle cx="86" cy="40" r="5" fill="#00f2fe"/>
+
+  <!-- 5GHz Wi-Fi Node -->
+  <circle cx="86" cy="88" r="13" fill="#0f172a" stroke="#10b981" stroke-width="3.5"/>
+  <circle cx="86" cy="88" r="5" fill="#10b981"/>
+
+  <!-- Centered Lightning Bolt Overlay -->
+  <path d="M60 26 L48 56 L62 56 L54 84 L78 50 L64 50 Z" fill="url(#boltGrad)" filter="url(#glow)" opacity="0.95"/>
+</svg>
