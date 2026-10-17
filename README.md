@@ -7,6 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/SamSunny4/ShareDash/ci.yml?branch=main&style=for-the-badge&logo=githubactions&label=CI)](https://github.com/SamSunny4/ShareDash/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/SamSunny4/ShareDash?style=for-the-badge&logo=semver&color=brightgreen)](https://github.com/SamSunny4/ShareDash/releases)
+[![Website](https://img.shields.io/badge/Website-Live-06b6d4.svg?style=for-the-badge&logo=googlechrome&logoColor=white)](https://samsunny4.github.io/ShareDash/)
 
 [![Rust](https://img.shields.io/badge/Rust-1.78%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-blue.svg?logo=kotlin)](https://kotlinlang.org/)
@@ -20,6 +21,7 @@
   <b>Aggregate USB 3.x Cable Fast-Path and Dedicated 5 GHz / 6 GHz Mobile Hotspots simultaneously into a single ultra-high-throughput pipeline (78+ MB/s) with Bluetooth LE out-of-band orchestration and zero-corruption cryptographic integrity.</b>
 </p>
 
+[🌐 **Official Website**](https://samsunny4.github.io/ShareDash/) •
 [**Quick Start**](#-quick-start-windows-cli-wizard) •
 [**Benchmarks**](#-live-benchmark-performance) •
 [**How It Works**](HOW_IT_WORKS.md) •

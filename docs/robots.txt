@@ -1,0 +1,7 @@
+# Robots.txt for ShareDash
+# Allow all search engine crawlers and bots
+User-agent: *
+Allow: /
+
+# Canonical Sitemap URL
+Sitemap: https://samsunny4.github.io/ShareDash/sitemap.xml

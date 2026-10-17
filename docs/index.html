@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- SEO Primary Meta Tags -->
+  <title>ShareDash — Next-Gen Multipath File Transfer Engine | 78+ MB/s Zero-LAN P2P</title>
+  <meta name="title" content="ShareDash — Next-Gen Multipath File Transfer Engine | 78+ MB/s Zero-LAN P2P">
+  <meta name="description" content="ShareDash aggregates USB 3.x Cable Fast-Path and dedicated 5GHz/6GHz mobile hotspots simultaneously for 78+ MB/s offline file transfer between Windows & Android with zero LAN or cloud dependencies.">
+  <meta name="keywords" content="ShareDash, multipath file transfer, offline file transfer, android to pc, usb fast-path, 5ghz hotspot, zerolan, airdrop alternative, localsend alternative, quick share alternative, high speed file sharing, open source rust android, p2p transfer">
+  <meta name="author" content="SamSunny4">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="googlebot" content="index, follow">
+  <link rel="canonical" href="https://samsunny4.github.io/ShareDash/">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://samsunny4.github.io/ShareDash/">
+  <meta property="og:title" content="ShareDash — Next-Gen Multipath File Transfer Engine">
+  <meta property="og:description" content="Simultaneously aggregate USB 3.x Cable and 5GHz Wi-Fi for 78+ MB/s offline file transfer between Windows and Android. 100% routerless, zero-cloud.">
+  <meta property="og:image" content="https://samsunny4.github.io/ShareDash/favicon.svg">
+  <meta property="og:site_name" content="ShareDash">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://samsunny4.github.io/ShareDash/">
+  <meta name="twitter:title" content="ShareDash — 78+ MB/s Zero-LAN Multipath File Transfer">
+  <meta name="twitter:description" content="Aggregate USB 3.x & 5GHz Wi-Fi simultaneously. 100% offline, zero-router, zero-cloud. Rust + Android Native.">
+  <meta name="twitter:image" content="https://samsunny4.github.io/ShareDash/favicon.svg">
+
+  <!-- Favicon & Mobile Icons -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="favicon.svg">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="theme-color" content="#080b11">
+
+  <!-- Google Fonts Preconnect & Stylesheet -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- JSON-LD Structured Data for Crawlers -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://samsunny4.github.io/ShareDash/#software",
+        "name": "ShareDash",
+        "operatingSystem": "Windows 10, Windows 11, Android 8.0+",
+        "applicationCategory": "UtilitiesApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "description": "Next-Generation Zero-LAN / Zero-Internet Multipath File Transfer Engine aggregating USB 3.x Cable Fast-Path and dedicated 5GHz/6GHz mobile hotspots simultaneously for 78+ MB/s transfer.",
+        "softwareVersion": "1.0.0",
+        "downloadUrl": "https://github.com/SamSunny4/ShareDash/releases",
+        "author": {
+          "@type": "Person",
+          "name": "SamSunny4",
+          "url": "https://github.com/SamSunny4"
+        },
+        "license": "https://opensource.org/licenses/MIT"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://samsunny4.github.io/ShareDash/#website",
+        "url": "https://samsunny4.github.io/ShareDash/",
+        "name": "ShareDash",
+        "description": "High-Throughput Offline Multipath File Transfer for Windows & Android",
+        "publisher": {
+          "@type": "Person",
+          "name": "SamSunny4"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://samsunny4.github.io/ShareDash/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Do I need an active internet connection or a Wi-Fi router for ShareDash?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. ShareDash is 100% offline and routerless (Zero LAN / Zero Internet). It communicates exclusively over direct physical hardware links: direct USB-C cables and dedicated point-to-point 5GHz mobile hotspots."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does simultaneous multipath transfer work in ShareDash?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "ShareDash splits large files into adaptive chunks (2MB to 64MB) and distributes them concurrently across multiple physical hardware transports (USB 3.x and 5GHz Wi-Fi) with 3 in-flight streaming workers per link. The receiving device writes chunks out-of-order into sparse disk files and verifies bit-level integrity using SHA-256."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What real-world transfer speeds does ShareDash achieve?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "In live benchmarks transferring a 2.80 GB video file, ShareDash achieved 78.7 MB/s aggregate throughput using simultaneous Phone 5GHz Wi-Fi and USB 3.x, and up to 107.2 MB/s on pure USB fast-path line speed."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+
+  <!-- Background Ambient Glow & Cyber Grid -->
+  <div class="bg-effects" aria-hidden="true">
+    <div class="ambient-glow glow-1"></div>
+    <div class="ambient-glow glow-2"></div>
+    <div class="ambient-glow glow-3"></div>
+    <div class="cyber-grid"></div>
+  </div>
+
+  <!-- Navigation Bar -->
+  <header class="navbar-wrapper">
+    <nav class="navbar" id="navbar" aria-label="Main Navigation">
+      <a href="#hero" class="brand" aria-label="ShareDash Home">
+        <div class="brand-logo">
+          <svg viewBox="0 0 128 128" width="36" height="36" aria-hidden="true">
+            <path d="M42 64 L86 40" stroke="#00f2fe" stroke-width="8" stroke-linecap="round"/>
+            <path d="M42 64 L86 88" stroke="#10b981" stroke-width="8" stroke-linecap="round"/>
+            <circle cx="42" cy="64" r="16" fill="#0f172a" stroke="#00f2fe" stroke-width="4"/>
+            <circle cx="42" cy="64" r="7" fill="#38bdf8"/>
+            <circle cx="86" cy="40" r="12" fill="#0f172a" stroke="#00f2fe" stroke-width="3"/>
+            <circle cx="86" cy="40" r="5" fill="#00f2fe"/>
+            <circle cx="86" cy="88" r="12" fill="#0f172a" stroke="#10b981" stroke-width="3"/>
+            <circle cx="86" cy="88" r="5" fill="#10b981"/>
+            <path d="M60 26 L48 56 L62 56 L54 84 L78 50 L64 50 Z" fill="#38bdf8"/>
+          </svg>
+        </div>
+        <span class="brand-name">Share<span class="gradient-text">Dash</span></span>
+      </a>
+
+      <!-- Desktop Links -->
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#simulator">Speed Calculator</a></li>
+        <li><a href="#benchmarks">Benchmarks</a></li>
+        <li><a href="#comparison">Comparison</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#cli-demo">Terminal CLI</a></li>
+        <li><a href="#download">Downloads</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+
+      <!-- Action Buttons -->
+      <div class="nav-actions">
+        <!-- Theme Toggle -->
+        <button id="themeToggle" class="icon-btn" title="Toggle Theme (Light / Dark)" aria-label="Toggle Theme">
+          <svg class="sun-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+
+        <!-- GitHub Star Link -->
+        <a href="https://github.com/SamSunny4/ShareDash" target="_blank" rel="noopener noreferrer" class="github-btn" aria-label="Star ShareDash on GitHub">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+          <span class="gh-text">Star</span>
+          <span class="gh-badge" id="ghStarsCount">⭐ MIT</span>
+        </a>
+
+        <!-- Download CTA -->
+        <a href="#download" class="btn btn-primary btn-sm">Get App</a>
+
+        <!-- Hamburger for mobile -->
+        <button id="mobileMenuBtn" class="hamburger-btn" aria-label="Toggle Navigation Menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <!-- HERO SECTION -->
+    <section class="hero-section" id="hero">
+      <div class="container hero-container">
+        <div class="hero-content">
+          <div class="badge-pill">
+            <span class="pulse-dot"></span>
+            <span>⚡ Next-Generation Multipath Engine • v1.0.0</span>
+          </div>
+
+          <h1 class="hero-title">
+            Break the Wi-Fi Barrier.<br>
+            <span class="gradient-text">Aggregate USB + 5GHz Simultaneously.</span>
+          </h1>
+
+          <p class="hero-subtitle">
+            Transfer multi-gigabyte files between Windows and Android at <strong>78 to 107+ MB/s</strong>. 
+            <strong>100% offline, zero-router, zero-cloud</strong>, with out-of-band BLE pairing and bit-level SHA-256 verification.
+          </p>
+
+          <div class="hero-actions">
+            <a href="https://github.com/SamSunny4/ShareDash/releases/latest" class="btn btn-primary btn-lg" id="heroWinDownload">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.95"/>
+              </svg>
+              <span>Download Windows (.exe)</span>
+            </a>
+
+            <a href="https://github.com/SamSunny4/ShareDash/releases/latest" class="btn btn-outline btn-lg" id="heroAndroidDownload">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.4101 13.8533 8.125 12 8.125c-1.8533 0-3.5902.2851-5.1368.8247L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+              </svg>
+              <span>Download Android (.apk)</span>
+            </a>
+
+            <a href="https://github.com/SamSunny4/ShareDash" target="_blank" rel="noopener noreferrer" class="btn btn-glass btn-lg">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
+              </svg>
+              <span>GitHub</span>
+            </a>
+          </div>
+
+          <!-- Feature badges -->
+          <div class="hero-specs-strip">
+            <div class="spec-item">
+              <span class="spec-icon">⚡</span>
+              <div>
+                <strong>78.7 - 107.2 MB/s</strong>
+                <p>Multipath Line Speed</p>
+              </div>
+            </div>
+            <div class="spec-divider"></div>
+            <div class="spec-item">
+              <span class="spec-icon">🚫</span>
+              <div>
+                <strong>Zero LAN / Routerless</strong>
+                <p>100% Offline Direct P2P</p>
+              </div>
+            </div>
+            <div class="spec-divider"></div>
+            <div class="spec-item">
+              <span class="spec-icon">🛡️</span>
+              <div>
+                <strong>AES-256-GCM + SHA-256</strong>
+                <p>Bit-Level Cryptographic Integrity</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- HERO INTERACTIVE MULTIPATH SIMULATOR VISUALIZER -->
+        <div class="hero-visual">
+          <div class="visualizer-card glass-panel">
+            <div class="card-header-bar">
+              <div class="window-dots">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+              </div>
+              <div class="header-status">
+                <span class="status-indicator active"></span>
+                <span>AGGREGATE MULTIPATH STREAM • ACTIVE</span>
+              </div>
+              <div class="header-fps" id="liveFpsMeter">60 FPS</div>
+            </div>
+
+            <!-- Multipath Network Canvas -->
+            <div class="canvas-container">
+              <canvas id="multipathCanvas" width="560" height="340" aria-label="Interactive Multipath Data Flow Stream Visualizer"></canvas>
+            </div>
+
+            <!-- Live Gauges & Controls -->
+            <div class="live-gauges-grid">
+              <div class="gauge-card">
+                <div class="gauge-label">⚡ USB 3.x Fast-Path</div>
+                <div class="gauge-val text-cyan" id="usbRateVal">31.0 MB/s</div>
+                <div class="channel-meter">
+                  <div class="meter-fill fill-cyan" style="width: 39.4%;"></div>
+                </div>
+                <span class="gauge-sub">39.4% Total Load • ADB / RNDIS</span>
+              </div>
+
+              <div class="gauge-card">
+                <div class="gauge-label">📶 Phone 5GHz Wi-Fi</div>
+                <div class="gauge-val text-emerald" id="wifiRateVal">47.7 MB/s</div>
+                <div class="channel-meter">
+                  <div class="meter-fill fill-emerald" style="width: 60.6%;"></div>
+                </div>
+                <span class="gauge-sub">60.6% Total Load • Direct AP</span>
+              </div>
+
+              <div class="gauge-card total-gauge">
+                <div class="gauge-label">🚀 Aggregated Throughput</div>
+                <div class="gauge-val text-highlight" id="totalRateVal">78.7 MB/s</div>
+                <div class="channel-meter">
+                  <div class="meter-fill fill-highlight" style="width: 100%;"></div>
+                </div>
+                <span class="gauge-sub">Zero-Corruption • SHA-256 Verified</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 1: KEY HIGHLIGHTS / OVERVIEW -->
+    <section class="section" id="overview">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">ENGINEERED FOR EXTREME PERFORMANCE</span>
+          <h2 class="section-title">Why Traditional Sharing Fails & How ShareDash Solves It</h2>
+          <p class="section-desc">
+            Quick Share, AirDrop, and LocalSend choke when Wi-Fi routers are missing, congested, or restricted. 
+            ShareDash bypasses the network stack with physical point-to-point hardware aggregation.
+          </p>
+        </div>
+
+        <div class="features-grid">
+          <!-- Card 1 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper cyan-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+              </svg>
+            </div>
+            <h3>Simultaneous Multipath Aggregation</h3>
+            <p>
+              Why choose between USB or Wi-Fi when you can use both? ShareDash splits multi-gigabyte files into adaptive 
+              chunks and streams them concurrently across USB 3.x and 5GHz Wi-Fi without packet collisions.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-cyan">78.7+ MB/s</span>
+              <span class="metric-lbl">Combined Real-World Throughput</span>
+            </div>
+          </article>
+
+          <!-- Card 2 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper emerald-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+              </svg>
+            </div>
+            <h3>100% Zero-LAN & Routerless</h3>
+            <p>
+              No home router, no office Wi-Fi, and no cloud relays required. ShareDash works in the middle of a desert, 
+              on an airplane, or in high-security air-gapped facilities over direct device-to-device hardware links.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-emerald">0 ms</span>
+              <span class="metric-lbl">Cloud Latency & Zero Telemetry</span>
+            </div>
+          </article>
+
+          <!-- Card 3 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper blue-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                <line x1="6" y1="18" x2="6.01" y2="18"></line>
+              </svg>
+            </div>
+            <h3>Smart 5GHz Hotspot Orchestration</h3>
+            <p>
+              Windows Internet Connection Sharing (ICS) bottlenecks PC hotspots to ~10 MB/s. ShareDash intelligently commands 
+              the Android phone via BLE to switch off client Wi-Fi and host an uncapped 5GHz Direct Group Owner at 48+ MB/s.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-highlight">4.92×</span>
+              <span class="metric-lbl">Faster than Windows SoftAP</span>
+            </div>
+          </article>
+
+          <!-- Card 4 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper amber-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+            </div>
+            <h3>Zero-Corruption Cryptographic Verification</h3>
+            <p>
+              Every frame is guarded with CRC32 framing. Every chunk is verified against BLAKE3 / SHA-256 hashes, and streams 
+              are secured with AES-256-GCM authenticated encryption. Corrupted chunks are re-requested on the fly.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-amber">100%</span>
+              <span class="metric-lbl">Bit-Verified Integrity</span>
+            </div>
+          </article>
+
+          <!-- Card 5 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper purple-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+              </svg>
+            </div>
+            <h3>Out-of-Order Sparse File Reassembly</h3>
+            <p>
+              High-speed chunks arrive concurrently across channels. The Android Kotlin engine utilizes direct-offset 
+              Java NIO <code>FileChannel</code> sparse allocations, writing chunks immediately without intermediate caching.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-purple">2MB - 64MB</span>
+              <span class="metric-lbl">Adaptive Chunk Pipelining</span>
+            </div>
+          </article>
+
+          <!-- Card 6 -->
+          <article class="feature-card glass-panel">
+            <div class="feature-icon-wrapper rose-glow">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </div>
+            <h3>Interactive Wifite-Style ANSI CLI</h3>
+            <p>
+              Engineered for power users. An interactive terminal wizard with hardware inspection, Bluetooth radar scanners, 
+              live multi-channel speedometers, and instantaneous transfer telemetry.
+            </p>
+            <div class="feature-metric">
+              <span class="metric-num text-rose">Pure Rust</span>
+              <span class="metric-lbl">Zero Runtime Overhead</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: INTERACTIVE SPEED & TIME CALCULATOR -->
+    <section class="section bg-tinted" id="simulator">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">REAL-TIME SIMULATION</span>
+          <h2 class="section-title">Interactive Transfer Speed Calculator</h2>
+          <p class="section-desc">
+            Drag the slider to adjust your file size and see how ShareDash compares against AirDrop, Quick Share, LocalSend, and Bluetooth.
+          </p>
+        </div>
+
+        <div class="calculator-container glass-panel">
+          <!-- Slider Control -->
+          <div class="calc-control-group">
+            <div class="calc-labels">
+              <label for="fileSizeSlider" class="calc-label">Selected File Size:</label>
+              <span class="calc-current-size" id="calcSizeDisplay">2.8 GB (Movie File)</span>
+            </div>
+            <input type="range" id="fileSizeSlider" min="0.5" max="50" step="0.5" value="2.8" aria-label="File Size in Gigabytes" class="range-slider">
+            <div class="slider-ticks">
+              <span>500 MB</span>
+              <span>2.8 GB</span>
+              <span>10 GB</span>
+              <span>25 GB</span>
+              <span>50 GB</span>
+            </div>
+          </div>
+
+          <!-- Highlight Banner -->
+          <div class="time-saved-alert" id="timeSavedBanner">
+            <div class="alert-icon">⚡</div>
+            <div class="alert-text">
+              <strong>ShareDash saves you <span id="timeSavedVal" class="text-highlight">41.8 seconds</span></strong> 
+              compared to Quick Share on this file!
+            </div>
+          </div>
+
+          <!-- Comparison Bars -->
+          <div class="calc-results-list" id="calcResultsList">
+            <!-- ShareDash Multipath -->
+            <div class="calc-row winner-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <span class="protocol-badge winner-badge">⚡ ShareDash Multipath</span>
+                  <span class="protocol-sub">USB 3.x + Phone 5GHz Wi-Fi (78.7 MB/s)</span>
+                </span>
+                <span class="protocol-eta winner-eta" id="etaShareDashMultipath">35.6s</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-multipath" id="barShareDashMultipath" style="width: 100%;"></div>
+              </div>
+            </div>
+
+            <!-- ShareDash USB-C Line Speed -->
+            <div class="calc-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <strong>⚡ ShareDash (USB Fast-Path Only)</strong>
+                  <span class="protocol-sub">Direct ADB / RNDIS Line Speed (107.2 MB/s)</span>
+                </span>
+                <span class="protocol-eta" id="etaShareDashUsb">26.1s</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-usb" id="barShareDashUsb" style="width: 73%;"></div>
+              </div>
+            </div>
+
+            <!-- Samsung / Google Quick Share -->
+            <div class="calc-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <strong>📲 Quick Share (Nearby Share)</strong>
+                  <span class="protocol-sub">Wi-Fi Direct Single Channel (~42 MB/s)</span>
+                </span>
+                <span class="protocol-eta" id="etaQuickShare">66.7s</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-quickshare" id="barQuickShare" style="width: 53%;"></div>
+              </div>
+            </div>
+
+            <!-- Apple AirDrop -->
+            <div class="calc-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <strong>🍏 Apple AirDrop</strong>
+                  <span class="protocol-sub">AWDL 5GHz Single Channel (~38 MB/s)</span>
+                </span>
+                <span class="protocol-eta" id="etaAirDrop">73.7s</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-airdrop" id="barAirDrop" style="width: 48%;"></div>
+              </div>
+            </div>
+
+            <!-- LocalSend -->
+            <div class="calc-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <strong>📦 LocalSend (LAN Router)</strong>
+                  <span class="protocol-sub">Local Wi-Fi Router Overhead (~32 MB/s)</span>
+                </span>
+                <span class="protocol-eta" id="etaLocalSend">87.5s</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-localsend" id="barLocalSend" style="width: 40%;"></div>
+              </div>
+            </div>
+
+            <!-- Standard Bluetooth 5.0 -->
+            <div class="calc-row">
+              <div class="calc-row-header">
+                <span class="protocol-name">
+                  <strong>🔵 Bluetooth 5.0</strong>
+                  <span class="protocol-sub">Basic EDR (~2.0 MB/s)</span>
+                </span>
+                <span class="protocol-eta" id="etaBluetooth">23.3 min</span>
+              </div>
+              <div class="calc-bar-track">
+                <div class="calc-bar-fill bar-bluetooth" id="barBluetooth" style="width: 2.5%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: LIVE BENCHMARK VALIDATION -->
+    <section class="section" id="benchmarks">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">HARDWARE VERIFIED</span>
+          <h2 class="section-title">Live Benchmark Performance Validation</h2>
+          <p class="section-desc">
+            Tested on real physical hardware: transferring a 2.80 GB (2,799 MB) 1080p video file between Windows 11 and Android.
+          </p>
+        </div>
+
+        <div class="benchmark-grid">
+          <div class="benchmark-table-wrapper glass-panel">
+            <table class="benchmark-table">
+              <thead>
+                <tr>
+                  <th>Transfer Mode</th>
+                  <th>Physical Channels</th>
+                  <th>Transfer Time</th>
+                  <th>Average Speed</th>
+                  <th>Integrity Check</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="highlight-row">
+                  <td>
+                    <strong>🚀 Multipath Aggregation</strong>
+                    <div class="table-sub">Phone 5GHz AP + USB-C</div>
+                  </td>
+                  <td>⚡ USB 3.x + 📶 5GHz Wi-Fi</td>
+                  <td class="font-mono text-cyan"><strong>35.55 s</strong></td>
+                  <td class="font-mono text-highlight"><strong>78.7 MB/s</strong></td>
+                  <td><span class="status-pill success">SHA-256 ✔</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>⚡ USB Fast-Path Only</strong>
+                    <div class="table-sub">Direct ADB Line Speed</div>
+                  </td>
+                  <td>⚡ USB 3.x Cable</td>
+                  <td class="font-mono text-cyan">~26.10 s</td>
+                  <td class="font-mono text-cyan">~107.2 MB/s</td>
+                  <td><span class="status-pill success">SHA-256 ✔</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <strong>⚠️ PC Hotspot (Windows ICS)</strong>
+                    <div class="table-sub">Fallback AP Mode</div>
+                  </td>
+                  <td>⚡ USB + 📶 PC SoftAP</td>
+                  <td class="font-mono">73.83 s</td>
+                  <td class="font-mono">37.9 MB/s</td>
+                  <td><span class="status-pill success">SHA-256 ✔</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="benchmark-insights glass-panel">
+            <h3>Key Performance Insights</h3>
+            <ul class="insights-list">
+              <li>
+                <span class="insight-bullet">🚀</span>
+                <div>
+                  <strong>Phone 5GHz Hotspot is 4.92× faster than PC Hotspot:</strong>
+                  <p>Windows ICS imposes driver-level NAT packet inspection bottlenecks, capping Wi-Fi to ~10 MB/s. Android's Wi-Fi Direct Group Owner runs unthrottled at 47.7 MB/s.</p>
+                </div>
+              </li>
+              <li>
+                <span class="insight-bullet">⚡</span>
+                <div>
+                  <strong>Zero-Idle Work Stealing:</strong>
+                  <p>3 parallel streaming workers per transport ensure neither USB nor Wi-Fi sits idle waiting for disk I/O.</p>
+                </div>
+              </li>
+              <li>
+                <span class="insight-bullet">🛡️</span>
+                <div>
+                  <strong>Zero Bit-Flips:</strong>
+                  <p>32 MB chunks arrived out of sequence, reconstructed via Java NIO FileChannel, and matched source SHA-256 with 100% precision.</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 4: COMPARISON MATRIX -->
+    <section class="section bg-tinted" id="comparison">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">COMPETITIVE MATRIX</span>
+          <h2 class="section-title">How ShareDash Compares to the Rest</h2>
+          <p class="section-desc">
+            See how ShareDash stacks up against Apple AirDrop, Google Quick Share, LocalSend, and Syncthing.
+          </p>
+        </div>
+
+        <div class="comparison-table-wrapper glass-panel">
+          <table class="comparison-table">
+            <thead>
+              <tr>
+                <th>Feature / Capability</th>
+                <th class="col-highlight">⚡ ShareDash</th>
+                <th>🍏 AirDrop</th>
+                <th>📲 Quick Share</th>
+                <th>📦 LocalSend</th>
+                <th>🔄 Syncthing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Simultaneous Multipath (USB + Wi-Fi)</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ YES (Aggregated)</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+              </tr>
+              <tr>
+                <td><strong>100% Offline / Routerless (Zero LAN)</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ YES (Direct P2P)</span></td>
+                <td><span class="check-yes">✅ Yes</span></td>
+                <td><span class="check-yes">✅ Yes</span></td>
+                <td><span class="check-no">❌ Requires Router</span></td>
+                <td><span class="check-no">❌ Requires Router</span></td>
+              </tr>
+              <tr>
+                <td><strong>PC ⟷ Android Direct Hardware Bridge</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ YES</span></td>
+                <td><span class="check-no">❌ Apple Only</span></td>
+                <td><span class="check-warn">⚠️ Limited</span></td>
+                <td><span class="check-yes">✅ Yes (LAN only)</span></td>
+                <td><span class="check-yes">✅ Yes</span></td>
+              </tr>
+              <tr>
+                <td><strong>Real-World Speed on Multi-GB Files</strong></td>
+                <td class="col-highlight"><strong class="text-highlight">🚀 78–107+ MB/s</strong></td>
+                <td>~30–45 MB/s</td>
+                <td>~35–50 MB/s</td>
+                <td>~25–40 MB/s</td>
+                <td>~15–30 MB/s</td>
+              </tr>
+              <tr>
+                <td><strong>USB 3.x Fast-Path Prioritization</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ YES (Line Speed)</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+              </tr>
+              <tr>
+                <td><strong>Automatic 5GHz SoftAP Provisioning</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ YES (via BLE)</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-warn">⚠️ Proprietary</span></td>
+                <td><span class="check-no">❌ No</span></td>
+                <td><span class="check-no">❌ No</span></td>
+              </tr>
+              <tr>
+                <td><strong>Zero Cloud / Zero Account / No Tracking</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ 100% Private</span></td>
+                <td><span class="check-no">❌ iCloud ID</span></td>
+                <td><span class="check-no">❌ Google/Samsung</span></td>
+                <td><span class="check-yes">✅ Yes</span></td>
+                <td><span class="check-yes">✅ Yes</span></td>
+              </tr>
+              <tr>
+                <td><strong>Open Source License</strong></td>
+                <td class="col-highlight"><span class="check-yes">✅ MIT License</span></td>
+                <td><span class="check-no">❌ Proprietary</span></td>
+                <td><span class="check-no">❌ Proprietary</span></td>
+                <td><span class="check-yes">✅ GPL-3.0</span></td>
+                <td><span class="check-yes">✅ MPL-2.0</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: TECHNICAL ARCHITECTURE -->
+    <section class="section" id="architecture">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">DEEP DIVE</span>
+          <h2 class="section-title">System Architecture & Operational Pipeline</h2>
+          <p class="section-desc">
+            How ShareDash provisions out-of-band BLE signals, schedules multipath work, and writes chunks at line speed.
+          </p>
+        </div>
+
+        <div class="arch-diagram-wrapper glass-panel">
+          <div class="arch-tabs">
+            <button class="arch-tab-btn active" data-tab="flow">Interactive Architecture</button>
+            <button class="arch-tab-btn" data-tab="handshake">3-Way BLE Handshake</button>
+            <button class="arch-tab-btn" data-tab="sparse">Sparse Reassembly</button>
+          </div>
+
+          <div class="arch-tab-content active" id="tab-flow">
+            <div class="arch-flow-diagram">
+              <div class="flow-col">
+                <div class="flow-box pc-box">
+                  <div class="box-tag">Rust 2021</div>
+                  <h4>💻 Windows PC Core</h4>
+                  <ul>
+                    <li>Dynamic Work-Stealing Scheduler</li>
+                    <li>High-Throughput Chunker (2MB-64MB)</li>
+                    <li>AES-256-GCM Stream Encryptor</li>
+                    <li>BLE Central Controller (btleplug)</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div class="flow-channels">
+                <div class="channel-line ch-usb">
+                  <span class="ch-badge">⚡ USB 3.x Cable Fast-Path (ADB tcp:54325 / RNDIS)</span>
+                  <div class="pulse-line"></div>
+                </div>
+                <div class="channel-line ch-wifi">
+                  <span class="ch-badge">📶 5GHz Wi-Fi Direct Hotspot (192.168.49.1)</span>
+                  <div class="pulse-line"></div>
+                </div>
+                <div class="channel-line ch-ble">
+                  <span class="ch-badge">🔵 Bluetooth LE 5.0 GATT Control & Signaling</span>
+                  <div class="pulse-line"></div>
+                </div>
+              </div>
+
+              <div class="flow-col">
+                <div class="flow-box android-box">
+                  <div class="box-tag">Kotlin / Compose</div>
+                  <h4>📱 Android Companion</h4>
+                  <ul>
+                    <li>Concurrent NIO FileChannel Writer</li>
+                    <li>BLE GATT Server & Hotspot Daemon</li>
+                    <li>Android System Share Sheet Target</li>
+                    <li>BLAKE3 / SHA-256 Chunk Verifier</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arch-tab-content" id="tab-handshake">
+            <div class="handshake-steps">
+              <div class="step-card">
+                <div class="step-num">1</div>
+                <h4>BLE Discovery & Radar</h4>
+                <p>Phone advertises ShareDash GATT Service UUID. The Windows PC discovers the phone via BLE in under 800ms.</p>
+              </div>
+              <div class="step-card">
+                <div class="step-num">2</div>
+                <h4>Band Freeing & 5GHz AP</h4>
+                <p>Phone automatically disables client Wi-Fi to free the antenna chip, provisions a 5GHz direct group, and sends credentials over BLE.</p>
+              </div>
+              <div class="step-card">
+                <div class="step-num">3</div>
+                <h4>Parallel Multipath Stream</h4>
+                <p>PC binds to USB-C port forward and 5GHz Wi-Fi simultaneously, launching 3 in-flight parallel workers per transport.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="arch-tab-content" id="tab-sparse">
+            <div class="sparse-explanation">
+              <h4>Direct-Offset Sparse File Writing (Zero Cache Thrashing)</h4>
+              <p>Traditional transfer tools buffer files in RAM or temporary caches. ShareDash pre-allocates the entire file on disk using sparse allocation, allowing chunks arriving out-of-order over USB and Wi-Fi to be written directly to their absolute byte offsets using <code>FileChannel.write(buffer, offset)</code>.</p>
+              <div class="code-preview-snippet">
+                <code>fileChannel.write(chunkBuffer, chunkManifest.byteOffset); // Zero intermediate copies</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 6: TERMINAL CLI INTERACTIVE DEMO -->
+    <section class="section bg-tinted" id="cli-demo">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">POWER USER INTERFACE</span>
+          <h2 class="section-title">Interactive Terminal CLI Wizard</h2>
+          <p class="section-desc">
+            Experience the retro-futuristic Wifite-style ANSI terminal interface built right into the Windows release binary.
+          </p>
+        </div>
+
+        <div class="terminal-container glass-panel">
+          <div class="terminal-titlebar">
+            <div class="window-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <div class="terminal-tabs">
+              <button class="cli-tab-btn active" data-cli="wizard">1. Auto-Connect Wizard</button>
+              <button class="cli-tab-btn" data-cli="transfer">2. Live Transfer (78 MB/s)</button>
+              <button class="cli-tab-btn" data-cli="receiver">3. Standalone Receiver</button>
+              <button class="cli-tab-btn" data-cli="tests">4. Automated Test Suite</button>
+            </div>
+          </div>
+
+          <!-- CLI Output Views -->
+          <div class="terminal-body" id="cliOutputBody">
+            <!-- View 1: Wizard -->
+            <pre class="cli-screen active" id="cli-wizard"><span class="cli-cyan">  ⚡ ShareDash Connection Wizard v1.0.0</span>
+  ──────────────────────────────────────────────────────────────────
+  <span class="cli-green">[+]</span> Scanning physical hardware interfaces...
+  <span class="cli-blue">[i]</span> USB 3.x Cable: <span class="cli-bold">Connected (ADB tcp:54325 forwarded)</span>
+  <span class="cli-blue">[i]</span> Bluetooth LE:  <span class="cli-bold">Scanning for ShareDash Android targets...</span>
+  <span class="cli-green">[✔] Found target: Pixel 8 Pro (RSSI: -42 dBm)</span>
+  <span class="cli-yellow">[⚡] Negotiating 5GHz SoftAP credentials via BLE GATT...</span>
+  <span class="cli-green">[✔] Phone 5GHz AP active: DIRECT-ShareDash-9281 (192.168.49.1)</span>
+  <span class="cli-green">[✔] Windows Wi-Fi auto-associated in 1.2 seconds</span>
+  <span class="cli-magenta">[★] Performing 3-Way Cryptographic Handshake (PIN: 849-219)...</span>
+  <span class="cli-green">[✔] Ephemeral AES-256-GCM Session Key Established!</span>
+  ──────────────────────────────────────────────────────────────────
+  <span class="cli-bold">READY TO STREAM. Press [ENTER] to select file to transmit.</span></pre>
+
+            <!-- View 2: Transfer -->
+            <pre class="cli-screen" id="cli-transfer"><span class="cli-cyan">  ⚡ Streaming: Marco.2024.1080p.SLIV.WEB-DL.D... (2.80 GB)</span>
+  ──────────────────────────────────────────────────────────────────
+  <span class="cli-blue">[⚡ USB Cable]</span>  ████████████████████████░░░░░░░░░░░░  31.0 MB/s (39.4%)
+  <span class="cli-green">[📶 5GHz Wi-Fi]</span> ████████████████████████████████░░░░  47.7 MB/s (60.6%)
+  ──────────────────────────────────────────────────────────────────
+  <span class="cli-bold text-highlight">[🚀 AGGREGATE]</span>  ████████████████████████████░░░░░░░░  <span class="cli-bold text-highlight">78.7 MB/s</span>
+  <span class="cli-gray">Chunks: 88/88 (100%) • Time Elapsed: 35.55s • ETA: 0.0s</span>
+  <span class="cli-green">[✔] SHA-256 Verification: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</span>
+  <span class="cli-bold cli-green">✨ TRANSFER SUCCESSFUL! Bit-level integrity confirmed.</span></pre>
+
+            <!-- View 3: Receiver -->
+            <pre class="cli-screen" id="cli-receiver"><span class="cli-cyan">  ⚡ ShareDash Standalone Background Receiver</span>
+  ──────────────────────────────────────────────────────────────────
+  <span class="cli-green">[+]</span> Listening on 0.0.0.0:54321 (TCP Multi-Channel)
+  <span class="cli-blue">[i]</span> Storage Target: C:\Users\SamSunny\Downloads\ShareDash\
+  <span class="cli-blue">[i]</span> Sparse File Pre-allocation: <span class="cli-green">ENABLED</span>
+  <span class="cli-yellow">[⚡] Incoming connection from 192.168.49.1 (Phone Wi-Fi)</span>
+  <span class="cli-yellow">[⚡] Incoming connection from 127.0.0.1:54325 (USB Fast-Path)</span>
+  <span class="cli-green">[✔] Multipath aggregation session initialized</span></pre>
+
+            <!-- View 4: Tests -->
+            <pre class="cli-screen" id="cli-tests"><span class="cli-cyan">  $ cargo test --lib --release</span>
+  ──────────────────────────────────────────────────────────────────
+  running 5 tests
+  test protocol::tests::test_crc32_frame_validation ... <span class="cli-green">ok</span>
+  test protocol::tests::test_aes_256_gcm_chunk_encryption ... <span class="cli-green">ok</span>
+  test storage::tests::test_sparse_writer_out_of_order ... <span class="cli-green">ok</span>
+  test scheduler::tests::test_dynamic_work_stealing ... <span class="cli-green">ok</span>
+  test hotspot::tests::test_usb_rndis_adapter_isolation ... <span class="cli-green">ok</span>
+
+  <span class="cli-bold cli-green">test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 7: DOWNLOAD & QUICK START -->
+    <section class="section" id="download">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">GET STARTED IN SECONDS</span>
+          <h2 class="section-title">Download ShareDash & Quick Start</h2>
+          <p class="section-desc">
+            Get pre-built distribution binaries for Windows and Android, or compile from source with Rust and Gradle.
+          </p>
+        </div>
+
+        <div class="download-cards-grid">
+          <!-- Windows Card -->
+          <div class="download-card glass-panel">
+            <div class="card-os-icon">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="#0078D6">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.95"/>
+              </svg>
+            </div>
+            <h3>Windows Desktop Binary</h3>
+            <p>Portable release executable with embedded CLI wizard, Wi-Fi Direct manager, and multipath streaming engine.</p>
+            <div class="package-meta">
+              <span>Version: <strong>1.0.0</strong></span>
+              <span>Size: <strong>~11 MB</strong></span>
+              <span>OS: <strong>Win 10/11 (x64)</strong></span>
+            </div>
+            <a href="https://github.com/SamSunny4/ShareDash/releases/latest" class="btn btn-primary btn-block">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download sharedash.exe</span>
+            </a>
+          </div>
+
+          <!-- Android Card -->
+          <div class="download-card glass-panel">
+            <div class="card-os-icon">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="#10B981">
+                <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.4101 13.8533 8.125 12 8.125c-1.8533 0-3.5902.2851-5.1368.8247L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+              </svg>
+            </div>
+            <h3>Android Companion App</h3>
+            <p>Native Jetpack Compose companion app with Android Share Sheet target, BLE GATT server, and 5GHz SoftAP daemon.</p>
+            <div class="package-meta">
+              <span>Version: <strong>1.0.0</strong></span>
+              <span>Size: <strong>~17 MB</strong></span>
+              <span>Requires: <strong>Android 8.0+</strong></span>
+            </div>
+            <a href="https://github.com/SamSunny4/ShareDash/releases/latest" class="btn btn-outline btn-block">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download ShareDash.apk</span>
+            </a>
+          </div>
+
+          <!-- Build From Source -->
+          <div class="download-card glass-panel">
+            <div class="card-os-icon">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="#F59E0B">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+              </svg>
+            </div>
+            <h3>Build From Source</h3>
+            <p>Compile the Rust binary or Android APK directly from source using Cargo and Gradle.</p>
+            <div class="code-copy-box">
+              <code>git clone https://github.com/SamSunny4/ShareDash.git
+cd ShareDash
+cargo run --release</code>
+              <button class="copy-cmd-btn" data-copy="git clone https://github.com/SamSunny4/ShareDash.git && cd ShareDash && cargo run --release" title="Copy command">
+                📋
+              </button>
+            </div>
+            <a href="https://github.com/SamSunny4/ShareDash" target="_blank" rel="noopener noreferrer" class="btn btn-glass btn-block">
+              <span>View Source on GitHub</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 8: FAQ ACCORDION -->
+    <section class="section bg-tinted" id="faq">
+      <div class="container">
+        <div class="section-header text-center">
+          <span class="section-tag">FREQUENTLY ASKED QUESTIONS</span>
+          <h2 class="section-title">Everything You Need to Know</h2>
+          <p class="section-desc">Clear answers to questions regarding performance, offline operation, and security.</p>
+        </div>
+
+        <div class="faq-accordion glass-panel">
+          <!-- FAQ 1 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Do I need an active internet connection or a Wi-Fi router?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p><strong>Absolutely not.</strong> ShareDash is 100% routerless and works without internet. It connects directly device-to-device using a USB-C cable and an automatically provisioned 5GHz Wi-Fi Direct mobile hotspot.</p>
+            </div>
+          </div>
+
+          <!-- FAQ 2 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Why is Phone 5GHz AP faster than Windows Mobile Hotspot?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Windows Mobile Hotspot uses Internet Connection Sharing (ICS), which performs software-based NAT packet inspection and requires an active internet connection, capping speeds to ~10 MB/s. In contrast, Android's Wi-Fi Direct Group Owner operates directly in hardware with zero NAT filtering, reaching unthrottled line speeds of 48+ MB/s.</p>
+            </div>
+          </div>
+
+          <!-- FAQ 3 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>How does multipath chunking avoid file corruption when packets are split?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>ShareDash assigns each chunk an index, byte offset, and individual cryptographic hash. The receiver uses Java NIO <code>FileChannel</code> to write chunks directly into their exact byte positions on disk regardless of arrival order. Once all chunks arrive, the master SHA-256 hash is computed and verified before marking the file complete.</p>
+            </div>
+          </div>
+
+          <!-- FAQ 4 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>What happens if the USB cable gets unplugged during a transfer?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>ShareDash's dynamic work-stealing scheduler immediately detects socket termination on the USB pipeline. In-flight chunks that were lost are automatically re-queued and dispatched over the active 5GHz Wi-Fi channel with zero interruption to the user.</p>
+            </div>
+          </div>
+
+          <!-- FAQ 5 -->
+          <div class="faq-item">
+            <button class="faq-question">
+              <span>Is my data encrypted and private?</span>
+              <span class="faq-icon">+</span>
+            </button>
+            <div class="faq-answer">
+              <p>Yes. All communication is protected with authenticated <strong>AES-256-GCM</strong> encryption using an ephemeral session key derived during the 3-way pairing handshake. No telemetry, account registrations, or third-party servers exist.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 9: CALL TO ACTION -->
+    <section class="section cta-section">
+      <div class="container text-center">
+        <div class="cta-box glass-panel">
+          <h2 class="cta-title">Ready for Next-Gen File Transfers?</h2>
+          <p class="cta-desc">
+            Experience true line-speed transfers without internet, routers, or cloud accounts. 
+            Open source, free forever, and licensed under MIT.
+          </p>
+          <div class="cta-buttons">
+            <a href="https://github.com/SamSunny4/ShareDash/releases/latest" class="btn btn-primary btn-lg">
+              <span>Download ShareDash Now</span>
+            </a>
+            <a href="https://github.com/SamSunny4/ShareDash" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-lg">
+              <span>⭐ Star on GitHub</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="footer">
+    <div class="container footer-container">
+      <div class="footer-col brand-col">
+        <div class="brand">
+          <span class="brand-name">Share<span class="gradient-text">Dash</span></span>
+        </div>
+        <p class="footer-tagline">
+          Next-Generation Zero-LAN / Zero-Internet Multipath File Transfer Engine for Windows & Android.
+        </p>
+        <p class="footer-license">
+          Released under the <strong>MIT Open Source License</strong>.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Navigation</h4>
+        <ul>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#simulator">Speed Calculator</a></li>
+          <li><a href="#benchmarks">Benchmarks</a></li>
+          <li><a href="#comparison">Comparison</a></li>
+          <li><a href="#architecture">Architecture</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="https://github.com/SamSunny4/ShareDash/blob/main/HOW_IT_WORKS.md" target="_blank" rel="noopener">Technical Deep Dive</a></li>
+          <li><a href="https://github.com/SamSunny4/ShareDash/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a></li>
+          <li><a href="https://github.com/SamSunny4/ShareDash/blob/main/SECURITY.md" target="_blank" rel="noopener">Security Policy</a></li>
+          <li><a href="https://github.com/SamSunny4/ShareDash/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
+          <li><a href="sitemap.xml">Sitemap</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Connect</h4>
+        <ul>
+          <li><a href="https://github.com/SamSunny4/ShareDash" target="_blank" rel="noopener">GitHub Repository</a></li>
+          <li><a href="https://github.com/SamSunny4/ShareDash/releases" target="_blank" rel="noopener">Releases & Binaries</a></li>
+          <li><a href="https://github.com/SamSunny4/ShareDash/issues" target="_blank" rel="noopener">Report Issue</a></li>
+          <li><a href="https://github.com/SamSunny4" target="_blank" rel="noopener">Developer Profile</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-inner">
+        <p>© 2026 ShareDash Contributors • Created by <a href="https://github.com/SamSunny4" target="_blank" rel="noopener" class="author-link">SamSunny4</a></p>
+        <p class="crawlers-allowed-badge">🔍 Search Engine Crawlers &amp; Bots Allowed</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Script -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://samsunny4.github.io/ShareDash/</loc>
+    <lastmod>2026-10-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.00</priority>
+    <image:image>
+      <image:loc>https://samsunny4.github.io/ShareDash/favicon.svg</image:loc>
+      <image:title>ShareDash Multipath File Transfer Engine</image:title>
+      <image:caption>Break the Wi-Fi Barrier with Aggregated USB 3.x and 5GHz Multipath Transfer</image:caption>
+    </image:image>
+  </url>
+</urlset>
