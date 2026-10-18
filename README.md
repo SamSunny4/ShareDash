@@ -203,7 +203,7 @@ cargo test --test corruption_test
 
 ```text
 ShareDash/
-  ├── Cargo.toml                    # Rust dependencies & package metadata
+  ├── Cargo.toml                    # Rust workspace dependencies, axum, btleplug, ring, rusqlite
   ├── LICENSE                       # MIT Open Source License
   ├── CONTRIBUTING.md               # Contributor guide & development workflow
   ├── CODE_OF_CONDUCT.md            # Contributor Covenant Code of Conduct
@@ -215,45 +215,86 @@ ShareDash/
   ├── .github/                      # GitHub CI/CD workflows & issue forms
   │   ├── workflows/ci.yml          # Automated multi-platform build & test CI
   │   ├── workflows/release.yml     # Automated binary release packaging
+  │   ├── workflows/pages.yml       # GitHub Pages deployment for official website
   │   ├── ISSUE_TEMPLATE/           # Bug report & feature request forms
   │   ├── PULL_REQUEST_TEMPLATE.md  # Standard PR checklist
   │   └── dependabot.yml            # Dependency maintenance automation
   │
+  ├── docs/                         # Official GitHub Pages Website & Live Simulator
+  │   ├── index.html                # Responsive landing page, speed calculator, architecture tabs
+  │   ├── style.css                 # Cyber-dark design system, glassmorphism, responsive styles
+  │   ├── app.js                    # Canvas visualizer, theme switcher, benchmark calculator
+  │   ├── sitemap.xml               # Search engine index sitemap
+  │   └── robots.txt                # Crawler directives
+  │
   ├── dist/                         # Distribution binaries
-  │   ├── sharedash.exe             # Compiled Windows release binary
+  │   ├── sharedash.exe             # Compiled Windows release binary (CLI + Axum HTTP API)
   │   ├── ShareDash-debug.apk       # Android companion APK
   │   └── sharedash.apk             # Android companion APK mirror
   │
   ├── src/                          # Windows Rust Core Engine
   │   ├── main.rs                   # Entry point, CLI flags, persistent UUID
   │   ├── lib.rs                    # Library interface & exports
-  │   ├── cli.rs                    # Connection wizard, speed calculations & streaming engine
+  │   ├── cli.rs                    # TerminalCli wizard, multipath streaming loop, speed calculation
   │   ├── cli_widgets.rs            # ANSI progress bars, animated spinners, speedometers, tables
-  │   ├── hotspot.rs                # Hotspot management, internet probe, fast parallel client scan
-  │   ├── discovery/                # BLE Central, GATT client & UDP discovery subsystem
-  │   ├── protocol/                 # Binary frames, CRC32, AES-256-GCM
+  │   ├── hotspot.rs                # Windows Netsh/WinRT Wi-Fi manager, fast client scanner, host choice
+  │   ├── discovery/                # Peer discovery subsystems
+  │   │   ├── bluetooth.rs          # BLE Central scanner & GATT client (btleplug)
+  │   │   ├── mdns.rs               # Local network UDP multicast discovery
+  │   │   └── pairing.rs            # 3-Way handshake manager & session state
+  │   ├── protocol/                 # Wire protocol & cryptography
+  │   │   ├── frame.rs              # Binary packet frames, CRC32 checksums
+  │   │   ├── message.rs            # Typed control messages (ChunkReq, ChunkAck, Capabilities)
+  │   │   └── crypto.rs             # AES-256-GCM AEAD encryption & SHA-256 integrity verification
   │   ├── scheduler/                # Dynamic work-stealing multipath scheduler
-  │   ├── server/                   # Axum HTTP API & WebSocket telemetry
-  │   ├── storage/                  # Adaptive chunker, SQLite WAL database, sparse file writer
-  │   └── transport/                # USB, Wi-Fi Direct, Hotspot transport drivers
+  │   │   ├── dynamic_scheduler.rs  # Asynchronous channel multiplexer & in-flight retry tracker
+  │   │   └── metrics.rs            # Per-channel throughput metrics & telemetry broadcast
+  │   ├── server/                   # Axum HTTP API & WebSocket server
+  │   │   ├── http.rs               # REST route registry, CORS, and ADB auto-reverse loop
+  │   │   ├── api.rs                # REST handlers: /info, /peers, /transfers, /pair, /wifi_caps
+  │   │   └── ws_telemetry.rs       # Real-time WebSocket streaming telemetry
+  │   ├── storage/                  # Disk storage & chunking engine
+  │   │   ├── chunker.rs            # Adaptive file chunker (2MB to 64MB)
+  │   │   ├── sparse_writer.rs      # Direct-offset sparse file disk writer
+  │   │   └── manifest_db.rs        # SQLite WAL transfer history & session persistence
+  │   └── transport/                # Transport abstraction & drivers
+  │       ├── trait.rs              # AsyncTransport trait definition
+  │       ├── tcp.rs                # TCP stream transport wrapper
+  │       └── mock_sim.rs           # Deterministic transport simulator for corruption & failover tests
   │
   ├── android/                      # Native Android Companion Project
   │   ├── app/src/main/
   │   │   ├── AndroidManifest.xml   # Permissions, BLE, Wi-Fi, Share Sheet filters
   │   │   └── java/com/sharedash/app/
-  │   │       ├── MainActivity.kt   # Jetpack Compose UI, Wi-Fi auto-enablement, lifecycle
-  │   │       ├── discovery/        # BLE scanner, GATT server, HotspotManager (band freeing)
-  │   │       ├── server/           # AndroidHttpServer (concurrent FileChannel chunk receiver)
+  │   │       ├── MainActivity.kt   # App lifecycle, Compose navigation, Wi-Fi coordinator
+  │   │       ├── DeviceIdentity.kt # Hardware-backed persistent device UUID
+  │   │       ├── discovery/        # Bluetooth & network discovery
+  │   │       │   ├── BleAdvertiser.kt         # BLE peripheral advertising service
+  │   │       │   ├── BleCommandServer.kt      # GATT server for out-of-band handshake
+  │   │       │   ├── BleDiscoveryManager.kt   # BLE central scanner
+  │   │       │   └── UdpDiscoveryManager.kt   # Local UDP beacon manager
+  │   │       ├── hotspot/          # Wi-Fi Hotspot & P2P management
+  │   │       │   └── HotspotManager.kt        # 5GHz SoftAP & Wi-Fi Direct Group Owner
+  │   │       ├── server/           # Embedded Android HTTP Server
+  │   │       │   └── AndroidHttpServer.kt     # High-throughput FileChannel chunk receiver
   │   │       ├── service/          # Foreground transfer service
-  │   │       ├── storage/          # Android sparse file writer & SHA-256 verifier
-  │   │       └── ui/               # RadarView, Speedometer, PieceGrid, BridgeCards
-  │   └── build.gradle.kts          # Gradle build script
+  │   │       │   └── TransferForegroundService.kt # Lock-holding background transfer service
+  │   │       ├── storage/          # Local Android file storage & verification
+  │   │       │   ├── AndroidSparseWriter.kt   # Direct random-access sparse file writer
+  │   │       │   ├── IntegrityVerifier.kt     # Streaming SHA-256 / CRC32 bit checker
+  │   │       │   └── SettingsManager.kt       # EncryptedSharedPreferences wrapper
+  │   │       └── ui/               # Jetpack Compose UI
+  │   │           ├── theme/        # Neomorphic Cyber-Dark design tokens & colors
+  │   │           ├── screens/      # HomeScreen, PairingScreen, TransferScreen, SettingsScreen
+  │   │           └── components/   # RadarView, Speedometer, PieceGrid, BridgeCards, Dialogs
+  │   └── build.gradle.kts          # Android Gradle build script
   │
   └── tests/                        # Automated Rust Test Suite
       ├── protocol_test.rs          # Frame serialization & CRC32 checks
       ├── multipath_benchmark.rs    # Concurrent channel aggregation tests
       ├── failover_test.rs          # Mid-transfer cable disconnect failovers
       ├── corruption_test.rs        # Bit-flip detection & re-fetch verification
+      ├── test_pc_to_pc.rs          # PC-to-PC optimal host selection tests
       └── test_tether_detection.rs  # Strict USB/RNDIS network adapter isolation tests
 ```
 

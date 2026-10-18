@@ -779,6 +779,7 @@
             <button class="arch-tab-btn active" data-tab="flow">Interactive Architecture</button>
             <button class="arch-tab-btn" data-tab="handshake">3-Way BLE Handshake</button>
             <button class="arch-tab-btn" data-tab="sparse">Sparse Reassembly</button>
+            <button class="arch-tab-btn" data-tab="api">REST & WebSocket API</button>
           </div>
 
           <div class="arch-tab-content active" id="tab-flow">
@@ -852,6 +853,31 @@
               <p>Traditional transfer tools buffer files in RAM or temporary caches. ShareDash pre-allocates the entire file on disk using sparse allocation, allowing chunks arriving out-of-order over USB and Wi-Fi to be written directly to their absolute byte offsets using <code>FileChannel.write(buffer, offset)</code>.</p>
               <div class="code-preview-snippet">
                 <code>fileChannel.write(chunkBuffer, chunkManifest.byteOffset); // Zero intermediate copies</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="arch-tab-content" id="tab-api">
+            <div class="api-endpoints-grid">
+              <div class="api-card">
+                <div class="api-method-pill get">GET</div>
+                <code>/api/v1/info</code>
+                <p>Discovers peer capability, OS version, device name, and listening IP addresses.</p>
+              </div>
+              <div class="api-card">
+                <div class="api-method-pill post">POST</div>
+                <code>/api/v1/pair/request</code>
+                <p>Initiates 3-way handshake with ephemeral PIN and compatibility check.</p>
+              </div>
+              <div class="api-card">
+                <div class="api-method-pill post">POST</div>
+                <code>/api/v1/transfers/chunk</code>
+                <p>Pipelined out-of-order chunk receiver with direct sparse disk write.</p>
+              </div>
+              <div class="api-card">
+                <div class="api-method-pill ws">WS</div>
+                <code>/ws/telemetry</code>
+                <p>Real-time bidirectional WebSocket telemetry feed for gauges, speeds, and chunk bitfields.</p>
               </div>
             </div>
           </div>

@@ -1322,6 +1322,69 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--cyan-bright);
 }
 
+.api-endpoints-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.api-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.api-card:hover {
+  border-color: rgba(6, 182, 212, 0.4);
+  transform: translateY(-2px);
+}
+
+.api-card code {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--cyan-bright);
+  font-weight: 700;
+}
+
+.api-card p {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.api-method-pill {
+  align-self: flex-start;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.api-method-pill.get {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--emerald-bright);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.api-method-pill.post {
+  background: rgba(6, 182, 212, 0.15);
+  color: var(--cyan-bright);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.api-method-pill.ws {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber-bright);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
 /* --- Section 6: Terminal Emulator --- */
 .terminal-container {
   max-width: 960px;

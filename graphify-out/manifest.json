@@ -1,0 +1,638 @@
+{
+  "Cargo.toml": {
+    "mtime": 1789311931.0073075,
+    "seen": 1792292743.5985532,
+    "ast_hash": "69d001cc6989ea87fd379afb99073688",
+    "semantic_hash": "69d001cc6989ea87fd379afb99073688"
+  },
+  "android/app/build.gradle.kts": {
+    "mtime": 1786903175.4984374,
+    "seen": 1792292743.5985599,
+    "ast_hash": "79e11f3dda2335b4c49ac6a97104129d",
+    "semantic_hash": "79e11f3dda2335b4c49ac6a97104129d"
+  },
+  "android/app/src/main/java/com/sharedash/app/MainActivity.kt": {
+    "mtime": 1790344380.272333,
+    "seen": 1792292743.5985625,
+    "ast_hash": "b6089d82dfd6cbf7144b0c39a109c1b4",
+    "semantic_hash": "b6089d82dfd6cbf7144b0c39a109c1b4"
+  },
+  "android/app/src/main/java/com/sharedash/app/ShareDashApplication.kt": {
+    "mtime": 1786903183.9125223,
+    "seen": 1792292743.598564,
+    "ast_hash": "ba30a77642de1e647bf3f72690cb8ac6",
+    "semantic_hash": "ba30a77642de1e647bf3f72690cb8ac6"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/AndroidPairingCoordinator.kt": {
+    "mtime": 1787023862.5992675,
+    "seen": 1792292743.598565,
+    "ast_hash": "d5f46ae7ee203235e50deab1bcf05931",
+    "semantic_hash": "d5f46ae7ee203235e50deab1bcf05931"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/BleCommandServer.kt": {
+    "mtime": 1787514476.4786942,
+    "seen": 1792292743.5985663,
+    "ast_hash": "b34b6d8b802054ae3f753cedd78a1b8d",
+    "semantic_hash": "b34b6d8b802054ae3f753cedd78a1b8d"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/BleDiscoveryManager.kt": {
+    "mtime": 1787141076.9423435,
+    "seen": 1792292743.5985677,
+    "ast_hash": "6eb5f663c51c0e994f3439f26a3f2a76",
+    "semantic_hash": "6eb5f663c51c0e994f3439f26a3f2a76"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/BluetoothRfcommServer.kt": {
+    "mtime": 1787514458.2884476,
+    "seen": 1792292743.5985687,
+    "ast_hash": "d5bc0b6801b1b24674bc8b4cced1df61",
+    "semantic_hash": "d5bc0b6801b1b24674bc8b4cced1df61"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/HotspotManager.kt": {
+    "mtime": 1789492386.233225,
+    "seen": 1792292743.5985694,
+    "ast_hash": "0f289aef2a206ba2d6c4e0a499ae60c2",
+    "semantic_hash": "0f289aef2a206ba2d6c4e0a499ae60c2"
+  },
+  "android/app/src/main/java/com/sharedash/app/discovery/UdpDiscoveryManager.kt": {
+    "mtime": 1790279418.2617564,
+    "seen": 1792292743.5985706,
+    "ast_hash": "0c066d9cea9e305b1454fa8d627cfc17",
+    "semantic_hash": "0c066d9cea9e305b1454fa8d627cfc17"
+  },
+  "android/app/src/main/java/com/sharedash/app/model/Models.kt": {
+    "mtime": 1790279365.4107163,
+    "seen": 1792292743.5985715,
+    "ast_hash": "351a2bb1347cab9c8a43c759de71dc1e",
+    "semantic_hash": "351a2bb1347cab9c8a43c759de71dc1e"
+  },
+  "android/app/src/main/java/com/sharedash/app/model/Protocol.kt": {
+    "mtime": 1786981701.8354707,
+    "seen": 1792292743.598573,
+    "ast_hash": "dde6eb3ad025ab752e6033d6448540f2",
+    "semantic_hash": "dde6eb3ad025ab752e6033d6448540f2"
+  },
+  "android/app/src/main/java/com/sharedash/app/server/AndroidHttpServer.kt": {
+    "mtime": 1789399098.2870102,
+    "seen": 1792292743.5985742,
+    "ast_hash": "e8156e671ba302efb566d69e5fa8dd15",
+    "semantic_hash": "e8156e671ba302efb566d69e5fa8dd15"
+  },
+  "android/app/src/main/java/com/sharedash/app/service/TransferForegroundService.kt": {
+    "mtime": 1787931030.4330833,
+    "seen": 1792292743.598575,
+    "ast_hash": "e1887369307d54f65b23e9602a8fe73b",
+    "semantic_hash": "e1887369307d54f65b23e9602a8fe73b"
+  },
+  "android/app/src/main/java/com/sharedash/app/storage/AndroidSparseFileWriter.kt": {
+    "mtime": 1786903318.6546166,
+    "seen": 1792292743.598576,
+    "ast_hash": "56ce712f89d7650c4211ea41118ae12f",
+    "semantic_hash": "56ce712f89d7650c4211ea41118ae12f"
+  },
+  "android/app/src/main/java/com/sharedash/app/storage/SettingsManager.kt": {
+    "mtime": 1789398967.73285,
+    "seen": 1792292743.5985775,
+    "ast_hash": "bfe49cdac7a32b9f5b226570d709228d",
+    "semantic_hash": "bfe49cdac7a32b9f5b226570d709228d"
+  },
+  "android/app/src/main/java/com/sharedash/app/storage/TransferHistoryManager.kt": {
+    "mtime": 1789317063.3709972,
+    "seen": 1792292743.5985785,
+    "ast_hash": "1fc6da0d00e06bdaddb39fc8477984d0",
+    "semantic_hash": "1fc6da0d00e06bdaddb39fc8477984d0"
+  },
+  "android/app/src/main/java/com/sharedash/app/transport/AndroidTransportManager.kt": {
+    "mtime": 1786981933.8591216,
+    "seen": 1792292743.5985794,
+    "ast_hash": "9906a079ae885f3f5846808db9dcb530",
+    "semantic_hash": "9906a079ae885f3f5846808db9dcb530"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/BottomPillBar.kt": {
+    "mtime": 1790280023.7860584,
+    "seen": 1792292743.5985806,
+    "ast_hash": "5690c0333eb4ff370111a639cadd627e",
+    "semantic_hash": "5690c0333eb4ff370111a639cadd627e"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/BridgeCards.kt": {
+    "mtime": 1789315598.6350927,
+    "seen": 1792292743.5985816,
+    "ast_hash": "fd04b939d91ac1ee10576b4292a63f58",
+    "semantic_hash": "fd04b939d91ac1ee10576b4292a63f58"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/ConnectingDialog.kt": {
+    "mtime": 1790280061.4349904,
+    "seen": 1792292743.5985823,
+    "ast_hash": "eeabd9b3fb2083529ab98a391406e803",
+    "semantic_hash": "eeabd9b3fb2083529ab98a391406e803"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/PieceGrid.kt": {
+    "mtime": 1787514853.6147952,
+    "seen": 1792292743.5985835,
+    "ast_hash": "cc4ab6a3ff8c928df3035a115a0b9233",
+    "semantic_hash": "cc4ab6a3ff8c928df3035a115a0b9233"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/RadarView.kt": {
+    "mtime": 1786903221.2443469,
+    "seen": 1792292743.598585,
+    "ast_hash": "f908d9fde307c6e97bdec8ce85704741",
+    "semantic_hash": "f908d9fde307c6e97bdec8ce85704741"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/SpeedometerGauges.kt": {
+    "mtime": 1787030074.2903693,
+    "seen": 1792292743.598586,
+    "ast_hash": "c4706ee1c832d940cce20ff6eddb83d7",
+    "semantic_hash": "c4706ee1c832d940cce20ff6eddb83d7"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/UsbPromptDialog.kt": {
+    "mtime": 1787077793.7965865,
+    "seen": 1792292743.598587,
+    "ast_hash": "dcd34f41d7f9041e4679b3b99f2e068a",
+    "semantic_hash": "dcd34f41d7f9041e4679b3b99f2e068a"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/WifiDisconnectPromptDialog.kt": {
+    "mtime": 1789492428.2072284,
+    "seen": 1792292743.598588,
+    "ast_hash": "0fd0d92b3b022990c9977ebb99529fe1",
+    "semantic_hash": "0fd0d92b3b022990c9977ebb99529fe1"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/components/WirelessWarningDialog.kt": {
+    "mtime": 1787471397.95727,
+    "seen": 1792292743.5985892,
+    "ast_hash": "c7afdf0783953471b4a22d8f73a318ed",
+    "semantic_hash": "c7afdf0783953471b4a22d8f73a318ed"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/ConnectedScreen.kt": {
+    "mtime": 1787548747.4735987,
+    "seen": 1792292743.5985901,
+    "ast_hash": "026c7d1d13beef09451898a71cb269fa",
+    "semantic_hash": "026c7d1d13beef09451898a71cb269fa"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/DiscoveryScreen.kt": {
+    "mtime": 1790277490.745954,
+    "seen": 1792292743.598591,
+    "ast_hash": "c265ddd4da5f96d0bb4b5cc35af4827b",
+    "semantic_hash": "c265ddd4da5f96d0bb4b5cc35af4827b"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/HomeScreen.kt": {
+    "mtime": 1790298854.0487375,
+    "seen": 1792292743.598592,
+    "ast_hash": "63246bcd6e5c61aa86d2f1be58576d5f",
+    "semantic_hash": "63246bcd6e5c61aa86d2f1be58576d5f"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/PairingScreen.kt": {
+    "mtime": 1789399140.1415133,
+    "seen": 1792292743.598593,
+    "ast_hash": "4b8c6255175046f47c261aeb1b718014",
+    "semantic_hash": "4b8c6255175046f47c261aeb1b718014"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/SettingsScreen.kt": {
+    "mtime": 1789494393.3245332,
+    "seen": 1792292743.598594,
+    "ast_hash": "224654356bc4b55222bbebf7e1b38b1c",
+    "semantic_hash": "224654356bc4b55222bbebf7e1b38b1c"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/TransferHistoryScreen.kt": {
+    "mtime": 1789411094.8665,
+    "seen": 1792292743.598595,
+    "ast_hash": "739074e87182ba9ed0c85e30081b79c1",
+    "semantic_hash": "739074e87182ba9ed0c85e30081b79c1"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/TransferScreen.kt": {
+    "mtime": 1789410845.312888,
+    "seen": 1792292743.5985959,
+    "ast_hash": "291eac201389c0ecbb6f6e09b1b18e3e",
+    "semantic_hash": "291eac201389c0ecbb6f6e09b1b18e3e"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/screens/UsbFirstScreen.kt": {
+    "mtime": 1790277040.265796,
+    "seen": 1792292743.598597,
+    "ast_hash": "7dd0356c5d3a3acaef14aa213215cfe3",
+    "semantic_hash": "7dd0356c5d3a3acaef14aa213215cfe3"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/theme/Color.kt": {
+    "mtime": 1789411111.8533337,
+    "seen": 1792292743.598598,
+    "ast_hash": "c1618a42641c6bc61704b47892ba0d82",
+    "semantic_hash": "c1618a42641c6bc61704b47892ba0d82"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/theme/Neomorphic.kt": {
+    "mtime": 1789399007.7364721,
+    "seen": 1792292743.598599,
+    "ast_hash": "73f8853d31b328eb626c9e6e591d7fd7",
+    "semantic_hash": "73f8853d31b328eb626c9e6e591d7fd7"
+  },
+  "android/app/src/main/java/com/sharedash/app/ui/theme/Theme.kt": {
+    "mtime": 1789399016.9863706,
+    "seen": 1792292743.5986,
+    "ast_hash": "71bdabf56cfef111e19f2a8b5c68417c",
+    "semantic_hash": "71bdabf56cfef111e19f2a8b5c68417c"
+  },
+  "android/build.gradle.kts": {
+    "mtime": 1786903162.0917573,
+    "seen": 1792292743.5986006,
+    "ast_hash": "0d7586f63bb33a6584f40641048a1572",
+    "semantic_hash": "0d7586f63bb33a6584f40641048a1572"
+  },
+  "android/settings.gradle.kts": {
+    "mtime": 1786903158.3737652,
+    "seen": 1792292743.5986018,
+    "ast_hash": "79a9a7497c140f22a56492bf72c2c9a2",
+    "semantic_hash": "79a9a7497c140f22a56492bf72c2c9a2"
+  },
+  "docs/app.js": {
+    "mtime": 1792274432.1435695,
+    "seen": 1792292743.5986028,
+    "ast_hash": "88ba31823cf21de59ae9197f6bb3d69a",
+    "semantic_hash": "88ba31823cf21de59ae9197f6bb3d69a"
+  },
+  "scripts/benchmark_suite.py": {
+    "mtime": 1787471761.5424092,
+    "seen": 1792292743.598604,
+    "ast_hash": "9bcdf32143b0b7ffd3ae815729026890",
+    "semantic_hash": "9bcdf32143b0b7ffd3ae815729026890"
+  },
+  "scripts/evaluate_multipath.py": {
+    "mtime": 1787471768.4305608,
+    "seen": 1792292743.5986054,
+    "ast_hash": "33d1a69c49836ea70d2cf23a94bd788f",
+    "semantic_hash": "33d1a69c49836ea70d2cf23a94bd788f"
+  },
+  "scripts/evaluate_multipath_model.py": {
+    "mtime": 1787471774.708622,
+    "seen": 1792292743.5986066,
+    "ast_hash": "44e4bf3a2ada22372d40a76ee026cac2",
+    "semantic_hash": "44e4bf3a2ada22372d40a76ee026cac2"
+  },
+  "scripts/full_matrix_optimizer.py": {
+    "mtime": 1787471780.3416457,
+    "seen": 1792292743.5986116,
+    "ast_hash": "129107ed19baf3fce00f18ba5a0fc662",
+    "semantic_hash": "129107ed19baf3fce00f18ba5a0fc662"
+  },
+  "scripts/generate_test_file.py": {
+    "mtime": 1787471753.1145904,
+    "seen": 1792292743.5986128,
+    "ast_hash": "a6deeb7810d950059b8b60788269f2f0",
+    "semantic_hash": "a6deeb7810d950059b8b60788269f2f0"
+  },
+  "scripts/run_benchmarks_live.py": {
+    "mtime": 1787471786.060578,
+    "seen": 1792292743.598614,
+    "ast_hash": "6c8da1f00f869ddf358831e5235d40d9",
+    "semantic_hash": "6c8da1f00f869ddf358831e5235d40d9"
+  },
+  "src/bin/bt_diag.rs": {
+    "mtime": 1787112838.5629718,
+    "seen": 1792292743.5986147,
+    "ast_hash": "c99082b475209aa66a5fb5e0fb9db4cf",
+    "semantic_hash": "c99082b475209aa66a5fb5e0fb9db4cf"
+  },
+  "src/cli.rs": {
+    "mtime": 1790279629.418286,
+    "seen": 1792292743.598616,
+    "ast_hash": "ad17cfd5939ffa59f504f0e21a2467ad",
+    "semantic_hash": "ad17cfd5939ffa59f504f0e21a2467ad"
+  },
+  "src/cli_widgets.rs": {
+    "mtime": 1787519683.3726044,
+    "seen": 1792292743.5986168,
+    "ast_hash": "0578ebee9141f65f8d4a5221b67543b7",
+    "semantic_hash": "0578ebee9141f65f8d4a5221b67543b7"
+  },
+  "src/discovery/bluetooth.rs": {
+    "mtime": 1789312010.568922,
+    "seen": 1792292743.5986178,
+    "ast_hash": "99614d389f9b2fe45c448da28eec896c",
+    "semantic_hash": "99614d389f9b2fe45c448da28eec896c"
+  },
+  "src/discovery/mdns.rs": {
+    "mtime": 1787548762.2058237,
+    "seen": 1792292743.598619,
+    "ast_hash": "2faa6ca8e2b0910c8b38c4e072812911",
+    "semantic_hash": "2faa6ca8e2b0910c8b38c4e072812911"
+  },
+  "src/discovery/mod.rs": {
+    "mtime": 1789312063.3867362,
+    "seen": 1792292743.5986197,
+    "ast_hash": "b5305ec72fc79a0eb8248644f3ff4440",
+    "semantic_hash": "b5305ec72fc79a0eb8248644f3ff4440"
+  },
+  "src/discovery/pairing.rs": {
+    "mtime": 1786903428.7515762,
+    "seen": 1792292743.5986207,
+    "ast_hash": "389136552ff9e60ef14e0fb7296298ba",
+    "semantic_hash": "389136552ff9e60ef14e0fb7296298ba"
+  },
+  "src/hotspot.rs": {
+    "mtime": 1789313073.8531995,
+    "seen": 1792292743.5986216,
+    "ast_hash": "ef09f5b8d49986b0a844b3407462cc95",
+    "semantic_hash": "ef09f5b8d49986b0a844b3407462cc95"
+  },
+  "src/lib.rs": {
+    "mtime": 1787069074.3606303,
+    "seen": 1792292743.5986228,
+    "ast_hash": "61d7138fe370ceb30039e09b8f378799",
+    "semantic_hash": "61d7138fe370ceb30039e09b8f378799"
+  },
+  "src/main.rs": {
+    "mtime": 1787772003.1771708,
+    "seen": 1792292743.5986235,
+    "ast_hash": "682ab802b909cbaf8ac36983ad658ffd",
+    "semantic_hash": "682ab802b909cbaf8ac36983ad658ffd"
+  },
+  "src/protocol/crypto.rs": {
+    "mtime": 1786903423.9211187,
+    "seen": 1792292743.5986245,
+    "ast_hash": "b7ea7f31bc7445de1add5deeaf125cdf",
+    "semantic_hash": "b7ea7f31bc7445de1add5deeaf125cdf"
+  },
+  "src/protocol/frame.rs": {
+    "mtime": 1786980693.706467,
+    "seen": 1792292743.598626,
+    "ast_hash": "b2a6cac69797c7c13f53d48af9d2bc07",
+    "semantic_hash": "b2a6cac69797c7c13f53d48af9d2bc07"
+  },
+  "src/protocol/handshake.rs": {
+    "mtime": 1786980948.3567498,
+    "seen": 1792292743.5986269,
+    "ast_hash": "2c0f9ce39fbf32df17319b0ddd4f75cb",
+    "semantic_hash": "2c0f9ce39fbf32df17319b0ddd4f75cb"
+  },
+  "src/protocol/message.rs": {
+    "mtime": 1786981914.4784732,
+    "seen": 1792292743.5986276,
+    "ast_hash": "0d004e79ed79b46eed678489d80a20bc",
+    "semantic_hash": "0d004e79ed79b46eed678489d80a20bc"
+  },
+  "src/protocol/mod.rs": {
+    "mtime": 1786980948.4587345,
+    "seen": 1792292743.5986285,
+    "ast_hash": "f27f2c9784e6e8682294c84f5361fcce",
+    "semantic_hash": "f27f2c9784e6e8682294c84f5361fcce"
+  },
+  "src/scheduler/dynamic_scheduler.rs": {
+    "mtime": 1786902125.19085,
+    "seen": 1792292743.5986297,
+    "ast_hash": "d95853f4827488cef1d433946a775093",
+    "semantic_hash": "d95853f4827488cef1d433946a775093"
+  },
+  "src/scheduler/metrics.rs": {
+    "mtime": 1786903443.922701,
+    "seen": 1792292743.5986307,
+    "ast_hash": "4348a5ac1c1d66830726b868af919716",
+    "semantic_hash": "4348a5ac1c1d66830726b868af919716"
+  },
+  "src/scheduler/mod.rs": {
+    "mtime": 1786902046.5316224,
+    "seen": 1792292743.5986316,
+    "ast_hash": "0984460f8e47258f846f1ad9a84c3070",
+    "semantic_hash": "0984460f8e47258f846f1ad9a84c3070"
+  },
+  "src/scheduler/pool.rs": {
+    "mtime": 1786901851.9913092,
+    "seen": 1792292743.5986328,
+    "ast_hash": "abe545df6584bd9f771998a5dda73660",
+    "semantic_hash": "abe545df6584bd9f771998a5dda73660"
+  },
+  "src/server/api.rs": {
+    "mtime": 1790301876.2374268,
+    "seen": 1792292743.5986338,
+    "ast_hash": "9be37f582804cf43624bcdb7122bef28",
+    "semantic_hash": "9be37f582804cf43624bcdb7122bef28"
+  },
+  "src/server/http.rs": {
+    "mtime": 1790278279.221324,
+    "seen": 1792292743.5986347,
+    "ast_hash": "61c217f24e84b7beb5379bd5de654f3c",
+    "semantic_hash": "61c217f24e84b7beb5379bd5de654f3c"
+  },
+  "src/server/mod.rs": {
+    "mtime": 1786901879.8317957,
+    "seen": 1792292743.5986357,
+    "ast_hash": "e099775b3feaab0e1013a1ec59d27b54",
+    "semantic_hash": "e099775b3feaab0e1013a1ec59d27b54"
+  },
+  "src/server/ws_telemetry.rs": {
+    "mtime": 1786903373.9215076,
+    "seen": 1792292743.5986369,
+    "ast_hash": "4b1cba7ac5ec8f3ec8a492a97889e882",
+    "semantic_hash": "4b1cba7ac5ec8f3ec8a492a97889e882"
+  },
+  "src/storage/chunker.rs": {
+    "mtime": 1786902090.5148242,
+    "seen": 1792292743.5986378,
+    "ast_hash": "0759b863d8469d00ca0f438bfb1e84c2",
+    "semantic_hash": "0759b863d8469d00ca0f438bfb1e84c2"
+  },
+  "src/storage/integrity.rs": {
+    "mtime": 1786901984.0633006,
+    "seen": 1792292743.5986388,
+    "ast_hash": "bb093f603e85fdf9820005cd54dcbf85",
+    "semantic_hash": "bb093f603e85fdf9820005cd54dcbf85"
+  },
+  "src/storage/manifest_db.rs": {
+    "mtime": 1786903457.3391035,
+    "seen": 1792292743.59864,
+    "ast_hash": "b8254d653b4c36cfeea752099c1e7655",
+    "semantic_hash": "b8254d653b4c36cfeea752099c1e7655"
+  },
+  "src/storage/mod.rs": {
+    "mtime": 1786901786.9509418,
+    "seen": 1792292743.598641,
+    "ast_hash": "f23b10f730716514bdf4dda403ffff86",
+    "semantic_hash": "f23b10f730716514bdf4dda403ffff86"
+  },
+  "src/storage/sparse_writer.rs": {
+    "mtime": 1786901801.0573487,
+    "seen": 1792292743.5986419,
+    "ast_hash": "350be1215fddd216e3d3e629d9543a80",
+    "semantic_hash": "350be1215fddd216e3d3e629d9543a80"
+  },
+  "src/transport/lan.rs": {
+    "mtime": 1786980613.0260363,
+    "seen": 1792292743.5986428,
+    "ast_hash": "ed3be4671fe4afe8729eacdc77fa0f78",
+    "semantic_hash": "ed3be4671fe4afe8729eacdc77fa0f78"
+  },
+  "src/transport/mock_sim.rs": {
+    "mtime": 1786902125.1898491,
+    "seen": 1792292743.598644,
+    "ast_hash": "45f4b418cb4b75933be9cb2eb9d609b5",
+    "semantic_hash": "45f4b418cb4b75933be9cb2eb9d609b5"
+  },
+  "src/transport/mod.rs": {
+    "mtime": 1786981188.3281531,
+    "seen": 1792292743.598645,
+    "ast_hash": "cc5de8248f2bc3411073905811814ee6",
+    "semantic_hash": "cc5de8248f2bc3411073905811814ee6"
+  },
+  "src/transport/quic_inet.rs": {
+    "mtime": 1786980635.5510695,
+    "seen": 1792292743.598646,
+    "ast_hash": "324f54ecca6dc2c26734f82050deb1ba",
+    "semantic_hash": "324f54ecca6dc2c26734f82050deb1ba"
+  },
+  "src/transport/trait.rs": {
+    "mtime": 1786903385.0613213,
+    "seen": 1792292743.598647,
+    "ast_hash": "34283a228a1ddf08e72db328003c64a3",
+    "semantic_hash": "34283a228a1ddf08e72db328003c64a3"
+  },
+  "src/transport/usb.rs": {
+    "mtime": 1786980653.892102,
+    "seen": 1792292743.5986478,
+    "ast_hash": "be132d6f549fe54eb46d0adc796f1f12",
+    "semantic_hash": "be132d6f549fe54eb46d0adc796f1f12"
+  },
+  "src/transport/wifi_direct.rs": {
+    "mtime": 1786981182.6195323,
+    "seen": 1792292743.598649,
+    "ast_hash": "cb4470d43281996221959f223e5e0760",
+    "semantic_hash": "cb4470d43281996221959f223e5e0760"
+  },
+  "tests/corruption_test.rs": {
+    "mtime": 1786901996.3452272,
+    "seen": 1792292743.5986502,
+    "ast_hash": "b86246b945ab6a6b298c63e4de62ba78",
+    "semantic_hash": "b86246b945ab6a6b298c63e4de62ba78"
+  },
+  "tests/failover_test.rs": {
+    "mtime": 1786902073.8855777,
+    "seen": 1792292743.5986512,
+    "ast_hash": "ed04ec5c8b3d3204ab6c802b91ee8318",
+    "semantic_hash": "ed04ec5c8b3d3204ab6c802b91ee8318"
+  },
+  "tests/multipath_benchmark.rs": {
+    "mtime": 1786901977.9844584,
+    "seen": 1792292743.5986521,
+    "ast_hash": "bb4f679dc4cfcae2d84dc6ab891564a2",
+    "semantic_hash": "bb4f679dc4cfcae2d84dc6ab891564a2"
+  },
+  "tests/protocol_test.rs": {
+    "mtime": 1786903394.6255443,
+    "seen": 1792292743.598653,
+    "ast_hash": "03e4f4597fcf03e364b3c509c2263969",
+    "semantic_hash": "03e4f4597fcf03e364b3c509c2263969"
+  },
+  "tests/test_pc_to_pc.rs": {
+    "mtime": 1789312241.334219,
+    "seen": 1792292743.5986557,
+    "ast_hash": "9c0125f18ec485e2d2d6ee43e84d9e39",
+    "semantic_hash": "9c0125f18ec485e2d2d6ee43e84d9e39"
+  },
+  "tests/test_tether_detection.rs": {
+    "mtime": 1787243033.2201378,
+    "seen": 1792292743.5986567,
+    "ast_hash": "1ec1774d091d7250e63260dbff65cace",
+    "semantic_hash": "1ec1774d091d7250e63260dbff65cace"
+  },
+  ".github/ISSUE_TEMPLATE/bug_report.yml": {
+    "mtime": 1787928896.263327,
+    "seen": 1792294040.511809,
+    "ast_hash": "d43d31bf5ac9adaa70203f705eda2b0f",
+    "semantic_hash": ""
+  },
+  ".github/ISSUE_TEMPLATE/config.yml": {
+    "mtime": 1787928902.0497777,
+    "seen": 1792294040.5118146,
+    "ast_hash": "4cbda1a6dd389c68cb1c204f5d63c523",
+    "semantic_hash": ""
+  },
+  ".github/ISSUE_TEMPLATE/feature_request.yml": {
+    "mtime": 1787928899.0061338,
+    "seen": 1792294040.5118182,
+    "ast_hash": "3077378bfc8a936a0ab12fc84eda00c5",
+    "semantic_hash": ""
+  },
+  ".github/PULL_REQUEST_TEMPLATE.md": {
+    "mtime": 1787928905.5054183,
+    "seen": 1792294040.511821,
+    "ast_hash": "2fb9f5d9f1c3289bbb2806e31709c6a5",
+    "semantic_hash": ""
+  },
+  ".github/dependabot.yml": {
+    "mtime": 1787928889.70511,
+    "seen": 1792294040.5118237,
+    "ast_hash": "23ba43843a60577d3b1f7747a9b1e0df",
+    "semantic_hash": ""
+  },
+  ".github/workflows/ci.yml": {
+    "mtime": 1787928883.0653849,
+    "seen": 1792294040.511826,
+    "ast_hash": "4b0a41a49cfcb9208a1c658cf21fdf24",
+    "semantic_hash": ""
+  },
+  ".github/workflows/pages.yml": {
+    "mtime": 1792274440.199494,
+    "seen": 1792294040.5118284,
+    "ast_hash": "edfecc35ab80aa373b21a9f05dee9f72",
+    "semantic_hash": ""
+  },
+  ".github/workflows/release.yml": {
+    "mtime": 1787928886.3706973,
+    "seen": 1792294040.511831,
+    "ast_hash": "e7efb6f60ae00592cb197fc35090e0f4",
+    "semantic_hash": ""
+  },
+  "CODE_OF_CONDUCT.md": {
+    "mtime": 1787928916.478225,
+    "seen": 1792294040.5118337,
+    "ast_hash": "755c5c4804785210917d8648e0193448",
+    "semantic_hash": ""
+  },
+  "CONTRIBUTING.md": {
+    "mtime": 1787928911.987803,
+    "seen": 1792294040.5118358,
+    "ast_hash": "bb81e8ae56c26edeb176aa479cf82d2b",
+    "semantic_hash": ""
+  },
+  "HOW_IT_WORKS.md": {
+    "mtime": 1787499394.9993136,
+    "seen": 1792294040.5118384,
+    "ast_hash": "ef08e0c0dd3c3fc1d00d636225ccbcc4",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1792293973.6433775,
+    "seen": 1792294040.5118408,
+    "ast_hash": "152845abdbfdfdcc0f6358c2de28b842",
+    "semantic_hash": ""
+  },
+  "ROADMAP.md": {
+    "mtime": 1787928932.5509675,
+    "seen": 1792294040.5118437,
+    "ast_hash": "6bd44163c90198f974efa4e72578ce63",
+    "semantic_hash": ""
+  },
+  "SECURITY.md": {
+    "mtime": 1787928920.0577483,
+    "seen": 1792294040.5118463,
+    "ast_hash": "cf7d5e51a715bf8cfa9a1e9e894ddf6c",
+    "semantic_hash": ""
+  },
+  "docs/index.html": {
+    "mtime": 1792293999.102121,
+    "seen": 1792294040.5118492,
+    "ast_hash": "7e717ef504bddedcab0797e0c7b90bab",
+    "semantic_hash": ""
+  },
+  "docs/robots.txt": {
+    "mtime": 1792274199.9600005,
+    "seen": 1792294040.5118513,
+    "ast_hash": "1c5791b30fbdefc225a1bf4ff39d483c",
+    "semantic_hash": ""
+  },
+  "scripts/README.md": {
+    "mtime": 1787471791.494857,
+    "seen": 1792294040.511854,
+    "ast_hash": "7e2e660002a9f81ffb6169a3cd858508",
+    "semantic_hash": ""
+  },
+  "docs/favicon.svg": {
+    "mtime": 1792274192.9336326,
+    "seen": 1792294040.5118563,
+    "ast_hash": "24dd9da4ecf2dbea4416abfa0996d6b7",
+    "semantic_hash": ""
+  }
+}
