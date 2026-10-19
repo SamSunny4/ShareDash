@@ -44,6 +44,9 @@ public class MultipathSender
 
     public event Action<TransferResult>? OnCompleted;
     public event Action<string>? OnFailed;
+    public event Action<int>? OnTotalChunksDetermined;
+    public event Action<uint>? OnChunkStarted;
+    public event Action<uint, bool>? OnChunkCompleted;
 
     public MultipathSender()
     {
@@ -152,6 +155,7 @@ public class MultipathSender
         }
 
         uint totalChunks = chunkId;
+        OnTotalChunksDetermined?.Invoke((int)totalChunks);
         long totalBytesTransferred = 0;
         var stopwatch = Stopwatch.StartNew();
 
@@ -200,6 +204,7 @@ public class MultipathSender
 
                     while (!ct.IsCancellationRequested && chunks.TryDequeue(out var chunk))
                     {
+                        OnChunkStarted?.Invoke(chunk.ChunkId);
                         stream.Seek(chunk.Offset, SeekOrigin.Begin);
                         int read = await stream.ReadAsync(chunkBuffer.AsMemory(0, chunk.Length), ct);
                         if (read <= 0) break;
@@ -223,6 +228,7 @@ public class MultipathSender
                         if (response.IsSuccessStatusCode)
                         {
                             Interlocked.Add(ref totalBytesTransferred, read);
+                            OnChunkCompleted?.Invoke(chunk.ChunkId, target.IsUsb);
                             lock (channelMetrics)
                             {
                                 if (channelMetrics.TryGetValue(target.Name, out var m))

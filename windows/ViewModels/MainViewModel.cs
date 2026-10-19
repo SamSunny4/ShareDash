@@ -149,7 +149,43 @@ public class MainViewModel : ViewModelBase
     public bool IsUsbPlugged
     {
         get => _isUsbPlugged;
-        set => SetField(ref _isUsbPlugged, value);
+        set
+        {
+            if (SetField(ref _isUsbPlugged, value))
+            {
+                OnPropertyChanged(nameof(ConnectionMethodText));
+            }
+        }
+    }
+
+    private bool _isUsbPromptOpen;
+    public bool IsUsbPromptOpen
+    {
+        get => _isUsbPromptOpen;
+        set => SetField(ref _isUsbPromptOpen, value);
+    }
+
+    private ShareDashPeerItem? _pendingTargetDevice;
+    public ShareDashPeerItem? PendingTargetDevice
+    {
+        get => _pendingTargetDevice;
+        set => SetField(ref _pendingTargetDevice, value);
+    }
+
+    public string ConnectionMethodText
+    {
+        get
+        {
+            if (ActiveDevice == null) return "Wi-Fi Direct";
+            bool hasUsb = ActiveDevice.HasUsb || IsUsbPlugged || IsUsbCableConnected;
+            bool hasWifi = ActiveDevice.HasWifi || !hasUsb;
+
+            if (hasUsb && hasWifi)
+                return "⚡ USB Fast-Path + 📶 Wi-Fi Direct";
+            if (hasUsb)
+                return "⚡ USB 3.x Cable Fast-Path (3.2 Gbps)";
+            return "📶 Wi-Fi Direct (5GHz Zero-LAN)";
+        }
     }
     #endregion
 
@@ -223,6 +259,71 @@ public class MainViewModel : ViewModelBase
         get => _latestResult;
         set => SetField(ref _latestResult, value);
     }
+
+    public ObservableCollection<ChunkVisualItem> VisualChunks { get; } = new();
+
+    private int _totalChunksCount;
+    public int TotalChunksCount
+    {
+        get => _totalChunksCount;
+        set => SetField(ref _totalChunksCount, value);
+    }
+
+    private int _completedChunksCount;
+    public int CompletedChunksCount
+    {
+        get => _completedChunksCount;
+        set => SetField(ref _completedChunksCount, value);
+    }
+
+    private int _usbChunksCount;
+    public int UsbChunksCount
+    {
+        get => _usbChunksCount;
+        set => SetField(ref _usbChunksCount, value);
+    }
+
+    private int _wifiChunksCount;
+    public int WifiChunksCount
+    {
+        get => _wifiChunksCount;
+        set => SetField(ref _wifiChunksCount, value);
+    }
+
+    private int _inFlightChunksCount;
+    public int InFlightChunksCount
+    {
+        get => _inFlightChunksCount;
+        set => SetField(ref _inFlightChunksCount, value);
+    }
+
+    private int _pendingChunksCount;
+    public int PendingChunksCount
+    {
+        get => _pendingChunksCount;
+        set => SetField(ref _pendingChunksCount, value);
+    }
+
+    private double _usbProgress;
+    public double UsbProgress
+    {
+        get => _usbProgress;
+        set => SetField(ref _usbProgress, value);
+    }
+
+    private double _wifiProgress;
+    public double WifiProgress
+    {
+        get => _wifiProgress;
+        set => SetField(ref _wifiProgress, value);
+    }
+
+    private double _peakSpeedMbS;
+    public double PeakSpeedMbS
+    {
+        get => _peakSpeedMbS;
+        set => SetField(ref _peakSpeedMbS, value);
+    }
     #endregion
 
     #region Commands
@@ -232,6 +333,9 @@ public class MainViewModel : ViewModelBase
     public ICommand SelectFolderCommand { get; }
     public ICommand CancelTransferCommand { get; }
     public ICommand BackToScanningCommand { get; }
+    public ICommand ContinueWithWifiCommand { get; }
+    public ICommand CheckUsbAndConnectCommand { get; }
+    public ICommand DismissUsbPromptCommand { get; }
     #endregion
 
     public MainViewModel()
@@ -243,6 +347,25 @@ public class MainViewModel : ViewModelBase
         CancelTransferCommand = new RelayCommand(CancelTransfer);
         BackToScanningCommand = new RelayCommand(BackToScanning);
 
+        ContinueWithWifiCommand = new RelayCommand(_ =>
+        {
+            IsUsbPromptOpen = false;
+            ProceedConnect(PendingTargetDevice);
+        });
+
+        CheckUsbAndConnectCommand = new RelayCommand(async _ =>
+        {
+            IsUsbPromptOpen = false;
+            await PollDevicesAsync();
+            ProceedConnect(PendingTargetDevice);
+        });
+
+        DismissUsbPromptCommand = new RelayCommand(_ =>
+        {
+            IsUsbPromptOpen = false;
+            PendingTargetDevice = null;
+        });
+
         // Multipath progress wire
         _sender.OnProgress += (pct, speedMbS, speedGbps, elapsed, eta, channels) =>
         {
@@ -251,6 +374,10 @@ public class MainViewModel : ViewModelBase
                 ProgressPercentage = Math.Round(pct * 100, 1);
                 CurrentSpeedMbS = Math.Round(speedMbS, 1);
                 CurrentSpeedGbps = Math.Round(speedGbps, 2);
+                if (speedMbS > PeakSpeedMbS)
+                {
+                    PeakSpeedMbS = Math.Round(speedMbS, 1);
+                }
                 EtaTimeFormatted = eta > 0 ? $"{TimeSpan.FromSeconds(eta):mm\\:ss}s" : "--:--";
 
                 var usb = channels.FirstOrDefault(c => c.Name.Contains("USB", StringComparison.OrdinalIgnoreCase));
@@ -258,6 +385,80 @@ public class MainViewModel : ViewModelBase
 
                 UsbSpeedMbS = Math.Round(usb?.CurrentSpeedMbS ?? 0, 1);
                 WifiSpeedMbS = Math.Round(wifi?.CurrentSpeedMbS ?? 0, 1);
+
+                double totalProg = Math.Clamp(pct, 0.0, 1.0);
+                double totalB = (usb?.BytesTransferred ?? 0) + (wifi?.BytesTransferred ?? 0);
+                if (totalB > 0)
+                {
+                    UsbProgress = Math.Clamp(totalProg * ((double)(usb?.BytesTransferred ?? 0) / totalB), 0.0, 1.0);
+                    WifiProgress = Math.Clamp(totalProg - UsbProgress, 0.0, 1.0);
+                }
+                else
+                {
+                    UsbProgress = 0.0;
+                    WifiProgress = totalProg;
+                }
+            });
+        };
+
+        _sender.OnTotalChunksDetermined += total =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                TotalChunksCount = total;
+                CompletedChunksCount = 0;
+                UsbChunksCount = 0;
+                WifiChunksCount = 0;
+                InFlightChunksCount = 0;
+                PendingChunksCount = total;
+                UsbProgress = 0;
+                WifiProgress = 0;
+                PeakSpeedMbS = 0;
+
+                int displayCount = Math.Clamp(total, 16, 96);
+                VisualChunks.Clear();
+                for (int i = 0; i < displayCount; i++)
+                {
+                    VisualChunks.Add(new ChunkVisualItem { ChunkId = i, State = ChunkVisualState.Pending });
+                }
+            });
+        };
+
+        _sender.OnChunkStarted += chunkId =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                int displayCount = VisualChunks.Count;
+                if (displayCount > 0 && TotalChunksCount > 0)
+                {
+                    int idx = (int)((chunkId * (long)displayCount) / Math.Max(1, TotalChunksCount));
+                    idx = Math.Clamp(idx, 0, displayCount - 1);
+                    if (VisualChunks[idx].State == ChunkVisualState.Pending)
+                    {
+                        VisualChunks[idx].State = ChunkVisualState.InFlight;
+                        InFlightChunksCount++;
+                        PendingChunksCount = Math.Max(0, TotalChunksCount - CompletedChunksCount - InFlightChunksCount);
+                    }
+                }
+            });
+        };
+
+        _sender.OnChunkCompleted += (chunkId, isUsb) =>
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                CompletedChunksCount++;
+                if (isUsb) UsbChunksCount++; else WifiChunksCount++;
+                InFlightChunksCount = Math.Max(0, InFlightChunksCount - 1);
+                PendingChunksCount = Math.Max(0, TotalChunksCount - CompletedChunksCount - InFlightChunksCount);
+
+                int displayCount = VisualChunks.Count;
+                if (displayCount > 0 && TotalChunksCount > 0)
+                {
+                    int idx = (int)((chunkId * (long)displayCount) / Math.Max(1, TotalChunksCount));
+                    idx = Math.Clamp(idx, 0, displayCount - 1);
+                    VisualChunks[idx].State = isUsb ? ChunkVisualState.CompletedUsb : ChunkVisualState.CompletedWifi;
+                }
             });
         };
 
@@ -301,11 +502,60 @@ public class MainViewModel : ViewModelBase
                     FormattedTransferred = $"{telem.Aggregate.TotalBytesTransferred / (1024.0 * 1024.0):F1} MB";
                     FormattedTotal = $"{telem.Aggregate.TotalBytesExpected / (1024.0 * 1024.0):F1} MB";
 
+                    double speedFromPhone = telem.Aggregate.AggregateMbps / 8.0;
+                    if (speedFromPhone > PeakSpeedMbS)
+                    {
+                        PeakSpeedMbS = Math.Round(speedFromPhone, 1);
+                    }
+
                     var usbTrans = telem.Transports.FirstOrDefault(t => t.TransportKind.Contains("Usb", StringComparison.OrdinalIgnoreCase));
                     var wifiTrans = telem.Transports.FirstOrDefault(t => !t.TransportKind.Contains("Usb", StringComparison.OrdinalIgnoreCase));
 
                     UsbSpeedMbS = Math.Round((usbTrans?.CurrentMbps ?? 0) / 8.0, 1);
                     WifiSpeedMbS = Math.Round((wifiTrans?.CurrentMbps ?? 0) / 8.0, 1);
+
+                    ulong usbBytes = usbTrans?.TotalBytes ?? 0;
+                    ulong wifiBytes = wifiTrans?.TotalBytes ?? 0;
+                    ulong totalB = usbBytes + wifiBytes;
+
+                    double totalProg = Math.Clamp(telem.Aggregate.ProgressPct / 100.0, 0.0, 1.0);
+                    if (totalB > 0)
+                    {
+                        UsbProgress = Math.Clamp(totalProg * ((double)usbBytes / totalB), 0.0, 1.0);
+                        WifiProgress = Math.Clamp(totalProg - UsbProgress, 0.0, 1.0);
+                    }
+                    else
+                    {
+                        UsbProgress = 0.0;
+                        WifiProgress = totalProg;
+                    }
+
+                    if (VisualChunks.Count == 0)
+                    {
+                        int displayCount = 64;
+                        for (int i = 0; i < displayCount; i++)
+                        {
+                            VisualChunks.Add(new ChunkVisualItem { ChunkId = i, State = ChunkVisualState.Pending });
+                        }
+                        TotalChunksCount = 64;
+                    }
+
+                    int completedVisual = (int)(totalProg * VisualChunks.Count);
+                    int usbVisual = (int)(UsbProgress * VisualChunks.Count);
+
+                    for (int i = 0; i < VisualChunks.Count; i++)
+                    {
+                        if (i < usbVisual)
+                            VisualChunks[i].State = ChunkVisualState.CompletedUsb;
+                        else if (i < completedVisual)
+                            VisualChunks[i].State = ChunkVisualState.CompletedWifi;
+                        else
+                            VisualChunks[i].State = ChunkVisualState.Pending;
+                    }
+                    CompletedChunksCount = completedVisual;
+                    UsbChunksCount = usbVisual;
+                    WifiChunksCount = Math.Max(0, completedVisual - usbVisual);
+                    PendingChunksCount = Math.Max(0, VisualChunks.Count - completedVisual);
                 }
                 else if (telem.Status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase))
                 {
@@ -469,7 +719,25 @@ public class MainViewModel : ViewModelBase
     public void ConnectToDevice(ShareDashPeerItem? peer)
     {
         if (peer == null) return;
+
+        // If connection was found through Wi-Fi and USB is not connected, pop up USB-C prompt
+        bool isUsbAvailable = peer.HasUsb || IsUsbPlugged || IsUsbCableConnected;
+        if (!isUsbAvailable)
+        {
+            PendingTargetDevice = peer;
+            IsUsbPromptOpen = true;
+            return;
+        }
+
+        ProceedConnect(peer);
+    }
+
+    public void ProceedConnect(ShareDashPeerItem? peer)
+    {
+        if (peer == null) return;
+        IsUsbPromptOpen = false;
         ActiveDevice = peer;
+        OnPropertyChanged(nameof(ConnectionMethodText));
         CurrentState = AppScreenState.Connecting;
 
         // Perform connection animation & pairing handshake
@@ -490,6 +758,7 @@ public class MainViewModel : ViewModelBase
             Application.Current.Dispatcher.Invoke(() =>
             {
                 CurrentState = AppScreenState.Connected;
+                OnPropertyChanged(nameof(ConnectionMethodText));
                 _log.Success($"Connected to {peer.Name}! Ready to drag and drop files.");
             });
         });

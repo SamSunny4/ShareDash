@@ -642,9 +642,9 @@
     "semantic_hash": ""
   },
   "windows/MainWindow.xaml": {
-    "mtime": 1792414262.703664,
-    "seen": 1792414906.5880933,
-    "ast_hash": "ce6448f84a3fd690ebdfaca776a32ed9",
+    "mtime": 1792416931.383383,
+    "seen": 1792416985.681382,
+    "ast_hash": "ff67b0ef21914f25e6cb524f5aa17c1c",
     "semantic_hash": ""
   },
   "windows/MainWindow.xaml.cs": {
@@ -702,9 +702,9 @@
     "semantic_hash": ""
   },
   "windows/Services/MultipathSender.cs": {
-    "mtime": 1792410570.3808348,
-    "seen": 1792410984.4260223,
-    "ast_hash": "1003df3083c59a2233d46a39e0d27a4e",
+    "mtime": 1792416565.6889277,
+    "seen": 1792416985.681419,
+    "ast_hash": "aedd28b89cfbed1311e7f799eefb6a0b",
     "semantic_hash": ""
   },
   "windows/Services/TelemetryWebSocketClient.cs": {
@@ -732,9 +732,9 @@
     "semantic_hash": ""
   },
   "windows/ViewModels/MainViewModel.cs": {
-    "mtime": 1792414344.6351025,
-    "seen": 1792414906.5881572,
-    "ast_hash": "a36577fbe5d206170e4d59c1db463734",
+    "mtime": 1792416741.1698527,
+    "seen": 1792416985.6814353,
+    "ast_hash": "e3fd69c8aa23c0e7b29a0674f078af39",
     "semantic_hash": ""
   },
   "windows/ViewModels/RelayCommand.cs": {
@@ -747,6 +747,24 @@
     "mtime": 1792410577.5300655,
     "seen": 1792410984.4260435,
     "ast_hash": "65ce9c7c49ee72cf1f9841f56f48122d",
+    "semantic_hash": ""
+  },
+  "windows/Controls/ChunkGridControl.cs": {
+    "mtime": 1792416541.5247178,
+    "seen": 1792416985.6813684,
+    "ast_hash": "82e96aa4517aae94a6940d3c7e9a85d2",
+    "semantic_hash": ""
+  },
+  "windows/Controls/DualColorProgressRing.cs": {
+    "mtime": 1792416522.0623252,
+    "seen": 1792416985.6813736,
+    "ast_hash": "67a0830c4a7336b4d8079122212201b9",
+    "semantic_hash": ""
+  },
+  "windows/Models/ChunkVisualItem.cs": {
+    "mtime": 1792416498.3172634,
+    "seen": 1792416985.6813958,
+    "ast_hash": "0e1dc34456c2b77faa6f2695bb5bd950",
     "semantic_hash": ""
   }
 }
