@@ -18,7 +18,7 @@
 <h3>Next-Generation Zero-LAN / Zero-Internet Multipath File Transfer Engine for Windows & Android</h3>
 
 <p align="center">
-  <b>Aggregate USB 3.x Cable Fast-Path and Dedicated 5 GHz / 6 GHz Mobile Hotspots simultaneously into a single ultra-high-throughput pipeline (78+ MB/s) with Bluetooth LE out-of-band orchestration and zero-corruption cryptographic integrity.</b>
+  <b>Aggregate USB 3.x Cable Fast-Path and Dedicated 5 GHz / 6 GHz Mobile Hotspots simultaneously into a single ultra-high-throughput pipeline (78+ MB/s) with direct Wi-Fi Direct / Zero-LAN discovery and zero-corruption cryptographic integrity.</b>
 </p>
 
 [🌐 **Official Website**](https://samsunny4.github.io/ShareDash/) •
@@ -44,7 +44,7 @@ Most existing file transfer tools rely on a single wireless channel or an existi
 | **PC <-> Android Direct Hardware Bridge** | ✅ **YES** | ❌ Apple Only | ⚠️ Limited | ✅ Yes (LAN only) | ✅ Yes |
 | **Real-World Speed on Multi-GB Files** | 🚀 **78–100+ MB/s** | ~30–45 MB/s | ~35–50 MB/s | ~25–40 MB/s | ~15–30 MB/s |
 | **USB 3.x Fast-Path Prioritization** | ✅ **YES (Line Speed)** | ❌ No | ❌ No | ❌ No | ❌ No |
-| **Automatic 5GHz SoftAP Orchestration** | ✅ **YES (via BLE)** | ❌ No | ⚠️ Proprietary | ❌ No | ❌ No |
+| **Automatic 5GHz SoftAP Orchestration** | ✅ **YES (Direct P2P)** | ❌ No | ⚠️ Proprietary | ❌ No | ❌ No |
 | **Zero Cloud / Zero Account / No Tracking** | ✅ **100% Private** | ❌ iCloud ID | ❌ Google/Samsung | ✅ Yes | ✅ Yes |
 | **Open Source (MIT)** | ✅ **YES** | ❌ Proprietary | ❌ Proprietary | ✅ GPL-3.0 | ✅ MPL-2.0 |
 
@@ -55,12 +55,13 @@ Most existing file transfer tools rely on a single wireless channel or an existi
 | Feature | Description |
 | :--- | :--- |
 | 🔌 **True Offline Direct P2P (Zero LAN / Zero Internet)** | **100% routerless & internet-free.** No local Wi-Fi router, cloud servers, or active internet connection required. Connects directly over physical hardware bridges. |
-| 📡 **Smart 5GHz Hotspot Auto-Orchestration** | Dynamically checks PC internet & Wi-Fi readiness. If PC lacks an internet connection (or cannot host 5GHz AP), the Phone automatically turns off client Wi-Fi to free antenna bands, starts a 5GHz SoftAP, and auto-associates the PC via BLE. |
+| 📡 **Smart 5GHz Hotspot Auto-Orchestration** | Dynamically checks PC internet & Wi-Fi readiness. If PC lacks an internet connection (or cannot host 5GHz AP), the Phone automatically turns off client Wi-Fi to free antenna bands, starts a 5GHz SoftAP, and auto-associates via direct Wi-Fi Direct / Local Zero-LAN. |
 | ⚡ **USB 3.x Cable Fast-Path Priority** | Instant line-speed connection over USB-C (3+ Gbps) via direct ADB port forwarding or USB Tethering (RNDIS/NCM). |
 | 🚀 **High-Throughput Pipelined Multipath (2MB–64MB Chunks)** | Adaptive chunking with **3 parallel in-flight streaming workers per transport**, delivering line speeds on multi-gigabyte files (2GB, 3GB, 10GB+) with zero idle gaps. |
 | 🛡️ **Zero-Corruption Verification** | CRC32 frame checksums, SHA-256 / BLAKE3 chunk hashing, AES-256-GCM authenticated encryption, and concurrent direct-offset `FileChannel` disk writes. |
-| 📱 **Native Android Companion App** | Modern Jetpack Compose UI with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and Bluetooth LE advertising/GATT server. |
-| 🖥️ **Wifite-Style ANSI Terminal Wizard** | Interactive CLI wizard that handles discovery, hardware inspection, hotspot provisioning, 3-way handshakes, and live multi-gauge progress meters. |
+| 📱 **Native Android Companion App** | Modern Jetpack Compose UI with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and local high-speed UDP / Wi-Fi Direct discovery. |
+| 🖥️ **Native Windows Desktop App (WPF / .NET 9)** | Sleek dark-mode desktop app with floating AirDrop-style device pods, instant USB Fast-Path detection, real-time speedometers, and one-click transfers. |
+| 📟 **Wifite-Style ANSI Terminal Wizard** | Interactive CLI wizard that handles discovery, hardware inspection, hotspot provisioning, 3-way handshakes, and live multi-gauge progress meters. |
 
 ---
 
@@ -69,6 +70,7 @@ Most existing file transfer tools rely on a single wireless channel or an existi
 ```mermaid
 graph TD
     subgraph UI ["User Interfaces"]
+        WinUI["Native Windows Desktop App (WPF / .NET 9)"]
         CLI["Terminal CLI Wizard (cli.rs)"]
         AndUI["ShareDash Android App (Jetpack Compose)"]
         WebPortal["Fluent Mica Web Dashboard"]
@@ -79,16 +81,16 @@ graph TD
         Chunker["High-Throughput Adaptive Chunker (2MB - 64MB)"]
         Writer["Concurrent FileChannel Sparse Disk Writer"]
         Verif["SHA-256 / BLAKE3 Integrity Verifier"]
-        HotspotMgr["Smart Hotspot Engine (WinRT / Netsh / BLE)"]
+        HotspotMgr["Smart Hotspot Engine (WinRT / Netsh / Wi-Fi Direct)"]
     end
 
     subgraph Transports ["Direct Physical P2P Channels (Zero LAN / Zero Cloud)"]
         USB["⚡ USB 3.x Cable Fast-Path (ADB tcp:54325 / RNDIS)"]
         HOTSPOT["📶 Dedicated 5 GHz / 6 GHz Mobile Hotspot (PC or Phone AP)"]
-        P2P["📡 Wi-Fi Direct P2P Group (192.168.49.x)"]
-        BLE["🔵 Bluetooth Low Energy (GATT Command & Signaling)"]
+        P2P["📡 Wi-Fi Direct / Zero-LAN P2P Group (UDP Beaconing)"]
     end
 
+    WinUI <--> Core
     CLI <--> Core
     AndUI <--> Core
     WebPortal <--> Core
@@ -96,7 +98,6 @@ graph TD
     Core <==> USB
     Core <==> HOTSPOT
     Core <==> P2P
-    Core <--> BLE
 ```
 
 ---
@@ -114,7 +115,7 @@ ShareDash defaults to **Phone 5GHz Wi-Fi Direct Group Owner** as the primary wir
 │ • Phone creates 5GHz Direct Group    │ • Used only if phone SoftAP fails    │
 │ • Gateway IP: 192.168.49.1           │ • PC creates SoftAP (192.168.137.1)  │
 │ • Uncapped Wi-Fi throughput (48+MB/s)│ • Wi-Fi subject to Windows ICS limits│
-│ • PC auto-binds in < 1.5s via WPA2   │ • Credentials sent via BLE to Phone  │
+│ • PC auto-binds in < 1.5s via WPA2   │ • Direct local pairing handshake    │
 ├──────────────────────────────────────┴──────────────────────────────────────┤
 │ 🚀 Both links active (USB + 5GHz Wi-Fi) -> 78+ MB/s Multipath Transfer      │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -132,7 +133,7 @@ Transfer metrics for a **2.80 GB (2800 MB)** movie file (`Marco.2024.1080p.SLIV.
 | ⚡ **USB Fast-Path Only** | ⚡ USB 3.x Cable | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0% | **SHA-256 ✔** |
 | ⚠️ **Multipath Aggregation (PC Hotspot)** | ⚡ USB + 📶 PC Hotspot (ICS) | **73.83 s** | **37.9 MB/s** | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%) | **SHA-256 ✔** |
 
-> 📖 **Deep Dive Technical Guide**: For an exhaustive, step-by-step breakdown of how the connection wizard, Bluetooth LE GATT exchange, PC/Phone hotspot provisioning, pipelined work-stealing, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](HOW_IT_WORKS.md).
+> 📖 **Deep Dive Technical Guide**: For an exhaustive, step-by-step breakdown of how the connection wizard, direct Wi-Fi Direct / UDP beaconing, PC/Phone hotspot provisioning, pipelined work-stealing, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](HOW_IT_WORKS.md).
 
 ---
 
@@ -153,7 +154,7 @@ cargo run --release
 ```
 Select Option `[1]` (**Auto-Connect Wizard**):
 1. **USB Detection**: Checks for connected USB-C cable (ADB port forwarding).
-2. **BLE Radar Scan**: Discovers nearby ShareDash phones via Bluetooth Low Energy.
+2. **Wi-Fi Direct / UDP Radar Scan**: Discovers nearby ShareDash devices via fast local UDP broadcast and Zero-LAN.
 3. **Hotspot Provisioning**: Inspects PC internet & Wi-Fi capabilities, triggers dedicated 5GHz hotspot (PC or Phone AP), and auto-associates credentials.
 4. **3-Way Cryptographic Handshake**: Performs ephemeral PIN verification and establishes AES-256-GCM encrypted session.
 5. **Streaming Transfer**: Prompts for file path and streams chunks over USB + Wi-Fi simultaneously at line speed.
@@ -232,6 +233,12 @@ ShareDash/
   │   ├── ShareDash-debug.apk       # Android companion APK
   │   └── sharedash.apk             # Android companion APK mirror
   │
+  ├── windows/                      # Native Windows Desktop App (.NET 9 WPF)
+  │   ├── MainWindow.xaml           # Apple AirDrop-style floating pods & speed gauge UI
+  │   ├── ViewModels/               # MainViewModel, reactive state & auto-connection
+  │   ├── Services/                 # ApiClient, EngineSupervisor, MultipathSender
+  │   └── Styles/                   # Custom controls & neomorphic gradient styles
+  │
   ├── src/                          # Windows Rust Core Engine
   │   ├── main.rs                   # Entry point, CLI flags, persistent UUID
   │   ├── lib.rs                    # Library interface & exports
@@ -239,7 +246,6 @@ ShareDash/
   │   ├── cli_widgets.rs            # ANSI progress bars, animated spinners, speedometers, tables
   │   ├── hotspot.rs                # Windows Netsh/WinRT Wi-Fi manager, fast client scanner, host choice
   │   ├── discovery/                # Peer discovery subsystems
-  │   │   ├── bluetooth.rs          # BLE Central scanner & GATT client (btleplug)
   │   │   ├── mdns.rs               # Local network UDP multicast discovery
   │   │   └── pairing.rs            # 3-Way handshake manager & session state
   │   ├── protocol/                 # Wire protocol & cryptography
@@ -264,14 +270,11 @@ ShareDash/
   │
   ├── android/                      # Native Android Companion Project
   │   ├── app/src/main/
-  │   │   ├── AndroidManifest.xml   # Permissions, BLE, Wi-Fi, Share Sheet filters
+  │   │   ├── AndroidManifest.xml   # Permissions, Wi-Fi, Share Sheet filters
   │   │   └── java/com/sharedash/app/
   │   │       ├── MainActivity.kt   # App lifecycle, Compose navigation, Wi-Fi coordinator
   │   │       ├── DeviceIdentity.kt # Hardware-backed persistent device UUID
-  │   │       ├── discovery/        # Bluetooth & network discovery
-  │   │       │   ├── BleAdvertiser.kt         # BLE peripheral advertising service
-  │   │       │   ├── BleCommandServer.kt      # GATT server for out-of-band handshake
-  │   │       │   ├── BleDiscoveryManager.kt   # BLE central scanner
+  │   │       ├── discovery/        # Direct network discovery
   │   │       │   └── UdpDiscoveryManager.kt   # Local UDP beacon manager
   │   │       ├── hotspot/          # Wi-Fi Hotspot & P2P management
   │   │       │   └── HotspotManager.kt        # 5GHz SoftAP & Wi-Fi Direct Group Owner

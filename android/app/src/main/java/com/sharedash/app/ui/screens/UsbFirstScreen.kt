@@ -384,7 +384,7 @@ fun UsbFirstScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Wi-Fi Direct & Bluetooth (Slower)",
+                            text = "Wi-Fi Direct Wireless (Slower)",
                             fontSize = 11.sp,
                             color = TextMuted
                         )

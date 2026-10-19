@@ -12,9 +12,9 @@
     "semantic_hash": "79e11f3dda2335b4c49ac6a97104129d"
   },
   "android/app/src/main/java/com/sharedash/app/MainActivity.kt": {
-    "mtime": 1792413934.248752,
-    "seen": 1792414906.58771,
-    "ast_hash": "f949f3e31343b306cf1ffa7ba8bac437",
+    "mtime": 1792415829.8400104,
+    "seen": 1792416140.3406785,
+    "ast_hash": "e7f4ff3f6d953f8638877fe983d0dba3",
     "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ShareDashApplication.kt": {
@@ -28,24 +28,6 @@
     "seen": 1792292743.598565,
     "ast_hash": "d5f46ae7ee203235e50deab1bcf05931",
     "semantic_hash": "d5f46ae7ee203235e50deab1bcf05931"
-  },
-  "android/app/src/main/java/com/sharedash/app/discovery/BleCommandServer.kt": {
-    "mtime": 1787514476.4786942,
-    "seen": 1792292743.5985663,
-    "ast_hash": "b34b6d8b802054ae3f753cedd78a1b8d",
-    "semantic_hash": "b34b6d8b802054ae3f753cedd78a1b8d"
-  },
-  "android/app/src/main/java/com/sharedash/app/discovery/BleDiscoveryManager.kt": {
-    "mtime": 1787141076.9423435,
-    "seen": 1792292743.5985677,
-    "ast_hash": "6eb5f663c51c0e994f3439f26a3f2a76",
-    "semantic_hash": "6eb5f663c51c0e994f3439f26a3f2a76"
-  },
-  "android/app/src/main/java/com/sharedash/app/discovery/BluetoothRfcommServer.kt": {
-    "mtime": 1787514458.2884476,
-    "seen": 1792292743.5985687,
-    "ast_hash": "d5bc0b6801b1b24674bc8b4cced1df61",
-    "semantic_hash": "d5bc0b6801b1b24674bc8b4cced1df61"
   },
   "android/app/src/main/java/com/sharedash/app/discovery/HotspotManager.kt": {
     "mtime": 1789492386.233225,
@@ -156,10 +138,10 @@
     "semantic_hash": "0fd0d92b3b022990c9977ebb99529fe1"
   },
   "android/app/src/main/java/com/sharedash/app/ui/components/WirelessWarningDialog.kt": {
-    "mtime": 1787471397.95727,
-    "seen": 1792292743.5985892,
-    "ast_hash": "c7afdf0783953471b4a22d8f73a318ed",
-    "semantic_hash": "c7afdf0783953471b4a22d8f73a318ed"
+    "mtime": 1792415759.6343117,
+    "seen": 1792416140.3407764,
+    "ast_hash": "c1cc04dd51f80952b778df12621edd33",
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/ConnectedScreen.kt": {
     "mtime": 1787548747.4735987,
@@ -168,10 +150,10 @@
     "semantic_hash": "026c7d1d13beef09451898a71cb269fa"
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/DiscoveryScreen.kt": {
-    "mtime": 1790277490.745954,
-    "seen": 1792292743.598591,
-    "ast_hash": "c265ddd4da5f96d0bb4b5cc35af4827b",
-    "semantic_hash": "c265ddd4da5f96d0bb4b5cc35af4827b"
+    "mtime": 1792415781.3936634,
+    "seen": 1792416140.3407843,
+    "ast_hash": "99eecb65262d377cd0aad135c98b2aa6",
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/HomeScreen.kt": {
     "mtime": 1790298854.0487375,
@@ -204,10 +186,10 @@
     "semantic_hash": "291eac201389c0ecbb6f6e09b1b18e3e"
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/UsbFirstScreen.kt": {
-    "mtime": 1790277040.265796,
-    "seen": 1792292743.598597,
-    "ast_hash": "7dd0356c5d3a3acaef14aa213215cfe3",
-    "semantic_hash": "7dd0356c5d3a3acaef14aa213215cfe3"
+    "mtime": 1792415741.959118,
+    "seen": 1792416140.3408072,
+    "ast_hash": "8a47b7e9b73d83198e01429f964021aa",
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/theme/Color.kt": {
     "mtime": 1789411111.8533337,
@@ -588,33 +570,33 @@
     "semantic_hash": ""
   },
   "HOW_IT_WORKS.md": {
-    "mtime": 1787499394.9993136,
-    "seen": 1792294040.5118384,
-    "ast_hash": "ef08e0c0dd3c3fc1d00d636225ccbcc4",
+    "mtime": 1792416036.456425,
+    "seen": 1792416140.3411524,
+    "ast_hash": "215d3d8a7fa8817bf3c35faf6e0be52b",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792293973.6433775,
-    "seen": 1792294040.5118408,
-    "ast_hash": "152845abdbfdfdcc0f6358c2de28b842",
+    "mtime": 1792415905.0536456,
+    "seen": 1792416140.3411558,
+    "ast_hash": "1ff06db9cfe26b1eece619a0ec15a4c1",
     "semantic_hash": ""
   },
   "ROADMAP.md": {
-    "mtime": 1787928932.5509675,
-    "seen": 1792294040.5118437,
-    "ast_hash": "6bd44163c90198f974efa4e72578ce63",
+    "mtime": 1792416070.2438345,
+    "seen": 1792416140.3411596,
+    "ast_hash": "cad337c6f067827ad9360a2b6967f220",
     "semantic_hash": ""
   },
   "SECURITY.md": {
-    "mtime": 1787928920.0577483,
-    "seen": 1792294040.5118463,
-    "ast_hash": "cf7d5e51a715bf8cfa9a1e9e894ddf6c",
+    "mtime": 1792416050.8341756,
+    "seen": 1792416140.3411636,
+    "ast_hash": "cc1e316277fa373b52c38dab46440224",
     "semantic_hash": ""
   },
   "docs/index.html": {
-    "mtime": 1792293999.102121,
-    "seen": 1792294040.5118492,
-    "ast_hash": "7e717ef504bddedcab0797e0c7b90bab",
+    "mtime": 1792416100.511536,
+    "seen": 1792416140.3411665,
+    "ast_hash": "73027658749b5afcd10d96d8f610eae8",
     "semantic_hash": ""
   },
   "docs/robots.txt": {

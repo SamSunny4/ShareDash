@@ -49,8 +49,6 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Close
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.sharedash.app.discovery.BleCommandServer
-import com.sharedash.app.discovery.BleDiscoveryManager
 import com.sharedash.app.discovery.HotspotManager
 import com.sharedash.app.discovery.HotspotState
 import com.sharedash.app.discovery.UdpDiscoveryManager
@@ -121,11 +119,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var settingsManager: SettingsManager
     private lateinit var historyManager: TransferHistoryManager
-    private lateinit var bleManager: BleDiscoveryManager
     private lateinit var udpManager: UdpDiscoveryManager
     private lateinit var hotspotManager: HotspotManager
-    private lateinit var bleCommandServer: BleCommandServer
-    private lateinit var rfcommServer: com.sharedash.app.discovery.BluetoothRfcommServer
     private var httpServer: com.sharedash.app.server.AndroidHttpServer? = null
     private val transportManager = AndroidTransportManager()
     private var activeSendJob: kotlinx.coroutines.Job? = null
@@ -242,17 +237,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun hasBluetoothConnectPermission(): Boolean = true
-    fun isBluetoothEnabledSafely(): Boolean = true
-
-    private val enableBtLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            startDiscovery()
-        }
-    }
-
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -350,59 +334,8 @@ class MainActivity : ComponentActivity() {
         historyManager = TransferHistoryManager.getInstance(this)
 
         val myFriendlyName = settingsManager.deviceName
-        bleManager = BleDiscoveryManager(this)
         udpManager = UdpDiscoveryManager(this, myFriendlyName)
         hotspotManager = HotspotManager(this)
-
-        // BLE GATT Command Server — allows PC to query Wi-Fi caps & issue commands
-        bleCommandServer = BleCommandServer(this)
-        bleCommandServer.onWifiConnectRequest = { ssid, password ->
-            connectToWifiNetwork(ssid, password)
-        }
-        bleCommandServer.onUsbTetherRequest = {
-            openUsbTetheringSettings()
-        }
-        bleCommandServer.onStartHotspotRequest = {
-            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
-                bleCommandServer.sendHotspotStartedResponse(ssid, password, gateway)
-                val resp = org.json.JSONObject().apply {
-                    put("status", "hotspot_started")
-                    put("ssid", ssid)
-                    put("password", password)
-                    put("gateway", gateway)
-                }
-                rfcommServer.broadcastJson(resp)
-                bleManager.startAdvertising()
-            }
-        }
-        bleCommandServer.onIncomingPairRequest = { id, name, ip, pin, ver ->
-            onIncomingPairCallback?.invoke(id, name, ip, pin, ver)
-        }
-
-        // Bluetooth Classic RFCOMM Server — streaming bidirectional socket
-        rfcommServer = com.sharedash.app.discovery.BluetoothRfcommServer(this)
-        rfcommServer.onWifiConnectRequest = { ssid, password ->
-            connectToWifiNetwork(ssid, password)
-        }
-        rfcommServer.onUsbTetherRequest = {
-            openUsbTetheringSettings()
-        }
-        rfcommServer.onStartHotspotRequest = {
-            hotspotManager.start5GHzHotspot { ssid, password, gateway ->
-                bleCommandServer.sendHotspotStartedResponse(ssid, password, gateway)
-                val resp = org.json.JSONObject().apply {
-                    put("status", "hotspot_started")
-                    put("ssid", ssid)
-                    put("password", password)
-                    put("gateway", gateway)
-                }
-                rfcommServer.broadcastJson(resp)
-                bleManager.startAdvertising()
-            }
-        }
-        rfcommServer.onIncomingPairRequest = { id, name, ip, pin, ver ->
-            onIncomingPairCallback?.invoke(id, name, ip, pin, ver)
-        }
 
         // Eagerly start Android HTTP Server on port 54321 for symmetric discovery and pairing
         httpServer = com.sharedash.app.server.AndroidHttpServer(
@@ -442,14 +375,6 @@ class MainActivity : ComponentActivity() {
                 try {
                     hotspotManager.start5GHzHotspot { ssid, password, gateway ->
                         callback(ssid, password, gateway)
-                        val resp = org.json.JSONObject().apply {
-                            put("status", "hotspot_started")
-                            put("ssid", ssid)
-                            put("password", password)
-                            put("gateway", gateway)
-                        }
-                        rfcommServer.broadcastJson(resp)
-                        bleManager.startAdvertising()
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Error in onStartHotspotRequest: ${e.message}")
@@ -475,15 +400,6 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             try {
                 registerReceiver(usbReceiver, usbFilter)
-            } catch (_: Exception) {}
-        }
-
-        val btFilter = android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
-        try {
-            ContextCompat.registerReceiver(this, btReceiver, btFilter, ContextCompat.RECEIVER_EXPORTED)
-        } catch (_: Exception) {
-            try {
-                registerReceiver(btReceiver, btFilter)
             } catch (_: Exception) {}
         }
 
@@ -523,7 +439,6 @@ class MainActivity : ComponentActivity() {
 
                 val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator() }
 
-                val blePeers by bleManager.discoveredBlePeers.collectAsState()
                 val udpPeers by udpManager.discoveredPeers.collectAsState()
                 val hotspotState by hotspotManager.hotspotState.collectAsState()
 
@@ -713,15 +628,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Only real peers from BLE and UDP discovery
-                val combinedPeers = remember(blePeers, udpPeers) {
-                    val list = mutableListOf<DiscoveredPeer>()
-                    list.addAll(udpPeers)
-                    blePeers.forEach { bp ->
-                        if (list.none { it.deviceId == bp.deviceId }) list.add(bp)
-                    }
-                    list
-                }
+                // Discovery peers from UDP (Wi-Fi Direct / Zero-LAN / Hotspot / USB)
+                val combinedPeers = udpPeers
 
                 // Cleanup poller on dispose
                 androidx.compose.runtime.DisposableEffect(Unit) {
@@ -778,7 +686,6 @@ class MainActivity : ComponentActivity() {
                 } catch (_: Exception) {
                     true
                 }
-                val isBluetoothOn = isBluetoothEnabledSafely()
 
                 // Heartbeat to detect when PC ShareDash is shutdown
                 LaunchedEffect(activeTarget) {
@@ -2235,10 +2142,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val btReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {}
-    }
-
     private fun startDiscovery() {
         try {
             udpManager.startDiscovery(lifecycleScope)
@@ -2408,13 +2311,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
-        try { unregisterReceiver(btReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(wifiConnectReceiver) } catch (_: Exception) {}
         try { hotspotManager.stopHotspot() } catch (_: Exception) {}
         httpServer?.stop()
-        bleCommandServer.stop()
-        rfcommServer.stop()
-        bleManager.stopDiscovery()
         udpManager.stopDiscovery()
         transportManager.closeAll()
     }

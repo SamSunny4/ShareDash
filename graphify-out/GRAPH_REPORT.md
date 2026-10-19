@@ -1,36 +1,36 @@
 # Graph Report - ShareDash  (2026-10-19)
 
 ## Corpus Check
-- 118 files · ~104,944 words
+- 115 files · ~101,389 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 19 file(s) not represented in the graph (top: .xml 8, (none) 3, .properties 2)
 
 ## Summary
-- 2081 nodes · 4473 edges · 118 communities (70 shown, 48 thin omitted)
+- 2001 nodes · 4321 edges · 126 communities (72 shown, 54 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 88 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e0e8033e`
+- Built from commit: `a9d20bcd`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - api.rs
 - FrameType
-- BleDiscoveryManager.kt
-- bluetooth.rs
+- HomeScreen.kt
+- BottomPillBar.kt
+- BleDiscovery
 - message.rs
-- HotspotManager
+- .create5GHzP2pGroupActual
 - benchmark_suite.py
-- MainActivity
 - TransferForegroundService
 - AndroidHttpServer
 - manifest_db.rs
 - cli_widgets.rs
-- BluetoothRfcommServer
+- bluetooth.rs
 - MainActivity.kt
-- BleCommandServer
+- .run_wireless_direct_wizard
 - NeoCard
 - TransferScreen.kt
 - dynamic_scheduler.rs
@@ -44,15 +44,14 @@
 - PairingRequest
 - TelemetryWebSocketClient
 - crypto.rs
-- handshake.rs
+- AsyncTransport
 - mdns.rs
 - chunker.rs
-- UdpDiscoveryManager.kt
 - HotspotState
 - run_transport_chunk_worker
-- TransportMetrics
+- LanTransport
 - QuicInetTransport
-- usb.rs
+- UsbTransport
 - Models.kt
 - TerminalCli
 - UdpDiscoveryManager
@@ -62,10 +61,11 @@
 - MainViewModel
 - app.js
 - Theme.kt
+- HotspotManager
 - TransportState
 - TransferHistoryScreen.kt
 - ⚡ ShareDash
-- .executeRealTransfer
+- MainActivity
 - AndroidSparseFileWriter
 - SettingsManager
 - MultipathSpeedometer
@@ -82,8 +82,8 @@
 - MultipathSender.cs
 - 🤝 Contributing to ShareDash
 - Task
-- NetworkCallback
-- ws_telemetry.rs
+- .connectToWifiNetwork
+- pairing.rs
 - sharedash
 - SettingsScreen.kt
 - TransferStatus
@@ -94,22 +94,22 @@
 - LogService
 - PULL_REQUEST_TEMPLATE.md
 - 🚀 Running Benchmarks
-- wifi_direct.rs
+- WifiDirectTransport
 - sparse_writer.rs
-- result
+- TransferEvent
 - ⚡ High-Throughput Pipelined Multipath Streaming Engine
 - TransferResult
 - Color.kt
-- lan.rs
+- wifi_direct.rs
 - TelemetryData
 - MainViewModel.cs
-- deserialize
+- TransportMetrics
 - MainWindow
 - AdapterInfo
 - DiscoveredPeer
 - DeviceInfo
 - ResourceDictionary
-- AsyncTransport
+- BytesMut
 - AggregateMetrics
 - ShareDash.Windows.Models
 - ChunkState
@@ -117,17 +117,22 @@
 - ShareDashPeerItem
 - UsbBridgeStatus
 - TransportMetric
-- TransportKind
 - LanBridgeStatus
 - ShareDash.Windows.csproj
 - Colors.xaml
 - PostResult
-- QuickShareRadar
+- Frame
+- AndroidPairingCoordinator
+- build
+- BleAdvertiser
+- ChunkStatus
+- .forceStopPreviousDirectGroup
+- DiscoveryMethod
 
 ## God Nodes (most connected - your core abstractions)
 1. `MainViewModel` - 58 edges
 2. `Window` - 50 edges
-3. `MainActivity` - 46 edges
+3. `MainActivity` - 42 edges
 4. `AppState` - 36 edges
 5. `NeoCard()` - 35 edges
 6. `TerminalCli` - 33 edges
@@ -151,23 +156,23 @@
 ## Import Cycles
 - None detected.
 
-## Communities (118 total, 48 thin omitted)
+## Communities (126 total, 54 thin omitted)
 
 ### Community 0 - "api.rs"
-Cohesion: 0.05
-Nodes (55): PairingManager, PairingSession, ACTIVE_CHUNK_RECEIVERS, ActiveIncomingChunkSession, ADB_CACHE, ADB_CACHE_TTL_SECS, AdbCacheEntry, AppState (+47 more)
+Cohesion: 0.07
+Nodes (53): ACTIVE_CHUNK_RECEIVERS, ActiveIncomingChunkSession, ADB_CACHE, ADB_CACHE_TTL_SECS, AdbCacheEntry, AppState, cancel_all_active_transfers(), cancel_transfer() (+45 more)
 
 ### Community 1 - "FrameType"
 Cohesion: 0.08
 Nodes (25): FrameType, BenchmarkProbe, BenchmarkResp, Capabilities, ChunkAck, ChunkData, ChunkReject, ChunkReq (+17 more)
 
-### Community 4 - "bluetooth.rs"
-Cohesion: 0.07
-Nodes (14): COMMAND_CHAR_UUID, RESPONSE_CHAR_UUID, SHAREDASH_BLE_SERVICE_UUID, WIFI_CAPS_CHAR_UUID, BleAdvertiser, BleDiscovery, COMMAND_CHAR_UUID, DiscoveryMethod (+6 more)
+### Community 3 - "BottomPillBar.kt"
+Cohesion: 0.08
+Nodes (6): BottomPillBar(), NavTab, HISTORY, HOME, SETTINGS, TRANSFER
 
 ### Community 5 - "message.rs"
-Cohesion: 0.09
-Nodes (21): BenchmarkProbeMessage, BenchmarkRespMessage, ChunkAckMessage, ChunkRejectMessage, ChunkReqMessage, ControlMessageWrapper, HelloMessage, HelloRespMessage (+13 more)
+Cohesion: 0.07
+Nodes (24): BenchmarkProbeMessage, BenchmarkRespMessage, ChunkAckMessage, ChunkRejectMessage, ChunkReqMessage, ControlMessageWrapper, HelloMessage, HelloRespMessage (+16 more)
 
 ### Community 7 - "benchmark_suite.py"
 Cohesion: 0.10
@@ -175,46 +180,46 @@ Nodes (15): check_adb_state(), install_and_start_app(), perform_stream_transfer(
 
 ### Community 14 - "cli_widgets.rs"
 Cohesion: 0.09
-Nodes (23): animated_scan_progress(), BLUE, BOLD, BOLD_CYAN, BOLD_GREEN, BOLD_RED, BOLD_WHITE, BOLD_YELLOW (+15 more)
+Nodes (21): animated_scan_progress(), BLUE, BOLD, BOLD_CYAN, BOLD_GREEN, BOLD_RED, BOLD_WHITE, BOLD_YELLOW (+13 more)
 
-### Community 16 - "MainActivity.kt"
-Cohesion: 0.06
-Nodes (8): DeviceIdentity, BottomPillBar(), NavTab, HISTORY, HOME, SETTINGS, TRANSFER, PairingScreen()
+### Community 15 - "bluetooth.rs"
+Cohesion: 0.13
+Nodes (8): COMMAND_CHAR_UUID, RESPONSE_CHAR_UUID, SHAREDASH_BLE_SERVICE_UUID, WIFI_CAPS_CHAR_UUID, COMMAND_CHAR_UUID, RESPONSE_CHAR_UUID, SHAREDASH_BLE_SERVICE_UUID, WIFI_CAPS_CHAR_UUID
+
+### Community 17 - ".run_wireless_direct_wizard"
+Cohesion: 0.18
+Nodes (8): draw_spinner_frame(), print_ok(), print_step_result(), print_table(), print_tree_item(), print_warn(), strip_ansi(), with_spinner()
 
 ### Community 18 - "NeoCard"
-Cohesion: 0.08
+Cohesion: 0.11
 Nodes (12): ConnectingDialog(), UsbPromptDialog(), WifiDisconnectPromptDialog(), WirelessWarningDialog(), ConnectedScreen(), SendCategoryCard(), DiscoveryScreen(), HomeScreen() (+4 more)
 
 ### Community 19 - "TransferScreen.kt"
-Cohesion: 0.13
+Cohesion: 0.14
 Nodes (6): LegendChip(), PieceVisualizerGrid(), ActiveTransferScreen(), TransferCategoryItem(), TransferIdleScreen(), TransferScreen()
-
-### Community 20 - "dynamic_scheduler.rs"
-Cohesion: 0.13
-Nodes (12): MultipathScheduler, TransferEvent, Cancelled, ChunkCompleted, ChunkCorrupt, Completed, Failed, Progress (+4 more)
 
 ### Community 21 - "hotspot.rs"
 Cohesion: 0.07
 Nodes (26): apply_and_connect_profile(), check_pc_wifi_adapter_enabled(), connect_to_phone_hotspot(), create_hotspot(), create_hotspot_with_band(), detect_hotspot_gateway(), detect_usb_tethering_peer(), detect_usb_tethering_peer_detailed() (+18 more)
 
 ### Community 22 - "frame.rs"
-Cohesion: 0.10
-Nodes (13): FLAG_BENCHMARK, FLAG_COMPRESSED, FLAG_ENCRYPTED, FLAG_NONE, FLAG_PRIORITY, Frame, FRAME_HEADER_LEN, FrameCodec (+5 more)
+Cohesion: 0.15
+Nodes (9): FLAG_BENCHMARK, FLAG_COMPRESSED, FLAG_ENCRYPTED, FLAG_NONE, FLAG_PRIORITY, FRAME_HEADER_LEN, MAGIC_BYTES, MAX_PAYLOAD_SIZE (+1 more)
 
 ### Community 23 - "Window"
 Cohesion: 0.05
 Nodes (36): ActiveDevice.Icon, ActiveDevice.Name, BackToScanningCommand, CancelTransferCommand, BoolToVis, InverseBoolToVis, CurrentFileName, CurrentSpeedGbps (+28 more)
 
 ### Community 24 - "FrameType"
-Cohesion: 0.09
+Cohesion: 0.07
 Nodes (18): Frame, FrameHeader, FrameType, BENCHMARK_PROBE, BENCHMARK_RESP, CAPABILITIES, CHUNK_ACK, CHUNK_DATA (+10 more)
 
 ### Community 26 - "ChunkPool"
-Cohesion: 0.08
-Nodes (8): ChunkPool, ChunkPoolInner, ChunkStatus, Completed, Corrupted, InFlight, Unassigned, InFlightInfo
+Cohesion: 0.18
+Nodes (3): ChunkPool, ChunkPoolInner, InFlightInfo
 
 ### Community 27 - "failover_test.rs"
-Cohesion: 0.14
+Cohesion: 0.17
 Nodes (6): mock_responder(), test_cryptographic_corruption_rejection_and_recovery(), mock_responder(), test_work_stealing_and_cable_disconnect_failover(), mock_responder(), test_multipath_concurrent_transports()
 
 ### Community 28 - "PairingRequest"
@@ -225,37 +230,41 @@ Nodes (9): PairingRequest, AppVersion, InitiatorDeviceId, InitiatorIp, Initiator
 Cohesion: 0.15
 Nodes (3): SessionCrypto, test_encryption_roundtrip(), test_hashers()
 
-### Community 31 - "handshake.rs"
-Cohesion: 0.15
-Nodes (10): build_local_capabilities(), HandshakeState, Established, Failed, Idle, SynReceived, SynSent, SessionInfo (+2 more)
+### Community 31 - "AsyncTransport"
+Cohesion: 0.10
+Nodes (11): build_local_capabilities(), HandshakeState, Established, Failed, Idle, SynReceived, SynSent, SessionInfo (+3 more)
 
 ### Community 32 - "mdns.rs"
-Cohesion: 0.13
+Cohesion: 0.12
 Nodes (7): CURRENT_APP_VERSION, DiscoveredPeer, DISCOVERY_BROADCAST_PORT, is_version_compatible(), MIN_SUPPORTED_APP_VERSION, PeerBeacon, PeerDiscovery
 
 ### Community 33 - "chunker.rs"
-Cohesion: 0.18
-Nodes (8): FileMetadata, AdaptiveChunker, ChunkInfo, DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, test_build_manifest_from_temp_file(), TransferManifest
+Cohesion: 0.12
+Nodes (8): AdaptiveChunker, ChunkInfo, DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, test_build_manifest_from_temp_file(), TransferManifest, IntegrityVerifier
 
 ### Community 35 - "HotspotState"
-Cohesion: 0.13
-Nodes (8): Active, Error, ActionListener, ActionListener, ActionListener, HotspotState, Idle, Starting
+Cohesion: 0.17
+Nodes (7): Active, Error, ActionListener, ActionListener, HotspotState, Idle, Starting
 
 ### Community 36 - "run_transport_chunk_worker"
-Cohesion: 0.17
+Cohesion: 0.18
 Nodes (7): DynamicWorkDispatcher, run_transport_chunk_worker(), stream_upload_channel(), TransferChunkInfo, ChannelProgress, draw_transfer_progress(), init_transfer_progress()
 
 ### Community 40 - "Models.kt"
-Cohesion: 0.14
-Nodes (17): ChunkInfo, ChunkState, COMPLETED, CORRUPTED, IN_FLIGHT, PENDING, FileMeta, TransferDirection (+9 more)
+Cohesion: 0.16
+Nodes (16): ChunkInfo, ChunkState, COMPLETED, CORRUPTED, IN_FLIGHT, PENDING, ChunkVisualItem, FileMeta (+8 more)
 
 ### Community 41 - "TerminalCli"
-Cohesion: 0.12
-Nodes (11): TerminalCli, draw_spinner_frame(), print_ok(), print_phase_header(), print_step_result(), print_tree_item(), print_warn(), print_wizard_banner() (+3 more)
+Cohesion: 0.15
+Nodes (5): TerminalCli, print_phase_header(), print_wizard_banner(), WifiCapsInfo, detect_pc_wifi_caps()
 
 ### Community 44 - "BleDevice"
 Cohesion: 0.25
 Nodes (8): BleDevice, Address, Name, PeripheralId, Rssi, SignalColor, SignalPercent, SignalQuality
+
+### Community 45 - "TransferHistoryManager"
+Cohesion: 0.12
+Nodes (10): TransferDirection, RECEIVED, SENT, TransferRecord, TransferStatus, CANCELLED, COMPLETED, FAILED (+2 more)
 
 ### Community 47 - "MainViewModel"
 Cohesion: 0.06
@@ -277,9 +286,9 @@ Nodes (5): CompactTransferRecordRow(), formatFileSize(), getFileIcon(), openTran
 Cohesion: 0.10
 Nodes (20): 🧪 Automated Test Suite, Build from Source via Gradle:, 🤝 Contributing, Direct Installation via ADB:, 🚀 Key Highlights, 📜 License, 📊 Live Benchmark Performance, Option A: Launch Interactive Auto-Connect Wizard (+12 more)
 
-### Community 54 - ".executeRealTransfer"
-Cohesion: 0.26
-Nodes (5): ChunkTask, TransportEndpoint, ChunkVisualItem, SchedulerTelemetry, TransportStats
+### Community 54 - "MainActivity"
+Cohesion: 0.13
+Nodes (3): ChunkTask, MainActivity, TransportEndpoint
 
 ### Community 58 - "⚡ ShareDash: Technical Architecture & Operational Guide"
 Cohesion: 0.11
@@ -317,10 +326,6 @@ Nodes (5): TransferUiStage, COMPLETED, FAILED, TRANSFERRING, VERIFYING
 Cohesion: 0.15
 Nodes (13): 1. Rust Core Engine (Windows / Linux), 2. Android Companion App, Android / Kotlin, 📜 Code of Conduct, 📐 Coding Guidelines & Standards, 💬 Commit Message Conventions, 🤝 Contributing to ShareDash, 🛠️ Development Setup (+5 more)
 
-### Community 73 - "ws_telemetry.rs"
-Cohesion: 0.27
-Nodes (3): Server, handle_socket(), ws_telemetry_handler()
-
 ### Community 81 - "TransferStatus"
 Cohesion: 0.20
 Nodes (8): TransferRecord, TransferStatus, Active, Cancelled, Completed, Failed, Paused, Pending
@@ -353,13 +358,13 @@ Nodes (6): ✅ Contributor Checklist, 📋 Description, 🔗 Related Issue(s), �
 Cohesion: 0.29
 Nodes (6): 1. Generate Test File, 2. Run Analytical Transfer Optimization, 3. Run Live ADB Phone Benchmark, 🚀 Running Benchmarks, 📁 Script Overview, 🛠️ ShareDash Diagnostic & Benchmarking Scripts
 
-### Community 89 - "wifi_direct.rs"
-Cohesion: 0.16
-Nodes (3): detect_wifi_capabilities(), WifiCapabilities, WifiDirectTransport
-
 ### Community 90 - "sparse_writer.rs"
 Cohesion: 0.16
-Nodes (4): FileTime, set_file_mtime(), SparseWriter, test_sparse_writer_write_out_of_order()
+Nodes (5): FileMetadata, FileTime, set_file_mtime(), SparseWriter, test_sparse_writer_write_out_of_order()
+
+### Community 91 - "TransferEvent"
+Cohesion: 0.18
+Nodes (10): TransferEvent, Cancelled, ChunkCompleted, ChunkCorrupt, Completed, Failed, Progress, Started (+2 more)
 
 ### Community 92 - "⚡ High-Throughput Pipelined Multipath Streaming Engine"
 Cohesion: 0.40
@@ -369,6 +374,10 @@ Nodes (5): 1. 📦 Adaptive Chunk Sizing, 2. 🌊 3 Pipelined In-Flight Workers 
 Cohesion: 0.10
 Nodes (20): TransferResult, AvgSpeedGbps, AvgSpeedMbS, CompletedAt, FileName, IntegrityOk, SizeMb, TimeSecs (+12 more)
 
+### Community 95 - "wifi_direct.rs"
+Cohesion: 0.24
+Nodes (3): BandwidthTracker, detect_wifi_capabilities(), WifiCapabilities
+
 ### Community 96 - "TelemetryData"
 Cohesion: 0.18
 Nodes (10): ChunkStateInfo, ChunkId, State, TelemetryData, Aggregate, ChunkStates, Status, Title (+2 more)
@@ -377,9 +386,9 @@ Nodes (10): ChunkStateInfo, ChunkId, State, TelemetryData, Aggregate, ChunkState
 Cohesion: 0.06
 Nodes (11): ShareDash.Windows, ShareDash.Windows.ViewModels, Application, App, AppScreenState, Completed, Connected, Connecting (+3 more)
 
-### Community 98 - "deserialize"
-Cohesion: 0.43
-Nodes (3): AggregateMetrics, ChunkVisualState, SchedulerTelemetry
+### Community 98 - "TransportMetrics"
+Cohesion: 0.21
+Nodes (4): AggregateMetrics, ChunkVisualState, SchedulerTelemetry, TransportMetrics
 
 ### Community 100 - "AdapterInfo"
 Cohesion: 0.25
@@ -421,10 +430,6 @@ Nodes (6): UsbBridgeStatus, Connected, DeviceModel, IsAdbReady, Message, SpeedGb
 Cohesion: 0.33
 Nodes (6): TransportMetric, CurrentGbps, CurrentMbps, TotalBytes, TransportId, TransportKind
 
-### Community 112 - "TransportKind"
-Cohesion: 0.40
-Nodes (5): TransportKind, BLUETOOTH, LAN, USB, WIFI_DIRECT
-
 ### Community 113 - "LanBridgeStatus"
 Cohesion: 0.40
 Nodes (5): LanBridgeStatus, Connected, LocalIp, Message, SpeedMbps
@@ -433,25 +438,33 @@ Nodes (5): LanBridgeStatus, Connected, LocalIp, Message, SpeedMbps
 Cohesion: 0.50
 Nodes (4): PostResult, NOT_FOUND, RETRY, SUCCESS
 
+### Community 123 - "ChunkStatus"
+Cohesion: 0.40
+Nodes (5): ChunkStatus, Completed, Corrupted, InFlight, Unassigned
+
+### Community 125 - "DiscoveryMethod"
+Cohesion: 0.50
+Nodes (4): DiscoveryMethod, Ble, HttpProbe, Udp
+
 ## Knowledge Gaps
 - **308 isolated node(s):** `sharedash`, `SUCCESS`, `NOT_FOUND`, `RETRY`, `Idle` (+303 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 861 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **48 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 823 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **54 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `MockSimTransport` connect `MockSimTransport` to `api.rs`, `TransportMetrics`, `AsyncTransport`, `failover_test.rs`, `lan.rs`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **Why does `AndroidHttpServer` connect `AndroidHttpServer` to `AndroidHttpServer.kt`, `.onCreate`?**
+  _High betweenness centrality (0.041) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `MainViewModel` (e.g. with `.Error()` and `RelayCommand`) actually correct?**
   _`MainViewModel` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `sharedash`, `SUCCESS`, `NOT_FOUND` to the rest of the system?**
   _308 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `api.rs` be split into smaller, more focused modules?**
-  _Cohesion score 0.051096491228070175 - nodes in this community are weakly interconnected._
-- **Why does `AndroidHttpServer` connect `AndroidHttpServer` to `AndroidHttpServer.kt`, `MainActivity`?**
-  _High betweenness centrality (0.029) - this node is a cross-community bridge._
+  _Cohesion score 0.07496194824961948 - nodes in this community are weakly interconnected._
+- **Why does `Protocol` connect `FrameType` to `MainActivity.kt`, `AndroidHttpServer.kt`?**
+  _High betweenness centrality (0.033) - this node is a cross-community bridge._
 - **Should `FrameType` be split into smaller, more focused modules?**
   _Cohesion score 0.08 - nodes in this community are weakly interconnected._
-- **Why does `BluetoothRfcommServer` connect `BluetoothRfcommServer` to `MainActivity`?**
-  _High betweenness centrality (0.028) - this node is a cross-community bridge._
+- **Why does `MainActivity` connect `MainActivity` to `.connectToWifiNetwork`, `.onCreate`, `UdpDiscoveryManager`, `TransferForegroundService`, `TransferHistoryManager`, `MainActivity.kt`, `HotspotManager`, `SettingsManager`, `FrameType`?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._

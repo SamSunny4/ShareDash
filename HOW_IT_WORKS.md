@@ -34,7 +34,7 @@ ShareDash eliminates these limitations by operating directly over **physical poi
 - **USB 3.x Cable Fast-Path** (via direct ADB port forwarding or USB RNDIS/NCM Tethering).
 - **Dedicated 5 GHz / 6 GHz Mobile Hotspot** (smart bi-directional provisioning: PC-hosted or Phone-hosted).
 - **Wi-Fi Direct P2P** (`192.168.49.x` direct peer links).
-- **Bluetooth Low Energy (BLE 5.0+)** (GATT capability exchange & zero-touch out-of-band automation).
+- **Zero-LAN UDP Multicast / Broadcast** (sub-second zero-touch peer discovery and pairing).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -44,9 +44,9 @@ ShareDash eliminates these limitations by operating directly over **physical poi
 │  ┌────────────┐     ⚡ USB 3.x Fast-Path (3 In-Flight Streams)   ┌────────────────┐ │
 │  │            │ ═══════════════════════════════════════════════> │                │ │
 │  │ Rust Core  │                                                  │ Kotlin / JVM   │ │
-│  │   Engine   │     📶 5GHz Wi-Fi Hotspot (3 In-Flight Streams)  │ Concurrent     │ │
+│  │ / Win App  │     📶 5GHz Wi-Fi Hotspot (3 In-Flight Streams)  │ Concurrent     │ │
 │  │            │ ───────────────────────────────────────────────> │ FileChannel    │ │
-│  │            │     🔵 BLE GATT Control, Signaling & Auto-AP     │ Disk Writer    │ │
+│  │            │     📡 Wi-Fi Direct & UDP Zero-LAN Signaling     │ Disk Writer    │ │
 │  └────────────┘ < - - - - - - - - - - - - - - - - - - - - - - - > └────────────────┘ │
 │                                                                             │
 │                 🚀 Up to 150+ MB/s Aggregate Line-Speed Transfer            │
@@ -83,7 +83,8 @@ ShareDash uses a dual-engine architecture: a high-performance **Rust backend** o
 
 ```mermaid
 graph TB
-    subgraph WindowsPC ["💻 Windows Desktop (Rust 2021)"]
+    subgraph WindowsPC ["💻 Windows Desktop (Rust 2021 + .NET 9 WPF)"]
+        WinApp["Native Windows Desktop App (WPF / .NET 9)"]
         CLI["Interactive ANSI CLI Wizard (cli.rs)"]
         WebUI["Fluent Mica Web Dashboard (Axum + Embedded Assets)"]
         
@@ -92,15 +93,15 @@ graph TB
             Chunker["High-Throughput Adaptive Chunker (storage/chunker.rs)"]
             Verifier["SHA-256 & BLAKE3 Verifier (storage/verifier.rs)"]
             ManifestDB["SQLite WAL Manifest Store (storage/manifest_db.rs)"]
-            HotspotMgr["Smart Hotspot Engine - WinRT / Netsh / BLE (hotspot.rs)"]
-            BleScanner["BLE Central Engine - btleplug (discovery/bluetooth.rs)"]
+            HotspotMgr["Smart Hotspot Engine - WinRT / Netsh (hotspot.rs)"]
+            UdpScanner["UDP Discovery Beacon Engine (discovery/mdns.rs)"]
         end
     end
 
     subgraph Channels ["Direct Physical Transport Layer"]
         USB_CH["⚡ USB 3.x Fast-Path (ADB tcp:54325 -> 54321 / RNDIS)"]
         WIFI_CH["📶 Dedicated 5GHz / 6GHz Direct Hotspot (TCP 54321)"]
-        BLE_CH["🔵 Bluetooth Low Energy GATT (0x5344 / 0x5345 / 0x5346)"]
+        P2P_CH["📡 Wi-Fi Direct / Zero-LAN UDP Beaconing (Port 54321)"]
     end
 
     subgraph AndroidDevice ["📱 Android Device (Kotlin + Compose)"]
@@ -108,24 +109,24 @@ graph TB
         
         subgraph AndroidCore ["Android Core Services"]
             AndroidServer["AndroidHttpServer (server/AndroidHttpServer.kt)"]
-            BleCmdServer["BleCommandServer GATT Peripheral (discovery/BleCommandServer.kt)"]
-            BleAdvertiser["BleDiscoveryManager (discovery/BleDiscoveryManager.kt)"]
+            UdpDiscovery["UdpDiscoveryManager (discovery/UdpDiscoveryManager.kt)"]
             HotspotService["HotspotManager - 5GHz SoftAP & Band Freeing (discovery/HotspotManager.kt)"]
             StorageWriter["Concurrent FileChannel Disk Writer (server/AndroidHttpServer.kt)"]
             FGService["Foreground Transfer Service (service/)"]
         end
     end
 
+    WinApp <--> RustCore
     CLI <--> RustCore
     WebUI <--> RustCore
 
     RustCore <==> USB_CH
     RustCore <==> WIFI_CH
-    RustCore <--> BLE_CH
+    RustCore <--> P2P_CH
 
     USB_CH <==> AndroidCore
     WIFI_CH <==> AndroidCore
-    BLE_CH <--> AndroidCore
+    P2P_CH <--> AndroidCore
 
     AndroidCore <--> AndroidUI
 ```
@@ -149,17 +150,17 @@ flowchart TD
 
     subgraph PCHostFlow ["PC Hotspot Host Flow"]
         PCHost --> PCStartAP["PC starts 5GHz SoftAP (Gateway: 192.168.137.1)"]
-        PCStartAP --> SendCredsBLE["Send SSID/Password to Phone via BLE GATT / USB"]
-        SendCredsBLE --> PhoneCheckWifi["Phone verifies Wi-Fi is ON (auto-prompts if OFF)"]
+        PCStartAP --> SendCredsDirect["Send SSID/Password to Phone via Zero-LAN / USB / P2P"]
+        SendCredsDirect --> PhoneCheckWifi["Phone verifies Wi-Fi is ON (auto-prompts if OFF)"]
         PhoneCheckWifi --> PhoneConnect["Phone associates to PC Hotspot"]
         PhoneConnect --> FastScan["PC fast-probes candidate IPs in parallel (< 500ms)"]
     end
 
     subgraph PhoneHostFlow ["Phone Hotspot Host Flow"]
-        PhoneHost --> ReqBLE["PC requests Phone to start 5GHz Hotspot over BLE"]
-        ReqBLE --> FreeBand["Phone disconnects client Wi-Fi to free 5GHz/6GHz antenna"]
+        PhoneHost --> ReqDirect["PC requests Phone to start 5GHz Hotspot over Direct P2P"]
+        ReqDirect --> FreeBand["Phone disconnects client Wi-Fi to free 5GHz/6GHz antenna"]
         FreeBand --> PhoneStartAP["Phone brings up 5GHz SoftAP / LocalOnlyHotspot"]
-        PhoneStartAP --> RetCreds["Phone sends SSID, Password, Gateway over BLE"]
+        PhoneStartAP --> RetCreds["Phone broadcasts SSID, Password, Gateway over Direct Wi-Fi"]
         RetCreds --> PCEngage["PC Wi-Fi adapter auto-enabled"]
         PCEngage --> PCConnectWPA3["PC creates WPA3-SAE / WPA2-PSK WLAN Profile & associates"]
     end
@@ -171,7 +172,7 @@ flowchart TD
 
 ### Key Technical Innovations:
 1. **Android Radio Band Freeing**: Before starting `LocalOnlyHotspot`, the Android app invokes `wifiManager.disconnect()`. This frees the 5GHz/6GHz radio hardware from client duties, dedicating the full antenna array to SoftAP broadcast for maximum PHY throughput.
-2. **Dynamic Gateway Detection**: Rather than hardcoding `192.168.43.1`, Android dynamically parses active network interfaces (`ap0`, `wlan1`, `swlan0`, `softap0`, `rndis0`) and delivers the actual gateway IP in the BLE response payload.
+2. **Dynamic Gateway Detection**: Rather than hardcoding `192.168.43.1`, Android dynamically parses active network interfaces (`ap0`, `wlan1`, `swlan0`, `softap0`, `rndis0`) and delivers the actual gateway IP in the direct response payload.
 3. **Sub-500ms Instant Client Detection**: When the PC hosts the hotspot, [`fast_scan_hotspot_clients()`](file:///e:/ShareDash/src/hotspot.rs) queries the Windows ARP cache and concurrently probes candidate IPs (`.2` through `.25`) with a 300ms timeout using `futures::future::join_all`, identifying the phone in **under 500 milliseconds**.
 4. **WPA3-Personal (SAE) Compatibility**: Android 12+ defaults to WPA3-Personal for Local-Only Hotspots. ShareDash generates dual-mode Windows XML profiles supporting both `WPA3SAE` and `WPA2PSK`.
 
@@ -183,29 +184,32 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant PC as 💻 Windows PC (ShareDash)
-    participant BLE as 🔵 BLE GATT / RFCOMM
+    participant UDP as 📡 Wi-Fi Direct / UDP Zero-LAN
     participant Phone as 📱 Android Phone (ShareDash)
     participant USB as ⚡ USB Subsystem
 
-    Note over PC,Phone: Phase 1: Bluetooth & Wi-Fi Scanning
-    Phone->>BLE: Advertise Service UUID 0x5344 + Device Model
-    PC->>BLE: Scan for nearby ShareDash devices (RSSI tracking)
-    PC-->>PC: Auto-selects single device or presents interactive menu
+    Note over PC,Phone: Phase 1: Direct Wi-Fi & USB Fast-Path Discovery
+    Phone->>UDP: Broadcast presence beacon (UDP port 54321)
+    PC->>UDP: Scan for nearby ShareDash UDP beacons on active interfaces
+    opt USB Cable Connected
+        PC->>USB: Detect ADB or RNDIS/NCM Tethering link (127.0.0.1:54325)
+    end
+    PC-->>PC: Auto-deduplicates device endpoints & activates best fast-path
 
     Note over PC,Phone: Phase 2: Hardware & Hotspot Readiness Check
     PC->>PC: Check PC Internet status (WinRT GetInternetConnectionProfile + DNS probe)
-    PC->>BLE: Read Characteristic 0x5345 (Wi-Fi 6 / 5GHz capabilities)
+    PC->>Phone: Query Wi-Fi capabilities via Direct HTTP / UDP probe
     PC-->>PC: Determine optimal host (Phone AP if no internet; PC AP if internet present)
 
     Note over PC,Phone: Phase 3: Hotspot Provisioning & Auto-Connect
     alt Phone Chosen as Host
-        PC->>BLE: Write {"cmd":"start_hotspot"} to Command Char 0x5346
+        PC->>Phone: Request start 5GHz Hotspot via direct endpoint
         Phone->>Phone: Free Wi-Fi radio & start 5GHz SoftAP
-        Phone-->>BLE: Return {"status":"hotspot_started","ssid":"...","password":"...","gateway":"..."}
+        Phone-->>PC: Return {"status":"hotspot_started","ssid":"...","password":"...","gateway":"..."}
         PC->>PC: Auto-enable PC Wi-Fi adapter & apply WPA3/WPA2 profile
     else PC Chosen as Host
         PC->>PC: Create 5GHz PC Hotspot (192.168.137.1)
-        PC->>BLE: Write {"cmd":"wifi_connect","ssid":"...","password":"..."}
+        PC->>Phone: Provision Wi-Fi credentials
         Phone->>Phone: Ensure Wi-Fi is ON & bind via WifiNetworkSpecifier
         PC->>Phone: Fast parallel candidate probe (< 500ms)
     end
@@ -279,8 +283,6 @@ com.sharedash.app/
 ├── server/
 │   └── AndroidHttpServer.kt         # Concurrent FileChannel chunk receiver (port 54321)
 ├── discovery/
-│   ├── BleDiscoveryManager.kt       # BLE advertisement (UUID 0x5344) & Wi-Fi capability reporting
-│   ├── BleCommandServer.kt          # GATT server: handles wifi_connect, start_hotspot, usb_tether_on
 │   ├── AndroidPairingCoordinator.kt # 3-way pairing state machine
 │   ├── HotspotManager.kt            # 5GHz SoftAP creation, band freeing & dynamic gateway detection
 │   └── UdpDiscoveryManager.kt       # UDP peer discovery broadcast listener
@@ -307,7 +309,7 @@ src/
 ├── cli_widgets.rs                   # ANSI progress bars, animated spinners, speedometers, tables
 ├── hotspot.rs                       # Smart hotspot engine, internet probe, fast parallel client scan
 ├── discovery/
-│   ├── bluetooth.rs                 # BLE Central scanning & GATT client (btleplug)
+│   ├── mdns.rs                      # UDP multicast discovery beacon (port 54321)
 │   ├── peer_discovery.rs            # UDP broadcast beacon (port 54321)
 │   └── pairing.rs                   # Cryptographic PIN generation & state machine
 ├── protocol/
@@ -367,7 +369,7 @@ src/
 | **PC 5GHz Hotspot** | `192.168.137.0/24` | **1.7 Gbps (5GHz)** | High-speed wireless direct link (PC as AP) |
 | **Phone 5GHz Hotspot** | `192.168.43.0/24` | **1.2 Gbps (5GHz)** | High-speed wireless direct link (Phone as AP) |
 | **Wi-Fi Direct P2P Group** | `192.168.49.0/24` | **1.4 Gbps (5GHz)** | Direct P2P connection without access point |
-| **BLE 5.0+ GATT** | UUID `0x5344` | **2 Mbps** | Out-of-band control plane, capability discovery & automation |
+| **Wi-Fi Direct / UDP Zero-LAN** | `Port 54321` | **Sub-second** | Direct local beaconing, peer handshake & capability exchange |
 
 ---
 
@@ -409,5 +411,5 @@ Accessible at `http://127.0.0.1:54321` or launched via [`run_windows_app.bat`](f
 
 ## 🏁 Summary
 
-ShareDash demonstrates that device-to-device file transfers do not require cloud middleboxes, local Wi-Fi routers, or active internet connections. By dynamically discovering capabilities over **Bluetooth Low Energy**, establishing high-speed **5 GHz Hotspot** and **USB 3.x Cable** connections, and orchestrating them via an **asynchronous pipelined multipath streaming engine**, ShareDash achieves **multi-gigabit throughput** with **100% cryptographic integrity**.
+ShareDash demonstrates that device-to-device file transfers do not require cloud middleboxes, local Wi-Fi routers, or active internet connections. By dynamically discovering capabilities over **direct Wi-Fi Direct and Zero-LAN UDP beaconing**, establishing high-speed **5 GHz Hotspot** and **USB 3.x Cable** connections, and orchestrating them via an **asynchronous pipelined multipath streaming engine**, ShareDash achieves **multi-gigabit throughput** with **100% cryptographic integrity**.
 

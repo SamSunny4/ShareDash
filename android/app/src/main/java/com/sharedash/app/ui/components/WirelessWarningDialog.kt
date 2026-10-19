@@ -117,7 +117,7 @@ fun WirelessWarningDialog(
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Wireless transfers over Wi-Fi Direct or Bluetooth may be significantly slower (~20-50 MB/s) compared to USB 3.x line speed (300+ MB/s).",
+                            text = "Wireless transfers over Wi-Fi Direct may be slower (~20-50 MB/s) compared to USB 3.x line speed (300+ MB/s).",
                             fontSize = 12.sp,
                             color = TextSecondary,
                             lineHeight = 16.sp

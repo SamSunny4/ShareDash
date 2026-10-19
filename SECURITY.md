@@ -18,7 +18,7 @@ ShareDash is engineered from the ground up with a zero-trust, zero-cloud offline
 
 1. **End-to-End Encryption**:
    - Every file chunk payload is encrypted using authenticated **AES-256-GCM** or **ChaCha20-Poly1305**.
-   - Session keys are derived per transfer session using high-entropy ephemeral tokens exchanged during the Bluetooth LE / PIN verification handshake.
+   - Session keys are derived per transfer session using high-entropy ephemeral tokens exchanged during the direct Wi-Fi Direct / PIN verification handshake.
 
 2. **Zero-Corruption Bit Integrity**:
    - Each individual frame is checked with **CRC32-Castagnoli** prior to deserialization to reject noisy physical link interference.
@@ -44,7 +44,7 @@ Instead, please report it via one of the following methods:
 ### What to Include:
 - Description of the vulnerability.
 - Proof of Concept (PoC) or reproducible steps.
-- Affected component(s) (e.g. Rust Core, Android App, BLE Protocol).
+- Affected component(s) (e.g. Rust Core, Android App, Windows App, Transfer Protocol).
 - Potential impact.
 
 We will acknowledge receipt within **48 hours** and provide a timeline for resolution. Once resolved, we will publish a security advisory crediting you.

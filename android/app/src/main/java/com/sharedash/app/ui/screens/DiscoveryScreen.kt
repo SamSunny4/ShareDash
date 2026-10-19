@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -73,7 +72,6 @@ fun DiscoveryScreen(
     connectedPeer: DiscoveredPeer?,
     isUsbConnected: Boolean,
     isWifiEnabled: Boolean,
-    isBluetoothEnabled: Boolean,
     onDeviceSelected: (DiscoveredPeer) -> Unit,
     onDisconnect: () -> Unit,
     onPickFiles: () -> Unit,
@@ -85,7 +83,6 @@ fun DiscoveryScreen(
     hotspotState: HotspotState = HotspotState.Idle,
     onStartHotspot: () -> Unit = {},
     onStopHotspot: () -> Unit = {},
-    onEnableBluetooth: () -> Unit = {},
     onEnableWifi: () -> Unit = {},
     onReturnToUsbMode: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -189,75 +186,6 @@ fun DiscoveryScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // ═══════════════════════════════════════════════════════════════
-        //  BLUETOOTH OFF ALERT BANNER
-        // ═══════════════════════════════════════════════════════════════
-        if (!isBluetoothEnabled) {
-            NeoCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                cornerRadius = 18.dp,
-                elevation = 4.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(NeoBlue.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bluetooth,
-                                contentDescription = "Bluetooth Off",
-                                tint = NeoBlue,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Bluetooth is Turned Off",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Enable for wireless nearby discovery",
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    NeoButton(
-                        onClick = onEnableBluetooth,
-                        cornerRadius = 12.dp,
-                        accentColor = NeoBlue
-                    ) {
-                        Text(
-                            text = "Turn On",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
 
         // ═══════════════════════════════════════════════════════════════
         //  USB 3.x TURBO BOOST BANNER
@@ -483,7 +411,7 @@ fun DiscoveryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Scanning over Wi-Fi, Bluetooth & USB...",
+                        text = "Scanning over Wi-Fi & USB...",
                         fontSize = 13.sp,
                         color = TextSecondary,
                         fontWeight = FontWeight.Medium
