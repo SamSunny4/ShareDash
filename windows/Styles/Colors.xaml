@@ -1,0 +1,60 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Apple-Grade Midnight Obsidian Base -->
+    <Color x:Key="SpaceBlackColor">#040712</Color>
+    <Color x:Key="DeepMidnightColor">#080E1E</Color>
+    <Color x:Key="GlassBgColor">#121A2C</Color>
+    <Color x:Key="GlassBorderColor">#22304C</Color>
+
+    <!-- Neon Accents -->
+    <Color x:Key="NeonGreenColor">#00FFA3</Color>
+    <Color x:Key="NeonCyanColor">#00D2FF</Color>
+    <Color x:Key="AlertAmberColor">#F59E0B</Color>
+
+    <!-- Typography -->
+    <Color x:Key="TextWhiteColor">#FFFFFF</Color>
+    <Color x:Key="TextSecondaryColor">#94A3B8</Color>
+    <Color x:Key="TextMutedColor">#586882</Color>
+
+    <!-- Solid Brushes -->
+    <SolidColorBrush x:Key="SpaceBlackBrush" Color="{StaticResource SpaceBlackColor}"/>
+    <SolidColorBrush x:Key="DeepMidnightBrush" Color="{StaticResource DeepMidnightColor}"/>
+    <SolidColorBrush x:Key="GlassBgBrush" Color="{StaticResource GlassBgColor}"/>
+    <SolidColorBrush x:Key="GlassBorderBrush" Color="{StaticResource GlassBorderColor}"/>
+
+    <SolidColorBrush x:Key="NeonGreenBrush" Color="{StaticResource NeonGreenColor}"/>
+    <SolidColorBrush x:Key="NeonCyanBrush" Color="{StaticResource NeonCyanColor}"/>
+    <SolidColorBrush x:Key="AlertAmberBrush" Color="{StaticResource AlertAmberColor}"/>
+
+    <SolidColorBrush x:Key="TextWhiteBrush" Color="{StaticResource TextWhiteColor}"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+
+    <!-- Gradients -->
+    <LinearGradientBrush x:Key="CyanGreenGradient" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#00FFA3" Offset="0"/>
+        <GradientStop Color="#00D2FF" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- Apple Glass Specular Border Brush -->
+    <LinearGradientBrush x:Key="AppleGlassBorderBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#45FFFFFF" Offset="0"/>
+        <GradientStop Color="#14FFFFFF" Offset="0.35"/>
+        <GradientStop Color="#0A00FFA3" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- Apple Glass Top Specular Sheen -->
+    <LinearGradientBrush x:Key="GlassSheenBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#1EFFFFFF" Offset="0"/>
+        <GradientStop Color="#00FFFFFF" Offset="0.5"/>
+    </LinearGradientBrush>
+
+    <!-- Smooth Velvety Background Gradient -->
+    <LinearGradientBrush x:Key="SmoothMidnightBgGradient" StartPoint="0.5,0" EndPoint="0.5,1">
+        <GradientStop Color="#04060E" Offset="0"/>
+        <GradientStop Color="#060C1C" Offset="0.45"/>
+        <GradientStop Color="#081228" Offset="1"/>
+    </LinearGradientBrush>
+
+</ResourceDictionary>

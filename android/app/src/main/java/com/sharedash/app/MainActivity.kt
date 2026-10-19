@@ -2273,6 +2273,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    fun requestEnableBluetooth() {
+        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+        val adapter = bluetoothManager?.adapter
+        if (adapter != null && !adapter.isEnabled) {
+            val enableBtIntent = android.content.Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            enableBtIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                startActivity(enableBtIntent)
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Could not request enable bluetooth: ${e.message}")
+            }
+        }
+    }
+
     private fun startDiscovery() {
         try {
             udpManager.startDiscovery(lifecycleScope)
@@ -2280,10 +2294,17 @@ class MainActivity : ComponentActivity() {
             android.util.Log.e("MainActivity", "UDP start failed: ${e.message}")
         }
 
+        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
+        val adapter = bluetoothManager?.adapter
+        if (adapter != null && !adapter.isEnabled) {
+            requestEnableBluetooth()
+        }
+
         if (hasBluetoothConnectPermission()) {
             try {
                 bleCommandServer.start()
                 rfcommServer.start(lifecycleScope)
+                bleManager.startAdvertising()
                 bleManager.startDiscovery()
             } catch (e: SecurityException) {
                 android.util.Log.w("MainActivity", "Bluetooth SecurityException: ${e.message}")

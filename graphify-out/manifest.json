@@ -12,10 +12,10 @@
     "semantic_hash": "79e11f3dda2335b4c49ac6a97104129d"
   },
   "android/app/src/main/java/com/sharedash/app/MainActivity.kt": {
-    "mtime": 1790344380.272333,
-    "seen": 1792292743.5985625,
-    "ast_hash": "b6089d82dfd6cbf7144b0c39a109c1b4",
-    "semantic_hash": "b6089d82dfd6cbf7144b0c39a109c1b4"
+    "mtime": 1792412169.0754313,
+    "seen": 1792412207.6264117,
+    "ast_hash": "83f87939937233e50b989108690bdbc6",
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ShareDashApplication.kt": {
     "mtime": 1786903183.9125223,
@@ -633,6 +633,144 @@
     "mtime": 1792274192.9336326,
     "seen": 1792294040.5118563,
     "ast_hash": "24dd9da4ecf2dbea4416abfa0996d6b7",
+    "semantic_hash": ""
+  },
+  "windows/App.xaml": {
+    "mtime": 1792410685.3727753,
+    "seen": 1792410984.4259477,
+    "ast_hash": "df1321d7d16306c9b5c3a026ceb2128d",
+    "semantic_hash": ""
+  },
+  "windows/App.xaml.cs": {
+    "mtime": 1792410236.0092947,
+    "seen": 1792410984.425973,
+    "ast_hash": "90a5f5a97239cc6ba5eed195e5e948d6",
+    "semantic_hash": ""
+  },
+  "windows/AssemblyInfo.cs": {
+    "mtime": 1792410236.0105014,
+    "seen": 1792410984.42598,
+    "ast_hash": "8a158a8a488c0dd7d226a06783fc2860",
+    "semantic_hash": ""
+  },
+  "windows/Converters/UiConverters.cs": {
+    "mtime": 1792410813.987183,
+    "seen": 1792410984.4259853,
+    "ast_hash": "db89817d77074a6eec064972a3b9b94b",
+    "semantic_hash": ""
+  },
+  "windows/MainWindow.xaml": {
+    "mtime": 1792413055.7871475,
+    "seen": 1792413110.6898546,
+    "ast_hash": "2449770f11d4b8af9666f7744fbd9adf",
+    "semantic_hash": ""
+  },
+  "windows/MainWindow.xaml.cs": {
+    "mtime": 1792412070.4956498,
+    "seen": 1792412207.6266506,
+    "ast_hash": "f2d9caa4847e648179f4d452c517c852",
+    "semantic_hash": ""
+  },
+  "windows/Models/AdapterInfo.cs": {
+    "mtime": 1792410442.3329422,
+    "seen": 1792410984.4259973,
+    "ast_hash": "c9f4c9e13e3279c4745adb371ebe8fc9",
+    "semantic_hash": ""
+  },
+  "windows/Models/BleDevice.cs": {
+    "mtime": 1792410453.5746965,
+    "seen": 1792410984.4260006,
+    "ast_hash": "2f7b3fe733aff3eabb686f3908324eaa",
+    "semantic_hash": ""
+  },
+  "windows/Models/DeviceInfo.cs": {
+    "mtime": 1792410428.4798753,
+    "seen": 1792410984.4260037,
+    "ast_hash": "6abf55000ebaf1bd15b5f35b06637f46",
+    "semantic_hash": ""
+  },
+  "windows/Models/TelemetryData.cs": {
+    "mtime": 1792410475.791156,
+    "seen": 1792410984.4260068,
+    "ast_hash": "9e261614886d637991f9150d3a0ce4fc",
+    "semantic_hash": ""
+  },
+  "windows/Models/TransferItem.cs": {
+    "mtime": 1792410465.762084,
+    "seen": 1792410984.42601,
+    "ast_hash": "16a07937a2da1fcf8ac77b6fee31a6f4",
+    "semantic_hash": ""
+  },
+  "windows/Services/ApiClient.cs": {
+    "mtime": 1792410527.9179833,
+    "seen": 1792410984.426013,
+    "ast_hash": "652ea4a217f14b806ecb2cde6aebeed9",
+    "semantic_hash": ""
+  },
+  "windows/Services/EngineSupervisor.cs": {
+    "mtime": 1792410506.546629,
+    "seen": 1792410984.4260163,
+    "ast_hash": "8fe0f242497d55f5d78d8c26c6c6e3c0",
+    "semantic_hash": ""
+  },
+  "windows/Services/LogService.cs": {
+    "mtime": 1792410489.7639704,
+    "seen": 1792410984.4260197,
+    "ast_hash": "2c2f46d6da4ff1ed2a41a094609cf063",
+    "semantic_hash": ""
+  },
+  "windows/Services/MultipathSender.cs": {
+    "mtime": 1792410570.3808348,
+    "seen": 1792410984.4260223,
+    "ast_hash": "1003df3083c59a2233d46a39e0d27a4e",
+    "semantic_hash": ""
+  },
+  "windows/Services/TelemetryWebSocketClient.cs": {
+    "mtime": 1792410913.4326737,
+    "seen": 1792410984.4260254,
+    "ast_hash": "ff1402db083d1de9d0af032a11a3ec5c",
+    "semantic_hash": ""
+  },
+  "windows/ShareDash.Windows.csproj": {
+    "mtime": 1792412780.3333888,
+    "seen": 1792413110.6898792,
+    "ast_hash": "88ed21cea1f2255cbd39a7e9098a955c",
+    "semantic_hash": ""
+  },
+  "windows/Styles/Colors.xaml": {
+    "mtime": 1792412903.946133,
+    "seen": 1792413110.689881,
+    "ast_hash": "9c78b8b35b9905ebd27f1b1d772be4a6",
+    "semantic_hash": ""
+  },
+  "windows/Styles/Controls.xaml": {
+    "mtime": 1792412931.8150458,
+    "seen": 1792413110.6898825,
+    "ast_hash": "3a4fde1e1f7a897367d45e1307b3f96d",
+    "semantic_hash": ""
+  },
+  "windows/ViewModels/MainViewModel.cs": {
+    "mtime": 1792413006.8881269,
+    "seen": 1792413110.6898842,
+    "ast_hash": "0f7c20f0cc9426c9f8ea333cd8fe18fb",
+    "semantic_hash": ""
+  },
+  "windows/ViewModels/RelayCommand.cs": {
+    "mtime": 1792410584.9498682,
+    "seen": 1792410984.426041,
+    "ast_hash": "9924bf16a385be2979ac4631c5de069b",
+    "semantic_hash": ""
+  },
+  "windows/ViewModels/ViewModelBase.cs": {
+    "mtime": 1792410577.5300655,
+    "seen": 1792410984.4260435,
+    "ast_hash": "65ce9c7c49ee72cf1f9841f56f48122d",
+    "semantic_hash": ""
+  },
+  "windows/Services/BluetoothRadioService.cs": {
+    "mtime": 1792412831.2303057,
+    "seen": 1792413110.6898699,
+    "ast_hash": "01bd9ed8ff78286ee7b26448c27ded1f",
     "semantic_hash": ""
   }
 }
