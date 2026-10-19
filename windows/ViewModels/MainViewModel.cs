@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Net.NetworkInformation;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -21,16 +22,62 @@ public enum AppScreenState
 
 public class ShareDashPeerItem : ViewModelBase
 {
-    public string DeviceId { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
-    public string IpAddress { get; set; } = string.Empty;
+    private string _deviceId = string.Empty;
+    public string DeviceId
+    {
+        get => _deviceId;
+        set => SetField(ref _deviceId, value);
+    }
+
+    private string _name = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set => SetField(ref _name, value);
+    }
+
+    private string _ipAddress = string.Empty;
+    public string IpAddress
+    {
+        get => _ipAddress;
+        set => SetField(ref _ipAddress, value);
+    }
+
     public int Port { get; set; } = 54321;
     public string OsType { get; set; } = "Phone"; // "Phone" or "PC"
-    public string ConnectionType { get; set; } = "Bluetooth LE • Wi-Fi Direct";
-    public int Rssi { get; set; } = -65;
+
+    private string _connectionType = "Wi-Fi Direct";
+    public string ConnectionType
+    {
+        get => _connectionType;
+        set => SetField(ref _connectionType, value);
+    }
+
+    private string _shortTransport = "Wi-Fi Direct";
+    public string ShortTransport
+    {
+        get => _shortTransport;
+        set => SetField(ref _shortTransport, value);
+    }
+
+    private bool _hasUsb;
+    public bool HasUsb
+    {
+        get => _hasUsb;
+        set => SetField(ref _hasUsb, value);
+    }
+
+    private bool _hasWifi;
+    public bool HasWifi
+    {
+        get => _hasWifi;
+        set => SetField(ref _hasWifi, value);
+    }
+
+    public int Rssi { get; set; } = -50;
 
     public string Icon => OsType.Equals("PC", StringComparison.OrdinalIgnoreCase) ? "💻" : "📱";
-    public string SignalBadge => Rssi >= -60 ? "●●●● High Speed" : "●●●○ Good";
+    public string SignalBadge => HasUsb ? "⚡ 3.2 Gbps Line Speed" : "●●●● High Speed";
 }
 
 public class MainViewModel : ViewModelBase
@@ -75,7 +122,7 @@ public class MainViewModel : ViewModelBase
         set => SetField(ref _activeDevice, value);
     }
 
-    private string _statusSubtext = "Bluetooth & Wi-Fi discoverable as ShareDash Desktop";
+    private string _statusSubtext = "Wi-Fi Direct & USB discoverable as ShareDash Desktop";
     public string StatusSubtext
     {
         get => _statusSubtext;
@@ -98,20 +145,12 @@ public class MainViewModel : ViewModelBase
         set => SetField(ref _usbModelName, value);
     }
 
-    private bool _isBluetoothEnabled = true;
-    public bool IsBluetoothEnabled
+    private bool _isUsbPlugged;
+    public bool IsUsbPlugged
     {
-        get => _isBluetoothEnabled;
-        set
-        {
-            if (SetField(ref _isBluetoothEnabled, value))
-            {
-                OnPropertyChanged(nameof(IsBluetoothOff));
-            }
-        }
+        get => _isUsbPlugged;
+        set => SetField(ref _isUsbPlugged, value);
     }
-
-    public bool IsBluetoothOff => !IsBluetoothEnabled;
     #endregion
 
     #region Live Transfer Metrics (Same as Phone)
@@ -120,6 +159,13 @@ public class MainViewModel : ViewModelBase
     {
         get => _currentFileName;
         set => SetField(ref _currentFileName, value);
+    }
+
+    private double _progressPercentage;
+    public double ProgressPercentage
+    {
+        get => _progressPercentage;
+        set => SetField(ref _progressPercentage, value);
     }
 
     private double _currentSpeedMbS;
@@ -134,13 +180,6 @@ public class MainViewModel : ViewModelBase
     {
         get => _currentSpeedGbps;
         set => SetField(ref _currentSpeedGbps, value);
-    }
-
-    private double _progressPercentage;
-    public double ProgressPercentage
-    {
-        get => _progressPercentage;
-        set => SetField(ref _progressPercentage, value);
     }
 
     private string _formattedTransferred = "0 MB";
@@ -193,7 +232,6 @@ public class MainViewModel : ViewModelBase
     public ICommand SelectFolderCommand { get; }
     public ICommand CancelTransferCommand { get; }
     public ICommand BackToScanningCommand { get; }
-    public ICommand TurnOnBluetoothCommand { get; }
     #endregion
 
     public MainViewModel()
@@ -204,12 +242,6 @@ public class MainViewModel : ViewModelBase
         SelectFolderCommand = new RelayCommand(PickFolderAndTransfer);
         CancelTransferCommand = new RelayCommand(CancelTransfer);
         BackToScanningCommand = new RelayCommand(BackToScanning);
-        TurnOnBluetoothCommand = new RelayCommand(async () =>
-        {
-            _log.Info("Turning on Bluetooth...");
-            await BluetoothRadioService.TurnOnBluetoothAsync();
-            await CheckBluetoothStateAsync();
-        });
 
         // Multipath progress wire
         _sender.OnProgress += (pct, speedMbS, speedGbps, elapsed, eta, channels) =>
@@ -248,34 +280,43 @@ public class MainViewModel : ViewModelBase
         };
 
         // Telemetry WebSocket wire (listens for incoming transfers from phone/peer)
-        _telemetryWs.OnTelemetryReceived += telemetry =>
+        _telemetryWs.OnTelemetryReceived += telem =>
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                if (telemetry.Status == "ACTIVE" || telemetry.Status == "VERIFYING")
+                if (telem.Status.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase) ||
+                    telem.Status.Equals("TRANSFERRING", StringComparison.OrdinalIgnoreCase))
                 {
                     if (CurrentState != AppScreenState.Transferring)
                     {
-                        CurrentFileName = telemetry.Title;
                         CurrentState = AppScreenState.Transferring;
                     }
-                    CurrentSpeedMbS = telemetry.Aggregate.AggregateMbps;
-                    CurrentSpeedGbps = (telemetry.Aggregate.AggregateMbps * 8.0) / 1000.0;
-                    ProgressPercentage = telemetry.Aggregate.ProgressPct;
-                    FormattedTransferred = TransferItem.FormatBytes((long)telemetry.Aggregate.TotalBytesTransferred);
-                    FormattedTotal = TransferItem.FormatBytes((long)telemetry.Aggregate.TotalBytesExpected);
-                    EtaTimeFormatted = $"{TimeSpan.FromSeconds(telemetry.Aggregate.EtaSeconds):mm\\:ss}s";
+
+                    CurrentFileName = telem.Title;
+                    ProgressPercentage = Math.Round(telem.Aggregate.ProgressPct, 1);
+                    CurrentSpeedMbS = Math.Round(telem.Aggregate.AggregateMbps / 8.0, 1);
+                    CurrentSpeedGbps = Math.Round(telem.Aggregate.AggregateMbps / 1000.0, 2);
+                    EtaTimeFormatted = telem.Aggregate.EtaSeconds > 0 ? $"{TimeSpan.FromSeconds(telem.Aggregate.EtaSeconds):mm\\:ss}s" : "--:--";
+
+                    FormattedTransferred = $"{telem.Aggregate.TotalBytesTransferred / (1024.0 * 1024.0):F1} MB";
+                    FormattedTotal = $"{telem.Aggregate.TotalBytesExpected / (1024.0 * 1024.0):F1} MB";
+
+                    var usbTrans = telem.Transports.FirstOrDefault(t => t.TransportKind.Contains("Usb", StringComparison.OrdinalIgnoreCase));
+                    var wifiTrans = telem.Transports.FirstOrDefault(t => !t.TransportKind.Contains("Usb", StringComparison.OrdinalIgnoreCase));
+
+                    UsbSpeedMbS = Math.Round((usbTrans?.CurrentMbps ?? 0) / 8.0, 1);
+                    WifiSpeedMbS = Math.Round((wifiTrans?.CurrentMbps ?? 0) / 8.0, 1);
                 }
-                else if (telemetry.Status == "COMPLETED")
+                else if (telem.Status.Equals("COMPLETED", StringComparison.OrdinalIgnoreCase))
                 {
                     if (CurrentState == AppScreenState.Transferring)
                     {
                         LatestResult = new TransferResult
                         {
-                            FileName = telemetry.Title,
-                            SizeMb = (double)telemetry.Aggregate.TotalBytesTransferred / (1024.0 * 1024.0),
-                            TimeSecs = telemetry.Aggregate.ElapsedSeconds,
-                            AvgSpeedMbS = telemetry.Aggregate.AggregateMbps,
+                            FileName = telem.Title,
+                            SizeMb = telem.Aggregate.TotalBytesExpected / (1024.0 * 1024.0),
+                            TimeSecs = telem.Aggregate.ElapsedSeconds,
+                            AvgSpeedMbS = telem.Aggregate.AggregateMbps / 8.0,
                             IntegrityOk = true
                         };
                         CurrentState = AppScreenState.Completed;
@@ -284,123 +325,144 @@ public class MainViewModel : ViewModelBase
             });
         };
 
-        // Periodic poller (every 1.5s) for BLE devices, USB status, and peers
+        // Periodic poller (every 1.5s) for USB status and Wi-Fi Direct peers
         _pollTimer.Interval = TimeSpan.FromSeconds(1.5);
         _pollTimer.Tick += async (_, _) => await PollDevicesAsync();
         _pollTimer.Start();
 
-        // Auto-initialize: Start engine, ensure Bluetooth/Wi-Fi active, and start scanning
+        // Auto-initialize: Start engine, ensure discoverable over Wi-Fi Direct and USB
         _ = InitializeAppAsync();
-    }
-
-    public async Task CheckBluetoothStateAsync()
-    {
-        bool on = await BluetoothRadioService.IsBluetoothOnAsync();
-        IsBluetoothEnabled = on;
-        if (!on)
-        {
-            StatusSubtext = "Bluetooth is turned off • Tap alert above to turn on";
-        }
-        else if (StatusSubtext.Contains("turned off"))
-        {
-            StatusSubtext = "Discoverable as ShareDash Desktop";
-        }
     }
 
     private async Task InitializeAppAsync()
     {
-        _log.Info("Opening ShareDash in Minimal Mode...");
-
-        await CheckBluetoothStateAsync();
+        _log.Info("Opening ShareDash in Wi-Fi Direct & USB Mode...");
+        StatusSubtext = "Wi-Fi Direct & USB discoverable as ShareDash Desktop";
         await _engineSupervisor.EnsureEngineStartedAsync(54321);
         _telemetryWs.Start();
-
-        await _api.TriggerBleScanAsync();
-        if (IsBluetoothEnabled)
-        {
-            StatusSubtext = "Discoverable as ShareDash Desktop";
-        }
     }
 
     private async Task PollDevicesAsync()
     {
-        // 0. Verify real Windows Bluetooth Radio state
-        await CheckBluetoothStateAsync();
-
-        // 1. Check USB Cable connection
+        // 1. Check USB Cable / ADB connection
         var bridges = await _api.GetBridgesAsync();
-        if (bridges != null)
-        {
-            IsUsbCableConnected = bridges.Usb.Connected;
-            UsbModelName = bridges.Usb.DeviceModel ?? "Connected Phone";
+        bool usbCablePlugged = bridges != null && bridges.Usb.Connected;
+        string? usbModel = bridges?.Usb?.DeviceModel;
 
-            // If a USB device is plugged in, add it as a primary candidate
-            if (IsUsbCableConnected)
-            {
-                AddOrUpdatePeer(new ShareDashPeerItem
-                {
-                    DeviceId = "usb-cable",
-                    Name = bridges.Usb.DeviceModel ?? "Android Phone (USB 3.x)",
-                    IpAddress = "192.168.42.129",
-                    Port = 54321,
-                    OsType = "Phone",
-                    ConnectionType = "⚡ USB-C 3.x Cable (3.2 Gbps Turbo)",
-                    Rssi = -30
-                });
-            }
-        }
+        IsUsbCableConnected = usbCablePlugged;
+        UsbModelName = usbModel ?? "Connected Phone";
 
-        // 2. Poll Bluetooth LE devices
-        var bleDevices = await _api.GetBleDevicesAsync();
-        foreach (var ble in bleDevices)
-        {
-            // Only show ShareDash devices or nearby phones
-            string os = ble.Name.Contains("PC", StringComparison.OrdinalIgnoreCase) || ble.Name.Contains("Desktop", StringComparison.OrdinalIgnoreCase) ? "PC" : "Phone";
-            AddOrUpdatePeer(new ShareDashPeerItem
-            {
-                DeviceId = ble.PeripheralId,
-                Name = ble.Name,
-                IpAddress = ble.Address,
-                Port = 54321,
-                OsType = os,
-                ConnectionType = "📶 Bluetooth LE • Wi-Fi Direct",
-                Rssi = ble.Rssi
-            });
-        }
-
-        // 3. Poll UDP/LAN discovered peers
+        // 2. Poll UDP / Wi-Fi Direct discovered peers
         var peers = await _api.GetDiscoveredPeersAsync();
+
+        // Track devices seen in this polling tick
+        var seenNormalizedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // A) Process USB ADB Bridge if connected
+        if (usbCablePlugged && !string.IsNullOrWhiteSpace(usbModel))
+        {
+            string normName = CleanDeviceName(usbModel);
+            seenNormalizedNames.Add(normName);
+            AddOrUpdateMergedPeer(normName, "127.0.0.1", 54321, "Phone", isUsbAdb: true, isUsbTether: false, isWifi: false);
+        }
+
+        // B) Process UDP / Wi-Fi Direct / Tethering peers
         foreach (var p in peers)
         {
-            string os = p.FriendlyName.Contains("PC", StringComparison.OrdinalIgnoreCase) ? "PC" : "Phone";
-            AddOrUpdatePeer(new ShareDashPeerItem
-            {
-                DeviceId = p.DeviceId,
-                Name = p.FriendlyName,
-                IpAddress = p.IpAddress,
-                Port = p.Port,
-                OsType = os,
-                ConnectionType = string.Join(" • ", p.SupportedTransports),
-                Rssi = -50
-            });
+            if (string.IsNullOrWhiteSpace(p.FriendlyName)) continue;
+            string normName = CleanDeviceName(p.FriendlyName);
+            seenNormalizedNames.Add(normName);
+
+            string os = p.FriendlyName.Contains("PC", StringComparison.OrdinalIgnoreCase) || p.FriendlyName.Contains("Desktop", StringComparison.OrdinalIgnoreCase) ? "PC" : "Phone";
+
+            bool hasTether = p.SupportedTransports.Any(t => t.Contains("tether", StringComparison.OrdinalIgnoreCase) || t.Contains("usb", StringComparison.OrdinalIgnoreCase))
+                          || p.FriendlyName.Contains("Tethering", StringComparison.OrdinalIgnoreCase);
+            bool hasWifi = p.SupportedTransports.Any(t => t.Contains("wifi", StringComparison.OrdinalIgnoreCase) || t.Contains("udp", StringComparison.OrdinalIgnoreCase) || t.Contains("lan", StringComparison.OrdinalIgnoreCase))
+                        || (!hasTether && !p.FriendlyName.Contains("USB", StringComparison.OrdinalIgnoreCase));
+
+            AddOrUpdateMergedPeer(normName, p.IpAddress, p.Port, os, isUsbAdb: false, isUsbTether: hasTether, isWifi: hasWifi);
         }
+
+        // C) Prune peers that are no longer advertising
+        var toRemove = DiscoveredDevices.Where(d => !seenNormalizedNames.Contains(CleanDeviceName(d.Name))).ToList();
+        foreach (var r in toRemove)
+        {
+            DiscoveredDevices.Remove(r);
+        }
+
+        // Update overall USB plugged status
+        IsUsbPlugged = usbCablePlugged || DiscoveredDevices.Any(d => d.HasUsb);
     }
 
-    private void AddOrUpdatePeer(ShareDashPeerItem item)
+    public static string CleanDeviceName(string raw)
     {
-        var existing = DiscoveredDevices.FirstOrDefault(d => d.DeviceId == item.DeviceId || (d.Name == item.Name && !string.IsNullOrWhiteSpace(item.Name)));
+        if (string.IsNullOrWhiteSpace(raw)) return "Device";
+        // Remove parenthesized suffixes like (ADB 3.2 Gbps), (USB ADB), (USB Tethering), (Wi-Fi), etc.
+        string s = Regex.Replace(raw, @"\s*\([^)]*\)", "").Trim();
+        s = Regex.Replace(s, @"\s*(?:USB|ADB|Tethering|Wi-Fi|Wifi|LAN|Bluetooth|Fast-Path)\b.*$", "", RegexOptions.IgnoreCase).Trim();
+        s = Regex.Replace(s, @"^(SM)\s+([A-Za-z0-9]+)", "$1-$2", RegexOptions.IgnoreCase);
+        return string.IsNullOrWhiteSpace(s) ? raw.Trim() : s;
+    }
+
+    private void AddOrUpdateMergedPeer(string normName, string ip, int port, string os, bool isUsbAdb, bool isUsbTether, bool isWifi)
+    {
+        var existing = DiscoveredDevices.FirstOrDefault(d => string.Equals(CleanDeviceName(d.Name), normName, StringComparison.OrdinalIgnoreCase));
         if (existing == null)
         {
-            DiscoveredDevices.Add(item);
+            existing = new ShareDashPeerItem
+            {
+                DeviceId = normName.ToLowerInvariant().Replace(" ", "-"),
+                Name = normName,
+                IpAddress = ip,
+                Port = port,
+                OsType = os,
+                HasUsb = isUsbAdb || isUsbTether,
+                HasWifi = isWifi
+            };
+            UpdateTransportBadges(existing);
+            DiscoveredDevices.Add(existing);
         }
         else
         {
-            existing.Rssi = item.Rssi;
-            existing.ConnectionType = item.ConnectionType;
-            if (!string.IsNullOrWhiteSpace(item.IpAddress) && !item.IpAddress.Contains(":"))
+            if (isUsbAdb || isUsbTether)
             {
-                existing.IpAddress = item.IpAddress;
+                existing.HasUsb = true;
+                // Prioritize fast USB IP if available
+                if (!string.IsNullOrWhiteSpace(ip) && (ip.StartsWith("127.") || ip.StartsWith("192.168.42.")))
+                {
+                    existing.IpAddress = ip;
+                    existing.Port = port;
+                }
             }
+            if (isWifi)
+            {
+                existing.HasWifi = true;
+                if (string.IsNullOrWhiteSpace(existing.IpAddress) || (!existing.HasUsb && !ip.StartsWith("127.")))
+                {
+                    existing.IpAddress = ip;
+                    existing.Port = port;
+                }
+            }
+            UpdateTransportBadges(existing);
+        }
+    }
+
+    private static void UpdateTransportBadges(ShareDashPeerItem item)
+    {
+        if (item.HasUsb && item.HasWifi)
+        {
+            item.ConnectionType = "⚡ USB 3.2 Gbps • 📶 Wi-Fi Direct (Multipath)";
+            item.ShortTransport = "⚡ USB + 📶 Wi-Fi";
+        }
+        else if (item.HasUsb)
+        {
+            item.ConnectionType = "⚡ USB-C 3.x Cable (3.2 Gbps Line Speed)";
+            item.ShortTransport = "⚡ USB 3.2 Gbps";
+        }
+        else
+        {
+            item.ConnectionType = "📶 Wi-Fi Direct (Zero-LAN)";
+            item.ShortTransport = "📶 Wi-Fi Direct";
         }
     }
 
@@ -437,7 +499,7 @@ public class MainViewModel : ViewModelBase
     {
         ActiveDevice = null;
         CurrentState = AppScreenState.Scanning;
-        StatusSubtext = "Bluetooth & Wi-Fi discoverable as ShareDash Desktop";
+        StatusSubtext = "Wi-Fi Direct & USB discoverable as ShareDash Desktop";
     }
 
     public void BackToScanning()
@@ -510,27 +572,27 @@ public class MainViewModel : ViewModelBase
         var targets = new List<TargetEndpoint>();
 
         // If USB connected, add USB endpoint (3.2 Gbps)
-        if (IsUsbCableConnected || ActiveDevice.DeviceId.Contains("usb"))
+        if (IsUsbCableConnected || ActiveDevice.HasUsb)
         {
             targets.Add(new TargetEndpoint
             {
                 Name = "⚡ USB 3.x Cable Fast-Path",
-                Ip = "192.168.42.129",
+                Ip = ActiveDevice.IpAddress.StartsWith("127.") ? "127.0.0.1" : (ActiveDevice.IpAddress.StartsWith("192.168.42.") ? ActiveDevice.IpAddress : "192.168.42.129"),
                 Port = ActiveDevice.Port
             });
         }
 
         // Add Wi-Fi endpoint
-        if (!string.IsNullOrWhiteSpace(ActiveDevice.IpAddress) && ActiveDevice.IpAddress.Contains('.'))
+        if (!string.IsNullOrWhiteSpace(ActiveDevice.IpAddress) && ActiveDevice.IpAddress.Contains('.') && !ActiveDevice.IpAddress.StartsWith("127."))
         {
             targets.Add(new TargetEndpoint
             {
-                Name = "📶 Wi-Fi 5GHz/6GHz",
+                Name = "📶 Wi-Fi Direct High-Speed",
                 Ip = ActiveDevice.IpAddress,
                 Port = ActiveDevice.Port
             });
         }
-        else
+        else if (!ActiveDevice.HasUsb)
         {
             // Fallback default hotspot/direct IP
             targets.Add(new TargetEndpoint

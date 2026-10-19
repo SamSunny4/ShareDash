@@ -96,25 +96,33 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Minimal Brand -->
+                    <!-- Minimal Brand with Android ShareDash Logo -->
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="30" Height="30" CornerRadius="9" Background="{StaticResource CyanGreenGradient}" Margin="0,0,10,0">
+                        <Border Width="34" Height="34" CornerRadius="10" Margin="0,0,12,0">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#3B82F6" Offset="0"/>
+                                    <GradientStop Color="#06B6D4" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
                             <Border.Effect>
-                                <DropShadowEffect Color="#00FFA3" BlurRadius="12" Opacity="0.45" ShadowDepth="0"/>
+                                <DropShadowEffect Color="#06B6D4" BlurRadius="14" Opacity="0.45" ShadowDepth="0"/>
                             </Border.Effect>
-                            <TextBlock Text="⚡" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#040711"/>
+                            <Path Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8A3,3 0 0,0 21,5A3,3 0 0,0 18,2A3,3 0 0,0 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9A3,3 0 0,0 3,12A3,3 0 0,0 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.35C15.11,18.56 15.08,18.78 15.08,19A3,3 0 0,0 18.08,22A3,3 0 0,0 21.08,19A3,3 0 0,0 18.08,16.08Z"
+                                  Fill="White" Stretch="Uniform" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Text="ShareDash" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextWhiteBrush}" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- Top Bubbly Dynamic Alert (Shows ONLY when Bluetooth is actually OFF) -->
-                    <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsBluetoothOff, Converter={StaticResource BoolToVis}}" Background="#221208" BorderBrush="{StaticResource AlertAmberBrush}" BorderThickness="1.2" CornerRadius="16" Padding="14,6">
-                        <Border.Effect>
-                            <DropShadowEffect Color="#F59E0B" BlurRadius="16" Opacity="0.35" ShadowDepth="0"/>
-                        </Border.Effect>
+                    <!-- Top Status Badge: Wi-Fi Direct & USB -->
+                    <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#101828" BorderBrush="#203450" BorderThickness="1" CornerRadius="15" Padding="14,5">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="⚠️ Bluetooth is off" FontSize="12" Foreground="{StaticResource AlertAmberBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <Button Style="{StaticResource BouncyPillButton}" Content="Turn On" Command="{Binding TurnOnBluetoothCommand}" Height="26" Padding="12,0" FontSize="11"/>
+                            <Ellipse Width="7" Height="7" Fill="#00FFA3" Margin="0,0,8,0">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect Color="#00FFA3" BlurRadius="6" ShadowDepth="0" Opacity="0.8"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                            <TextBlock Text="Wi-Fi Direct &amp; USB Active" Foreground="#94A3B8" FontSize="11" FontWeight="SemiBold"/>
                         </StackPanel>
                     </Border>
 
@@ -162,7 +170,8 @@
                             <Grid>
                                 <!-- Top Gloss Sheen Reflection -->
                                 <Border VerticalAlignment="Top" Height="36" CornerRadius="38,38,0,0" Background="{StaticResource GlassSheenBrush}" IsHitTestVisible="False"/>
-                                <TextBlock Text="⚡" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource NeonGreenBrush}"/>
+                                <Path Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8A3,3 0 0,0 21,5A3,3 0 0,0 18,2A3,3 0 0,0 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9A3,3 0 0,0 3,12A3,3 0 0,0 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.35C15.11,18.56 15.08,18.78 15.08,19A3,3 0 0,0 18.08,22A3,3 0 0,0 21.08,19A3,3 0 0,0 18.08,16.08Z"
+                                      Fill="{StaticResource NeonGreenBrush}" Stretch="Uniform" Width="26" Height="26" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Grid>
                         </Border>
                     </Grid>
@@ -173,35 +182,54 @@
                         <TextBlock Text="{Binding StatusSubtext}" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     </StackPanel>
 
-                    <!-- Discovered Devices: Apple-Style Bubbly Floating Cards -->
-                    <StackPanel Grid.Row="2" Width="460" HorizontalAlignment="Center">
+                    <!-- Discovered Devices: Apple-Style Floating Round Icons -->
+                    <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,5,0,0">
                         <ItemsControl ItemsSource="{Binding DiscoveredDevices}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Style="{StaticResource BubblyDeviceCardButton}" Command="{Binding DataContext.SelectDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <!-- Device Glass Bubble Icon -->
-                                            <Border Grid.Column="0" Width="44" Height="44" CornerRadius="22" Background="#17243A" BorderBrush="{StaticResource AppleGlassBorderBrush}" BorderThickness="1" Margin="0,0,14,0">
-                                                <TextBlock Text="{Binding Icon}" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Button Style="{StaticResource FloatingRoundDeviceButton}"
+                                            Command="{Binding DataContext.SelectDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}">
+                                        <StackPanel HorizontalAlignment="Center" Width="110" Margin="14,8">
+                                            <!-- Circular Glossy Glass Avatar Pod -->
+                                            <Grid Width="76" Height="76" HorizontalAlignment="Center">
+                                                <!-- Ambient Glow Aura and Glass Bubble -->
+                                                <Border CornerRadius="38" Background="#111B2E" BorderBrush="{StaticResource AppleGlassBorderBrush}" BorderThickness="1.5">
+                                                    <Border.Effect>
+                                                        <DropShadowEffect Color="#00FFA3" BlurRadius="20" Opacity="0.45" ShadowDepth="0"/>
+                                                    </Border.Effect>
+                                                    <Grid>
+                                                        <!-- Upper Gloss Sheen Arc -->
+                                                        <Border VerticalAlignment="Top" Height="36" CornerRadius="38,38,0,0" Background="{StaticResource GlassSheenBrush}" IsHitTestVisible="False"/>
+                                                        <!-- Device Icon (Phone / Laptop) -->
+                                                        <TextBlock Text="{Binding Icon}" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <!-- USB Fast-Path Mini Badge (if USB connected) -->
+                                                <Border Width="24" Height="24" CornerRadius="12" Background="#00FFA3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2"
+                                                        Visibility="{Binding HasUsb, Converter={StaticResource BoolToVis}}">
+                                                    <Border.Effect>
+                                                        <DropShadowEffect Color="#00FFA3" BlurRadius="8" Opacity="0.6" ShadowDepth="0"/>
+                                                    </Border.Effect>
+                                                    <TextBlock Text="⚡" FontSize="13" FontWeight="Bold" Foreground="#040711" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,1"/>
+                                                </Border>
+                                            </Grid>
+
+                                            <!-- Device Name -->
+                                            <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextWhiteBrush}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="105" TextAlignment="Center" Margin="0,8,0,3" HorizontalAlignment="Center"/>
+
+                                            <!-- Transport Pill Badge -->
+                                            <Border Background="#121D30" BorderBrush="{StaticResource AppleGlassBorderBrush}" BorderThickness="1" CornerRadius="9" Padding="8,3" HorizontalAlignment="Center">
+                                                <TextBlock Text="{Binding ShortTransport}" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource NeonCyanBrush}"/>
                                             </Border>
-                                            <!-- Device Details -->
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextWhiteBrush}"/>
-                                                <TextBlock Text="{Binding ConnectionType}" FontSize="11" Foreground="{StaticResource NeonCyanBrush}" Margin="0,2,0,0"/>
-                                            </StackPanel>
-                                            <!-- Connect Pill -->
-                                            <Border Grid.Column="2" Background="{StaticResource CyanGreenGradient}" CornerRadius="14" Padding="14,7" VerticalAlignment="Center">
-                                                <Border.Effect>
-                                                    <DropShadowEffect Color="#00FFA3" BlurRadius="12" Opacity="0.4" ShadowDepth="0"/>
-                                                </Border.Effect>
-                                                <TextBlock Text="Connect →" FontSize="11" FontWeight="Bold" Foreground="#040711"/>
-                                            </Border>
-                                        </Grid>
+                                        </StackPanel>
                                     </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -373,7 +401,8 @@
                 <!--  BOTTOM MINIMAL FOOTER                                  -->
                 <!-- ═══════════════════════════════════════════════════════ -->
                 <Grid Grid.Row="2" Margin="28,0">
-                    <TextBlock Text="Plug your phone with USB-C cable for faster share." FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    <TextBlock Text="Plug your phone with USB-C cable for faster share." FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                               Visibility="{Binding IsUsbPlugged, Converter={StaticResource InverseBoolToVis}}"/>
                 </Grid>
             </Grid>
         </Grid>

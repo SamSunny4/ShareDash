@@ -242,26 +242,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun hasBluetoothConnectPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    fun isBluetoothEnabledSafely(): Boolean {
-        return try {
-            if (hasBluetoothConnectPermission()) {
-                val adapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
-                adapter?.isEnabled == true
-            } else {
-                false
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
+    fun hasBluetoothConnectPermission(): Boolean = true
+    fun isBluetoothEnabledSafely(): Boolean = true
 
     private val enableBtLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -2208,19 +2190,11 @@ class MainActivity : ComponentActivity() {
     private fun checkAndRequestPermissions() {
         val neededPermissions = mutableListOf<String>()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            neededPermissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            neededPermissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            neededPermissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            neededPermissions.add(Manifest.permission.BLUETOOTH)
-            neededPermissions.add(Manifest.permission.BLUETOOTH_ADMIN)
-            neededPermissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
             neededPermissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else {
+            neededPermissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
         val ungranted = neededPermissions.filter {
@@ -2262,29 +2236,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val btReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            if (intent?.action == android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED) {
-                val state = intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, android.bluetooth.BluetoothAdapter.ERROR)
-                if (state == android.bluetooth.BluetoothAdapter.STATE_ON) {
-                    android.util.Log.i("MainActivity", "Bluetooth turned ON, restarting discovery & servers")
-                    startDiscovery()
-                }
-            }
-        }
-    }
-
-    fun requestEnableBluetooth() {
-        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
-        val adapter = bluetoothManager?.adapter
-        if (adapter != null && !adapter.isEnabled) {
-            val enableBtIntent = android.content.Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            enableBtIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                startActivity(enableBtIntent)
-            } catch (e: Exception) {
-                android.util.Log.w("MainActivity", "Could not request enable bluetooth: ${e.message}")
-            }
-        }
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {}
     }
 
     private fun startDiscovery() {
@@ -2292,27 +2244,6 @@ class MainActivity : ComponentActivity() {
             udpManager.startDiscovery(lifecycleScope)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "UDP start failed: ${e.message}")
-        }
-
-        val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager
-        val adapter = bluetoothManager?.adapter
-        if (adapter != null && !adapter.isEnabled) {
-            requestEnableBluetooth()
-        }
-
-        if (hasBluetoothConnectPermission()) {
-            try {
-                bleCommandServer.start()
-                rfcommServer.start(lifecycleScope)
-                bleManager.startAdvertising()
-                bleManager.startDiscovery()
-            } catch (e: SecurityException) {
-                android.util.Log.w("MainActivity", "Bluetooth SecurityException: ${e.message}")
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Bluetooth discovery start failed: ${e.message}")
-            }
-        } else {
-            android.util.Log.i("MainActivity", "Bluetooth permissions not yet granted, skipping BLE discovery until granted")
         }
     }
 

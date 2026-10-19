@@ -35,7 +35,7 @@ public class ApiClient
     {
         try
         {
-            return await _http.GetFromJsonAsync<ConnectionBridgesResponse>($"{BaseUrl}/api/v1/adapters");
+            return await _http.GetFromJsonAsync<ConnectionBridgesResponse>($"{BaseUrl}/api/v1/bridges");
         }
         catch (Exception ex)
         {
