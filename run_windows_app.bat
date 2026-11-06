@@ -1,7 +1,7 @@
 @echo off
-title ShareDash Desktop
+title ShareDash Windows GUI (GPUI)
 cd /d "%~dp0"
-echo Starting ShareDash Native Windows GUI...
-cargo run --release --bin sharedash
+echo Starting ShareDash Native Windows GPUI GUI...
+cargo run --bin sharedash-gui --features gui
 pause
 

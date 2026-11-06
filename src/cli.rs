@@ -29,11 +29,11 @@ pub struct TerminalCli {
 
 /// A BLE-discovered device for the scan table.
 #[derive(Clone, Debug)]
-pub struct BleDevice {
-    pub name: String,
-    pub address: String,
-    pub rssi: i16,
-    pub peripheral_id: String,
+struct BleDevice {
+    name: String,
+    address: String,
+    rssi: i16,
+    peripheral_id: String,
 }
 
 impl TerminalCli {
@@ -1126,7 +1126,7 @@ impl TerminalCli {
         ).await;
     }
 
-    pub async fn send_start_hotspot_with_band(&self, ip: &str, port: u16, band: &str) -> Option<(String, String, String)> {
+    async fn send_start_hotspot_with_band(&self, ip: &str, port: u16, band: &str) -> Option<(String, String, String)> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -1152,7 +1152,7 @@ impl TerminalCli {
     }
 
     /// Helper HTTP calls over USB
-    pub async fn query_phone_wifi_caps_http(&self, ip: &str, port: u16) -> Option<WifiCapsInfo> {
+    async fn query_phone_wifi_caps_http(&self, ip: &str, port: u16) -> Option<WifiCapsInfo> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
             .build()
@@ -1166,7 +1166,7 @@ impl TerminalCli {
         }
     }
 
-    pub async fn send_wifi_connect_over_usb(&self, ip: &str, port: u16, ssid: &str, password: &str) -> bool {
+    async fn send_wifi_connect_over_usb(&self, ip: &str, port: u16, ssid: &str, password: &str) -> bool {
         // 1. Try sending over HTTP to AndroidHttpServer
         if let Ok(client) = reqwest::Client::builder().timeout(Duration::from_secs(4)).build() {
             let url = format!("http://{}:{}/api/v1/wifi_connect", ip, port);
@@ -1202,7 +1202,7 @@ impl TerminalCli {
         false
     }
 
-    pub async fn send_start_hotspot_over_usb(&self, ip: &str, port: u16) -> Option<(String, String, String)> {
+    async fn send_start_hotspot_over_usb(&self, ip: &str, port: u16) -> Option<(String, String, String)> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -1224,7 +1224,7 @@ impl TerminalCli {
         None
     }
 
-    pub async fn pair_handshake_target(&self, ip: &str, port: u16) -> bool {
+    async fn pair_handshake_target(&self, ip: &str, port: u16) -> bool {
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
@@ -1265,7 +1265,7 @@ impl TerminalCli {
     }
 
     /// Robust Wi-Fi verification and pairing handshake with retries and multi-homed local interface binding.
-    pub async fn verify_and_pair_wifi_with_retries(&self, target_ip: &str, port: u16, max_retries: usize) -> bool {
+    async fn verify_and_pair_wifi_with_retries(&self, target_ip: &str, port: u16, max_retries: usize) -> bool {
         let url_info = format!("http://{}:{}/api/v1/info", target_ip, port);
 
         // Find local Wi-Fi interface IP on the same subnet if available to force interface routing
@@ -1482,7 +1482,7 @@ impl TerminalCli {
     // ═══════════════════════════════════════════════════════════════
 
     /// Phase 1: BLE scan using btleplug.
-    pub async fn phase1_ble_scan(&self) -> Vec<BleDevice> {
+    async fn phase1_ble_scan(&self) -> Vec<BleDevice> {
         let mut devices = Vec::new();
 
         // Animated scan progress bar
@@ -1584,7 +1584,7 @@ impl TerminalCli {
     //  STREAMING DYNAMIC MULTIPATH PIPELINE (39+ MB/s)
     // ═══════════════════════════════════════════════════════════════
 
-    pub async fn execute_transfer(
+    async fn execute_transfer(
         &self,
         file_path: &Path,
         file_name: &str,
@@ -1619,11 +1619,6 @@ impl TerminalCli {
 
         init_transfer_progress(channel_states.len());
 
-        let transfer_id = uuid::Uuid::new_v4().to_string();
-        let transfer_id_uuid = uuid::Uuid::parse_str(&transfer_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-        let file_name_clone = file_name.to_string();
-        let telemetry_tx = self.state.telemetry_tx.clone();
-
         let transfer_start = Instant::now();
         let ui_handle = tokio::spawn(async move {
             while !stop_ui_clone.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1654,38 +1649,6 @@ impl TerminalCli {
                     0.0
                 };
                 draw_transfer_progress(pct, eta, &current_channels);
-
-                let telem = crate::scheduler::metrics::SchedulerTelemetry {
-                    transfer_id: transfer_id_uuid,
-                    title: file_name_clone.clone(),
-                    status: "ACTIVE".to_string(),
-                    aggregate: crate::scheduler::metrics::AggregateMetrics {
-                        aggregate_mbps: total_speed,
-                        peak_aggregate_mbps: total_speed,
-                        total_bytes_transferred: total_sent,
-                        total_bytes_expected: total_size,
-                        progress_pct: pct * 100.0,
-                        eta_seconds: eta as u64,
-                        elapsed_seconds: elapsed,
-                    },
-                    transports: current_channels.iter().map(|c| {
-                        let kind = if c.name == "USB" {
-                            crate::protocol::TransportKind::Usb
-                        } else {
-                            crate::protocol::TransportKind::WifiDirect
-                        };
-                        let mut m = crate::transport::r#trait::TransportMetrics::new(c.name.clone(), kind);
-                        m.current_mbps = c.speed_mb_s;
-                        m.peak_mbps = c.speed_mb_s;
-                        m.total_bytes_sent = c.bytes_sent;
-                        m.state = crate::transport::r#trait::TransportState::Active;
-                        m.is_enabled = true;
-                        m
-                    }).collect(),
-                    chunk_states: vec![],
-                    timestamp_epoch_ms: chrono::Utc::now().timestamp_millis(),
-                };
-                let _ = telemetry_tx.send(telem);
             }
         });
 
@@ -1793,43 +1756,6 @@ impl TerminalCli {
             integrity_ok: all_ok,
         };
         print_transfer_result(&result);
-
-        let final_telem = crate::scheduler::metrics::SchedulerTelemetry {
-            transfer_id: transfer_id_uuid,
-            title: file_name.to_string(),
-            status: if all_ok { "COMPLETED".to_string() } else { "FAILED".to_string() },
-            aggregate: crate::scheduler::metrics::AggregateMetrics {
-                aggregate_mbps: speed_mb_s,
-                peak_aggregate_mbps: speed_mb_s,
-                total_bytes_transferred: file_size,
-                total_bytes_expected: file_size,
-                progress_pct: 100.0,
-                eta_seconds: 0,
-                elapsed_seconds: elapsed,
-            },
-            transports: final_channels.iter().map(|c| {
-                let kind = if c.name == "USB" {
-                    crate::protocol::TransportKind::Usb
-                } else {
-                    crate::protocol::TransportKind::WifiDirect
-                };
-                let mut m = crate::transport::r#trait::TransportMetrics::new(c.name.clone(), kind);
-                m.current_mbps = c.speed_mb_s;
-                m.peak_mbps = c.speed_mb_s;
-                m.total_bytes_sent = c.bytes_sent;
-                m.state = if all_ok {
-                    crate::transport::r#trait::TransportState::Connected
-                } else {
-                    crate::transport::r#trait::TransportState::Disconnected
-                };
-                m.is_enabled = true;
-                m
-            }).collect(),
-            chunk_states: vec![],
-            timestamp_epoch_ms: chrono::Utc::now().timestamp_millis(),
-        };
-        let _ = self.state.telemetry_tx.send(final_telem);
-
         self.is_local_sender.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -1838,7 +1764,7 @@ impl TerminalCli {
     // ═══════════════════════════════════════════════════════════════
 
     /// HTTP probe — check if a device responds at ip:port.
-    pub async fn http_probe(&self, ip: &str, port: u16) -> bool {
+    async fn http_probe(&self, ip: &str, port: u16) -> bool {
         let url = format!("http://{}:{}/api/v1/info", ip, port);
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(3))
@@ -1848,7 +1774,7 @@ impl TerminalCli {
     }
 
     /// Execute the 3-way handshake pairing sequence.
-    pub async fn pair_handshake(&self, target_ip: &str) -> bool {
+    async fn pair_handshake(&self, target_ip: &str) -> bool {
         let pin = format!("{:06}", rand::random::<u32>() % 1000000);
 
         let body = IncomingPairRequest {
@@ -1888,7 +1814,7 @@ impl TerminalCli {
     }
 
     /// Setup ADB port forwarding for USB channel.
-    pub async fn setup_adb_forward(&self) -> bool {
+    async fn setup_adb_forward(&self) -> bool {
         let adb = self.find_adb();
         if let Some(adb_path) = adb {
             // Forward PC port 54325 → phone port 54321
@@ -1917,11 +1843,11 @@ impl TerminalCli {
         }
     }
 
-    pub async fn check_adb(&self) -> (bool, Option<String>) {
+    async fn check_adb(&self) -> (bool, Option<String>) {
         self.check_adb_inner().await
     }
 
-    pub async fn check_adb_inner(&self) -> (bool, Option<String>) {
+    async fn check_adb_inner(&self) -> (bool, Option<String>) {
         if let Some(adb_path) = self.find_adb() {
             if let Ok(output) = std::process::Command::new(&adb_path)
                 .arg("devices")
@@ -1953,7 +1879,7 @@ impl TerminalCli {
         (false, None)
     }
 
-    pub fn find_adb(&self) -> Option<String> {
+    fn find_adb(&self) -> Option<String> {
         let candidates = [
             format!(
                 "{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
@@ -2215,7 +2141,7 @@ fn get_dir_size(path: &Path) -> u64 {
 }
 
 /// Package an entire directory tree into a high-speed `.zip` archive for multipath transmission.
-pub fn package_directory_to_zip(dir_path: &Path) -> anyhow::Result<(PathBuf, u64)> {
+fn package_directory_to_zip(dir_path: &Path) -> anyhow::Result<(PathBuf, u64)> {
     use std::io::{Read, Write};
     let dir_name = dir_path
         .file_name()

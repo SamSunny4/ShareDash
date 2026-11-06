@@ -46,10 +46,18 @@ btleplug = "0.11"
 memmap2 = "0.9"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 windows = { version = "0.62.2", features = ["Devices_Bluetooth_Advertisement", "Storage_Streams", "Foundation", "Foundation_Collections"] }
-eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
-rfd = "0.15"
-image = { version = "0.25", default-features = false, features = ["png"] }
+gpui = { version = "0.2", optional = true }
+rfd = { version = "0.14", optional = true }
 
 [dev-dependencies]
 tempfile = "3.12"
 tokio-test = "0.4"
+
+[features]
+default = []
+gui = ["dep:gpui", "dep:rfd"]
+
+[[bin]]
+name = "sharedash-gui"
+path = "src/bin/sharedash_gui.rs"
+required-features = ["gui"]

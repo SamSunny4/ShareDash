@@ -1,8 +1,8 @@
 {
   "Cargo.toml": {
-    "mtime": 1793953037.533556,
-    "seen": 1793954415.7438436,
-    "ast_hash": "6f65108c5916ebf01e7b92fa26419c67",
+    "mtime": 1793962117.5152254,
+    "seen": 1793974506.8928754,
+    "ast_hash": "3422a8d800eda07fc51347310f30f94d",
     "semantic_hash": ""
   },
   "android/app/build.gradle.kts": {
@@ -156,10 +156,10 @@
     "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/HomeScreen.kt": {
-    "mtime": 1790298854.0487375,
-    "seen": 1792292743.598592,
+    "mtime": 1793960627.8973062,
+    "seen": 1793974506.8929367,
     "ast_hash": "63246bcd6e5c61aa86d2f1be58576d5f",
-    "semantic_hash": "63246bcd6e5c61aa86d2f1be58576d5f"
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/screens/PairingScreen.kt": {
     "mtime": 1789399140.1415133,
@@ -192,10 +192,10 @@
     "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/theme/Color.kt": {
-    "mtime": 1789411111.8533337,
-    "seen": 1792292743.598598,
+    "mtime": 1793960627.9044402,
+    "seen": 1793974506.8929467,
     "ast_hash": "c1618a42641c6bc61704b47892ba0d82",
-    "semantic_hash": "c1618a42641c6bc61704b47892ba0d82"
+    "semantic_hash": ""
   },
   "android/app/src/main/java/com/sharedash/app/ui/theme/Neomorphic.kt": {
     "mtime": 1789399007.7364721,
@@ -270,9 +270,9 @@
     "semantic_hash": "c99082b475209aa66a5fb5e0fb9db4cf"
   },
   "src/cli.rs": {
-    "mtime": 1793953781.2225587,
-    "seen": 1793954415.7440395,
-    "ast_hash": "3bee87d0a5565bdf8e5126ce16cf43d7",
+    "mtime": 1793960628.7274823,
+    "seen": 1793974506.892969,
+    "ast_hash": "1e635278c649b49133a56b33831651ea",
     "semantic_hash": ""
   },
   "src/cli_widgets.rs": {
@@ -312,15 +312,15 @@
     "semantic_hash": "ef09f5b8d49986b0a844b3407462cc95"
   },
   "src/lib.rs": {
-    "mtime": 1793953921.344192,
-    "seen": 1793954415.7440722,
-    "ast_hash": "fba81dc19657b862416c86fdbc458991",
+    "mtime": 1793962133.3658662,
+    "seen": 1793974506.8929956,
+    "ast_hash": "77e265cd97718bc63067991008445971",
     "semantic_hash": ""
   },
   "src/main.rs": {
-    "mtime": 1793954110.6775284,
-    "seen": 1793954415.744076,
-    "ast_hash": "a1e6eb2f8454db508deff6b917d6e27d",
+    "mtime": 1793960628.3515503,
+    "seen": 1793974506.892997,
+    "ast_hash": "682ab802b909cbaf8ac36983ad658ffd",
     "semantic_hash": ""
   },
   "src/protocol/crypto.rs": {
@@ -384,9 +384,9 @@
     "semantic_hash": "9be37f582804cf43624bcdb7122bef28"
   },
   "src/server/http.rs": {
-    "mtime": 1793953713.588094,
-    "seen": 1793954415.7441142,
-    "ast_hash": "4150e0c161a4585a73ff220977288e8d",
+    "mtime": 1793960628.7329626,
+    "seen": 1793974506.8930151,
+    "ast_hash": "61c217f24e84b7beb5379bd5de654f3c",
     "semantic_hash": ""
   },
   "src/server/mod.rs": {
@@ -594,8 +594,8 @@
     "semantic_hash": ""
   },
   "docs/index.html": {
-    "mtime": 1792416100.511536,
-    "seen": 1792416140.3411665,
+    "mtime": 1793960628.0461578,
+    "seen": 1793974506.8930733,
     "ast_hash": "73027658749b5afcd10d96d8f610eae8",
     "semantic_hash": ""
   },
@@ -617,16 +617,100 @@
     "ast_hash": "24dd9da4ecf2dbea4416abfa0996d6b7",
     "semantic_hash": ""
   },
-  "src/bin/sharedash-gui.rs": {
-    "mtime": 1793954128.3961754,
-    "seen": 1793954415.7440348,
-    "ast_hash": "a7640a1a6b6b6c2d006e3835dfb0b3d9",
+  "Anime File Icon with Golden Aura.png": {
+    "mtime": 1793954536.2455876,
+    "seen": 1793955797.0678763,
+    "ast_hash": "ca3b8994e870aac38708961d330162ab",
     "semantic_hash": ""
   },
-  "src/gui.rs": {
-    "mtime": 1793954151.99941,
-    "seen": 1793954415.744065,
-    "ast_hash": "cb28b720c4df6b995ec41e499394612a",
+  "ShareDash Neon UI Color Palette.png": {
+    "mtime": 1793954645.617041,
+    "seen": 1793955797.0678775,
+    "ast_hash": "6717dffcb44ace883ef8778a84d5d18d",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/res/drawable/app_logo.png": {
+    "mtime": 1793954536.2455876,
+    "seen": 1793955797.067879,
+    "ast_hash": "ca3b8994e870aac38708961d330162ab",
+    "semantic_hash": ""
+  },
+  "assets/logo.png": {
+    "mtime": 1793954536.2455876,
+    "seen": 1793955797.0678802,
+    "ast_hash": "ca3b8994e870aac38708961d330162ab",
+    "semantic_hash": ""
+  },
+  "docs/logo.png": {
+    "mtime": 1793954536.2455876,
+    "seen": 1793955797.067883,
+    "ast_hash": "ca3b8994e870aac38708961d330162ab",
+    "semantic_hash": ""
+  },
+  "src/gui/app.rs": {
+    "mtime": 1793975892.9906042,
+    "seen": 1793975923.8614552,
+    "ast_hash": "5b0712afaba6ab8bf992e3d61435e83b",
+    "semantic_hash": ""
+  },
+  "src/gui/engine.rs": {
+    "mtime": 1793975764.4441552,
+    "seen": 1793975923.861457,
+    "ast_hash": "78ea36c62eea4bfd8487adc0b302c252",
+    "semantic_hash": ""
+  },
+  "src/gui/home_view.rs": {
+    "mtime": 1793974408.8323412,
+    "seen": 1793974506.8929825,
+    "ast_hash": "23ca02d9683aa47904fadbea18f45cb9",
+    "semantic_hash": ""
+  },
+  "src/gui/info_view.rs": {
+    "mtime": 1793974408.8974762,
+    "seen": 1793974506.8929842,
+    "ast_hash": "4a0a81baec32556d9bfd30718e5a4d25",
+    "semantic_hash": ""
+  },
+  "src/gui/mod.rs": {
+    "mtime": 1793973936.3659654,
+    "seen": 1793974506.8929853,
+    "ast_hash": "35fcf0387e9bf74a28f87b24c6543da6",
+    "semantic_hash": ""
+  },
+  "src/gui/pc2pc_view.rs": {
+    "mtime": 1793974409.2397015,
+    "seen": 1793974506.8929865,
+    "ast_hash": "2e2f437f5022ea89749c24330df75d86",
+    "semantic_hash": ""
+  },
+  "src/gui/theme.rs": {
+    "mtime": 1793962192.8478975,
+    "seen": 1793974506.8929882,
+    "ast_hash": "1f5b234bb3f6dc8926f1342491d84e4d",
+    "semantic_hash": ""
+  },
+  "src/gui/transfer_view.rs": {
+    "mtime": 1793974409.355691,
+    "seen": 1793974506.8929896,
+    "ast_hash": "58b7bab8e740aaf1841d0621ec116a8c",
+    "semantic_hash": ""
+  },
+  "src/gui/widgets.rs": {
+    "mtime": 1793974805.4940634,
+    "seen": 1793975548.549041,
+    "ast_hash": "b37a8de5e768b21af003ba5c2ac57637",
+    "semantic_hash": ""
+  },
+  "src/gui/wizard_view.rs": {
+    "mtime": 1793974409.5875502,
+    "seen": 1793974506.892992,
+    "ast_hash": "c3de71eef51dba68be3bd82dec189aca",
+    "semantic_hash": ""
+  },
+  "src/bin/sharedash_gui.rs": {
+    "mtime": 1793975116.240665,
+    "seen": 1793975548.549014,
+    "ast_hash": "d825ca408694ef5adf89ad39bd741a9a",
     "semantic_hash": ""
   }
 }
