@@ -1,17 +1,17 @@
-# Graph Report - ShareDash  (2026-11-06)
+# Graph Report - ShareDash  (2026-11-07)
 
 ## Corpus Check
-- 104 files · ~736,394 words
+- 104 files · ~736,585 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 20 file(s) not represented in the graph (top: .xml 8, (none) 3, .properties 2)
+- Unclassified: 21 file(s) not represented in the graph (top: .xml 8, (none) 3, .toml 2)
 
 ## Summary
-- 1795 nodes · 4176 edges · 97 communities (58 shown, 39 thin omitted)
+- 1795 nodes · 4175 edges · 98 communities (58 shown, 40 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 84 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `51befa97`
+- Built from commit: `70d45251`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -33,7 +33,7 @@
 - MainActivity.kt
 - TerminalCli
 - NeoCard
-- sparse_writer.rs
+- SparseWriter
 - dynamic_scheduler.rs
 - hotspot.rs
 - .executeRealTransfer
@@ -51,14 +51,15 @@
 - UdpDiscoveryManager.kt
 - TransferStatus
 - cli.rs
-- LanTransport
-- QuicInetTransport
-- UsbTransport
+- lan.rs
+- quic_inet.rs
+- usb.rs
 - Models.kt
 - LogEntry
 - UdpDiscoveryManager
+- AdaptiveChunker
 - TransferHistoryManager
-- arc
+- pathbuf
 - select_optimal_pc_to_pc_host
 - app.js
 - Theme.kt
@@ -75,7 +76,7 @@
 - BridgeBadge
 - BleDiscovery
 - .send_file_multipath_loop
-- .postChunkDetailed
+- PostResult
 - GuiEngine
 - ws_telemetry.rs
 - app.rs
@@ -83,23 +84,25 @@
 - .run_interactive_loop
 - 🤝 Contributing to ShareDash
 - WizardEvent
-- ChunkState
+- .connectToWifiNetwork
+- 💻 Quick Start: Windows Desktop
 - sharedash
 - SettingsScreen.kt
 - render_home_view
 - 🗺️ ShareDash Product & Engineering Roadmap
 - TransportKind
 - Contributor Covenant Code of Conduct
-- README.md
+- CONTRIBUTING.md
 - TransportMetrics
 - PULL_REQUEST_TEMPLATE.md
 - 🚀 Running Benchmarks
 - wifi_direct.rs
+- 📊 Live Benchmark Validation
 - TransferViewState
 - ⚡ High-Throughput Pipelined Multipath Streaming Engine
-- NetworkCallback
+- IntegrityVerifier
 - Color.kt
-- usb.rs
+- BandwidthTracker
 - print_warn
 
 ## God Nodes (most connected - your core abstractions)
@@ -129,7 +132,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (97 total, 39 thin omitted)
+## Communities (98 total, 40 thin omitted)
 
 ### Community 0 - "api.rs"
 Cohesion: 0.05
@@ -179,12 +182,8 @@ Nodes (6): TerminalCli, draw_spinner_frame(), print_ok(), print_step_result(), p
 Cohesion: 0.11
 Nodes (12): ConnectingDialog(), UsbPromptDialog(), WifiDisconnectPromptDialog(), WirelessWarningDialog(), ConnectedScreen(), SendCategoryCard(), DiscoveryScreen(), HomeScreen() (+4 more)
 
-### Community 19 - "sparse_writer.rs"
-Cohesion: 0.16
-Nodes (4): FileTime, set_file_mtime(), SparseWriter, test_sparse_writer_write_out_of_order()
-
 ### Community 20 - "dynamic_scheduler.rs"
-Cohesion: 0.14
+Cohesion: 0.12
 Nodes (12): MultipathScheduler, TransferEvent, Cancelled, ChunkCompleted, ChunkCorrupt, Completed, Failed, Progress (+4 more)
 
 ### Community 21 - "hotspot.rs"
@@ -192,23 +191,23 @@ Cohesion: 0.10
 Nodes (19): apply_and_connect_profile(), check_pc_wifi_adapter_enabled(), connect_to_phone_hotspot(), create_hotspot(), create_hotspot_with_band(), detect_hotspot_gateway(), detect_usb_tethering_peer(), detect_usb_tethering_peer_detailed() (+11 more)
 
 ### Community 22 - ".executeRealTransfer"
-Cohesion: 0.36
-Nodes (4): TransportEndpoint, ChunkVisualItem, SchedulerTelemetry, TransportStats
+Cohesion: 0.26
+Nodes (5): ChunkTask, TransportEndpoint, ChunkVisualItem, SchedulerTelemetry, TransportStats
 
 ### Community 23 - "chunker.rs"
-Cohesion: 0.12
-Nodes (8): AdaptiveChunker, ChunkInfo, DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, test_build_manifest_from_temp_file(), TransferManifest, IntegrityVerifier
+Cohesion: 0.11
+Nodes (7): ChunkInfo, DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, TransferManifest, FileTime, set_file_mtime()
 
 ### Community 24 - "FrameType"
 Cohesion: 0.09
 Nodes (18): Frame, FrameHeader, FrameType, BENCHMARK_PROBE, BENCHMARK_RESP, CAPABILITIES, CHUNK_ACK, CHUNK_DATA (+10 more)
 
 ### Community 26 - "ChunkPool"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (8): ChunkPool, ChunkPoolInner, ChunkStatus, Completed, Corrupted, InFlight, Unassigned, InFlightInfo
 
 ### Community 27 - "failover_test.rs"
-Cohesion: 0.18
+Cohesion: 0.13
 Nodes (6): mock_responder(), test_cryptographic_corruption_rejection_and_recovery(), mock_responder(), test_work_stealing_and_cable_disconnect_failover(), mock_responder(), test_multipath_concurrent_transports()
 
 ### Community 28 - "WifiCapsInfo"
@@ -240,8 +239,8 @@ Cohesion: 0.14
 Nodes (7): DiscoveredItem, DynamicWorkDispatcher, run_transport_chunk_worker(), stream_upload_channel(), TransferChunkInfo, ChannelProgress, draw_transfer_progress()
 
 ### Community 40 - "Models.kt"
-Cohesion: 0.21
-Nodes (12): ChunkInfo, FileMeta, TransferDirection, RECEIVED, SENT, TransferManifest, TransferRecord, TransferStatus (+4 more)
+Cohesion: 0.14
+Nodes (17): ChunkInfo, ChunkState, COMPLETED, CORRUPTED, IN_FLIGHT, PENDING, FileMeta, TransferDirection (+9 more)
 
 ### Community 41 - "LogEntry"
 Cohesion: 0.15
@@ -264,12 +263,12 @@ Cohesion: 0.10
 Nodes (5): CompactTransferRecordRow(), formatFileSize(), getFileIcon(), openTransferredFile(), TransferHistoryScreen()
 
 ### Community 53 - "⚡ ShareDash"
-Cohesion: 0.10
-Nodes (20): 🧪 Automated Test Suite, Build from Source via Gradle:, 🤝 Contributing, Direct Installation via ADB:, 🚀 Key Highlights, 📜 License, 📊 Live Benchmark Performance, Option A: Launch Interactive Auto-Connect Wizard (+12 more)
+Cohesion: 0.12
+Nodes (16): 🧪 Automated Test Suite, Build from Source via Gradle:, 🤝 Contributing, Direct Installation via ADB:, 🚀 Key Highlights, 📜 License, 📊 Live Benchmark Performance, 📦 Pre-Built Binaries & Packages (+8 more)
 
 ### Community 58 - "⚡ ShareDash: Technical Architecture & Operational Guide"
-Cohesion: 0.11
-Nodes (19): 1. Performance Summary Matrix, 1. Wifite-Style Terminal Interface (Default), 2. Fluent Mica Web Dashboard, 2. Speedup & Efficiency Analysis, 📱 Android Companion App Architecture, 🖥️ CLI & Web UI User Interfaces, 🔒 Cryptographic Security & Verification, 🌟 Executive Summary & Offline Philosophy (+11 more)
+Cohesion: 0.12
+Nodes (16): 1. Wifite-Style Terminal Interface (Default), 2. Fluent Mica Web Dashboard, 📱 Android Companion App Architecture, 🖥️ CLI & Web UI User Interfaces, 🔒 Cryptographic Security & Verification, 🌟 Executive Summary & Offline Philosophy, Key Technical Innovations:, 🚫 No LAN & No Internet Dependency (+8 more)
 
 ### Community 59 - "ChunkState"
 Cohesion: 0.33
@@ -283,8 +282,8 @@ Nodes (4): BridgeBadge(), RecommendationRow(), SmartBridgeStrip(), TransportReco
 Cohesion: 0.32
 Nodes (6): get_dir_size(), package_directory_to_zip(), print_channel_summary(), print_fail(), prompt(), prompt_choice()
 
-### Community 63 - ".postChunkDetailed"
-Cohesion: 0.33
+### Community 63 - "PostResult"
+Cohesion: 0.50
 Nodes (4): PostResult, NOT_FOUND, RETRY, SUCCESS
 
 ### Community 64 - "GuiEngine"
@@ -311,9 +310,9 @@ Nodes (13): 1. Rust Core Engine (Windows / Linux), 2. Android Companion App, And
 Cohesion: 0.20
 Nodes (10): WizardEvent, CapsSynchronized, HotspotCredsTransferred, Log, Phase2Start, Phase3OptimalHost, Phase4HotspotActive, Phase5UsbConfirmed (+2 more)
 
-### Community 73 - "ChunkState"
-Cohesion: 0.40
-Nodes (5): ChunkState, COMPLETED, CORRUPTED, IN_FLIGHT, PENDING
+### Community 73 - "💻 Quick Start: Windows Desktop"
+Cohesion: 0.50
+Nodes (4): Option A: Launch Native Windows GPUI Desktop App (Recommended), Option B: Launch Interactive Terminal CLI Wizard, Option C: Standalone Background Receiver, 💻 Quick Start: Windows Desktop
 
 ### Community 81 - "render_home_view"
 Cohesion: 0.29
@@ -328,15 +327,15 @@ Cohesion: 0.40
 Nodes (5): TransportKind, BLUETOOTH, LAN, USB, WIFI_DIRECT
 
 ### Community 84 - "Contributor Covenant Code of Conduct"
-Cohesion: 0.22
+Cohesion: 0.29
 Nodes (7): Attribution, Contributor Covenant Code of Conduct, Enforcement, Enforcement Responsibilities, Our Pledge, Our Standards, Scope
 
-### Community 85 - "README.md"
-Cohesion: 0.25
+### Community 85 - "CONTRIBUTING.md"
+Cohesion: 0.20
 Nodes (5): 🚨 Reporting a Vulnerability, 🔒 Security & Cryptographic Architecture, 🛡️ Security Policy, Supported Versions, What to Include:
 
 ### Community 86 - "TransportMetrics"
-Cohesion: 0.15
+Cohesion: 0.16
 Nodes (12): AggregateMetrics, ChunkVisualState, SchedulerTelemetry, TransportMetrics, TransportState, Active, Benchmarking, Closed (+4 more)
 
 ### Community 87 - "PULL_REQUEST_TEMPLATE.md"
@@ -350,6 +349,10 @@ Nodes (6): 1. Generate Test File, 2. Run Analytical Transfer Optimization, 3. Ru
 ### Community 89 - "wifi_direct.rs"
 Cohesion: 0.16
 Nodes (3): detect_wifi_capabilities(), WifiCapabilities, WifiDirectTransport
+
+### Community 90 - "📊 Live Benchmark Validation"
+Cohesion: 0.67
+Nodes (3): 1. Performance Summary Matrix, 2. Speedup & Efficiency Analysis, 📊 Live Benchmark Validation
 
 ### Community 91 - "TransferViewState"
 Cohesion: 0.25
@@ -365,23 +368,23 @@ Nodes (3): print_table(), print_warn(), strip_ansi()
 
 ## Knowledge Gaps
 - **126 isolated node(s):** `sharedash`, `SUCCESS`, `NOT_FOUND`, `RETRY`, `Idle` (+121 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 612 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **39 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 614 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `AndroidHttpServer` connect `AndroidHttpServer` to `.onCreate`, `AndroidHttpServer.kt`?**
+- **Why does `AndroidHttpServer` connect `AndroidHttpServer` to `AndroidHttpServer.kt`, `MainActivity`?**
   _High betweenness centrality (0.052) - this node is a cross-community bridge._
 - **What connects `sharedash`, `SUCCESS`, `NOT_FOUND` to the rest of the system?**
   _126 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `api.rs` be split into smaller, more focused modules?**
   _Cohesion score 0.051096491228070175 - nodes in this community are weakly interconnected._
-- **Why does `MockSimTransport` connect `MockSimTransport` to `api.rs`, `TransportMetrics`, `failover_test.rs`, `AsyncTransport`, `usb.rs`?**
-  _High betweenness centrality (0.052) - this node is a cross-community bridge._
+- **Why does `MockSimTransport` connect `MockSimTransport` to `api.rs`, `TransportMetrics`, `failover_test.rs`, `AsyncTransport`, `BandwidthTracker`?**
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Should `frame.rs` be split into smaller, more focused modules?**
   _Cohesion score 0.0519774011299435 - nodes in this community are weakly interconnected._
-- **Why does `MainActivity` connect `MainActivity` to `.onCreate`, `UdpDiscoveryManager`, `TransferForegroundService`, `TransferHistoryManager`, `MainActivity.kt`, `HotspotManager`, `.executeRealTransfer`, `SettingsManager`, `FrameType`, `.postChunkDetailed`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
 - **Should `HomeScreen.kt` be split into smaller, more focused modules?**
   _Cohesion score 0.10661268556005399 - nodes in this community are weakly interconnected._
+- **Should `message.rs` be split into smaller, more focused modules?**
+  _Cohesion score 0.05795918367346939 - nodes in this community are weakly interconnected._

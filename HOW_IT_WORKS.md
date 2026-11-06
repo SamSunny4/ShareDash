@@ -83,8 +83,8 @@ ShareDash uses a dual-engine architecture: a high-performance **Rust backend** o
 
 ```mermaid
 graph TB
-    subgraph WindowsPC ["💻 Windows Desktop (Rust 2021 + .NET 9 WPF)"]
-        WinApp["Native Windows Desktop App (WPF / .NET 9)"]
+    subgraph WindowsPC ["💻 Windows Desktop (Rust 2021 + GPUI)"]
+        WinApp["Native Windows GPU GUI (Rust + GPUI)"]
         CLI["Interactive ANSI CLI Wizard (cli.rs)"]
         WebUI["Fluent Mica Web Dashboard (Axum + Embedded Assets)"]
         

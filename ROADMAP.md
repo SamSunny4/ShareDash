@@ -11,7 +11,7 @@ This document outlines the architectural vision, upcoming milestones, and planne
 - [x] **Adaptive Chunker & Sparse Writer**: 2MB–64MB adaptive chunks with concurrent `FileChannel` reassembly.
 - [x] **Zero-Corruption Verification**: CRC32 frame checksums, SHA-256 / BLAKE3 hash checks, AES-256-GCM encryption.
 - [x] **Native Android Companion**: Jetpack Compose UI, Zero-LAN UDP discovery, Android Share Sheet target.
-- [x] **Native Windows Desktop App**: Modern Mica .NET 9 WPF desktop application with AirDrop-style floating pods and one-click transfers.
+- [x] **Native Windows GPU Desktop App**: GPU-accelerated Rust GPUI desktop application with real-time HUD, AirDrop-style radar scan, 5-phase interactive auto-connect wizard, piece grid, and one-click transfers.
 - [x] **Windows CLI Wizard**: Interactive terminal UI with real-time gauges, hardware inspect, and pin handshakes.
 
 ---

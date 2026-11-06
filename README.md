@@ -31,7 +31,7 @@ Most existing file transfer tools rely on a single wireless channel or an existi
 | 🚀 **High-Throughput Pipelined Multipath (2MB–64MB Chunks)** | Adaptive chunking with **3 parallel in-flight streaming workers per transport**, delivering line speeds on multi-gigabyte files (2GB, 3GB, 10GB+) with zero idle gaps.                                                                                             |
 | 🛡️ **Zero-Corruption Verification**                         | CRC32 frame checksums, SHA-256 / BLAKE3 chunk hashing, AES-256-GCM authenticated encryption, and concurrent direct-offset `FileChannel` disk writes.                                                                                                                   |
 | 📱 **Native Android Companion App**                           | Modern Jetpack Compose UI with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and local high-speed UDP / Wi-Fi Direct discovery.                                                                                                    |
-| 🖥️ **Native Windows Desktop App (WPF / .NET 9)**            | Sleek dark-mode desktop app with floating AirDrop-style device pods, instant USB Fast-Path detection, real-time speedometers, and one-click transfers.                                                                                                                   |
+| 🖥️ **Native Windows GPU GUI (Rust + GPUI)**                 | Sleek dark-mode desktop app powered by Zed's GPUI framework. Features real-time hardware status HUD, AirDrop-style radar scan, 5-phase interactive auto-connect wizard, multipath telemetry visualizer, chunk piece grid, and native file/folder picking.             |
 | 📟 **Wifite-Style ANSI Terminal Wizard**                      | Interactive CLI wizard that handles discovery, hardware inspection, hotspot provisioning, 3-way handshakes, and live multi-gauge progress meters.                                                                                                                        |
 
 ---
@@ -41,7 +41,7 @@ Most existing file transfer tools rely on a single wireless channel or an existi
 ```mermaid
 graph TD
     subgraph UI ["User Interfaces"]
-        WinUI["Native Windows Desktop App (WPF / .NET 9)"]
+        WinUI["Native Windows GPU GUI (Rust + GPUI)"]
         CLI["Terminal CLI Wizard (cli.rs)"]
         AndUI["ShareDash Android App (Jetpack Compose)"]
         WebPortal["Fluent Mica Web Dashboard"]
@@ -112,32 +112,49 @@ Transfer metrics for a **2.80 GB (2800 MB)** movie file (`Marco.2024.1080p.SLIV.
 
 Pre-built binaries are available in [`dist/`](dist) and the [GitHub Releases](https://github.com/SamSunny4/ShareDash/releases) page:
 
-- **Windows Desktop Application**: [`dist/sharedash.exe`](dist/sharedash.exe)
+- **Windows Native GUI Application**: [`dist/sharedash-gui.exe`](dist/) (GPU-accelerated native Rust + GPUI)
+- **Windows CLI Application & Daemon**: [`dist/sharedash.exe`](dist/sharedash.exe) (Interactive terminal wizard & Axum HTTP/WS engine)
 - **Android Companion App**: [`dist/ShareDash-debug.apk`](dist/ShareDash-debug.apk) (and `dist/sharedash.apk`)
 
 ---
 
-## 💻 Quick Start: Windows CLI Wizard
+## 💻 Quick Start: Windows Desktop
 
-### Option A: Launch Interactive Auto-Connect Wizard
+### Option A: Launch Native Windows GPUI Desktop App (Recommended)
+
+ShareDash features a high-performance native Windows GUI powered by the GPUI framework (built by the authors of Zed) with Direct3D/Vulkan GPU acceleration:
 
 ```powershell
-# Build & run release executable
-cargo run --release
+# Run Native Rust GPUI Desktop Application
+cargo run --release --bin sharedash-gui --features gui
+```
+
+Features included in the GUI:
+- **Radar Dashboard**: Live USB Fast-Path and 5GHz Wi-Fi hardware capability indicators.
+- **Auto-Connect Wizard**: 5-phase guided connection automating USB handshake and Wi-Fi Direct provisioning.
+- **PC-to-PC Mode**: Bluetooth LE advertisement, nearby PC discovery, and direct Wi-Fi hotspot pairing.
+- **Multipath Visualizer**: Real-time dual-speedometer, in-flight piece grid, and chunk completion integrity tracker.
+- **Integrated File & Folder Picker**: Native Windows dialog support with automatic ZIP packaging for directory transfers.
+
+### Option B: Launch Interactive Terminal CLI Wizard
+
+```powershell
+# Run Interactive ANSI Terminal CLI Wizard
+cargo run --release --bin sharedash
 ```
 
 Select Option `[1]` (**Auto-Connect Wizard**):
 
-1. **USB Detection**: Checks for connected USB-C cable (ADB port forwarding).
+1. **USB Detection**: Checks for connected USB-C cable (ADB port forwarding / RNDIS tethering).
 2. **Wi-Fi Direct / UDP Radar Scan**: Discovers nearby ShareDash devices via fast local UDP broadcast and Zero-LAN.
 3. **Hotspot Provisioning**: Inspects PC internet & Wi-Fi capabilities, triggers dedicated 5GHz hotspot (PC or Phone AP), and auto-associates credentials.
 4. **3-Way Cryptographic Handshake**: Performs ephemeral PIN verification and establishes AES-256-GCM encrypted session.
 5. **Streaming Transfer**: Prompts for file path and streams chunks over USB + Wi-Fi simultaneously at line speed.
 
-### Option B: Standalone Background Receiver
+### Option C: Standalone Background Receiver
 
 ```powershell
-cargo run --release -- --port 54321
+cargo run --release --bin sharedash -- --port 54321
 ```
 
 ---
@@ -208,24 +225,32 @@ ShareDash/
   │   └── robots.txt                # Crawler directives
   │
   ├── dist/                         # Distribution binaries
-  │   ├── sharedash.exe             # Compiled Windows release binary (CLI + Axum HTTP API)
+  │   ├── sharedash.exe             # Compiled Windows release CLI binary (CLI + Axum HTTP API)
+  │   ├── sharedash-gui.exe         # Compiled Windows release GUI binary (GPUI Native App)
   │   ├── ShareDash-debug.apk       # Android companion APK
   │   └── sharedash.apk             # Android companion APK mirror
   │
-  ├── windows/                      # Native Windows Desktop App (.NET 9 WPF)
-  │   ├── MainWindow.xaml           # Apple AirDrop-style floating pods & speed gauge UI
-  │   ├── ViewModels/               # MainViewModel, reactive state & auto-connection
-  │   ├── Services/                 # ApiClient, EngineSupervisor, MultipathSender
-  │   └── Styles/                   # Custom controls & neomorphic gradient styles
-  │
-  ├── src/                          # Windows Rust Core Engine
-  │   ├── main.rs                   # Entry point, CLI flags, persistent UUID
-  │   ├── lib.rs                    # Library interface & exports
+  ├── src/                          # Windows Rust Core Engine & Native Desktop App
+  │   ├── bin/
+  │   │   └── sharedash_gui.rs      # Native GPUI GUI entry point & window bootstrapping
+  │   ├── main.rs                   # CLI entry point, CLI flags, persistent UUID
+  │   ├── lib.rs                    # Library interface & shared module exports
   │   ├── cli.rs                    # TerminalCli wizard, multipath streaming loop, speed calculation
   │   ├── cli_widgets.rs            # ANSI progress bars, animated spinners, speedometers, tables
+  │   ├── gui/                      # Native Rust GPUI Desktop Application (Zero C# / 100% Rust)
+  │   │   ├── app.rs                # Root GPUI app, active view router, background telemetry
+  │   │   ├── engine.rs             # GUI backend engine, Axum server, discovery & work dispatcher
+  │   │   ├── home_view.rs          # Home dashboard, radar scan, hardware status HUD, action cards
+  │   │   ├── wizard_view.rs        # 5-Phase interactive auto-connect wizard (USB + Wi-Fi Direct)
+  │   │   ├── pc2pc_view.rs         # PC-to-PC Bluetooth discovery & direct hotspot pairing
+  │   │   ├── transfer_view.rs      # Live speedometer, dual-channel progress, chunk piece grid
+  │   │   ├── info_view.rs          # Network adapters, interface IP inspector, hardware specs
+  │   │   ├── theme.rs              # Cyber-dark design tokens, neon accents, fonts & layout
+  │   │   └── widgets.rs            # Custom GPUI components: status pills, cards, progress bars
   │   ├── hotspot.rs                # Windows Netsh/WinRT Wi-Fi manager, fast client scanner, host choice
-  │   ├── discovery/                # Peer discovery subsystems
+  │   ├── discovery/                # Peer discovery subsystems (UDP mDNS, BLE, Pairing)
   │   │   ├── mdns.rs               # Local network UDP multicast discovery
+  │   │   ├── bluetooth.rs          # BLE advertiser & scanner for phone/PC discovery
   │   │   └── pairing.rs            # 3-Way handshake manager & session state
   │   ├── protocol/                 # Wire protocol & cryptography
   │   │   ├── frame.rs              # Binary packet frames, CRC32 checksums
