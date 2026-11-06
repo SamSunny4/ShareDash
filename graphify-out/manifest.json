@@ -1,9 +1,9 @@
 {
   "Cargo.toml": {
-    "mtime": 1789311931.0073075,
-    "seen": 1792292743.5985532,
-    "ast_hash": "69d001cc6989ea87fd379afb99073688",
-    "semantic_hash": "69d001cc6989ea87fd379afb99073688"
+    "mtime": 1793953037.533556,
+    "seen": 1793954415.7438436,
+    "ast_hash": "6f65108c5916ebf01e7b92fa26419c67",
+    "semantic_hash": ""
   },
   "android/app/build.gradle.kts": {
     "mtime": 1786903175.4984374,
@@ -270,10 +270,10 @@
     "semantic_hash": "c99082b475209aa66a5fb5e0fb9db4cf"
   },
   "src/cli.rs": {
-    "mtime": 1790279629.418286,
-    "seen": 1792292743.598616,
-    "ast_hash": "ad17cfd5939ffa59f504f0e21a2467ad",
-    "semantic_hash": "ad17cfd5939ffa59f504f0e21a2467ad"
+    "mtime": 1793953781.2225587,
+    "seen": 1793954415.7440395,
+    "ast_hash": "3bee87d0a5565bdf8e5126ce16cf43d7",
+    "semantic_hash": ""
   },
   "src/cli_widgets.rs": {
     "mtime": 1787519683.3726044,
@@ -312,16 +312,16 @@
     "semantic_hash": "ef09f5b8d49986b0a844b3407462cc95"
   },
   "src/lib.rs": {
-    "mtime": 1787069074.3606303,
-    "seen": 1792292743.5986228,
-    "ast_hash": "61d7138fe370ceb30039e09b8f378799",
-    "semantic_hash": "61d7138fe370ceb30039e09b8f378799"
+    "mtime": 1793953921.344192,
+    "seen": 1793954415.7440722,
+    "ast_hash": "fba81dc19657b862416c86fdbc458991",
+    "semantic_hash": ""
   },
   "src/main.rs": {
-    "mtime": 1787772003.1771708,
-    "seen": 1792292743.5986235,
-    "ast_hash": "682ab802b909cbaf8ac36983ad658ffd",
-    "semantic_hash": "682ab802b909cbaf8ac36983ad658ffd"
+    "mtime": 1793954110.6775284,
+    "seen": 1793954415.744076,
+    "ast_hash": "a1e6eb2f8454db508deff6b917d6e27d",
+    "semantic_hash": ""
   },
   "src/protocol/crypto.rs": {
     "mtime": 1786903423.9211187,
@@ -384,10 +384,10 @@
     "semantic_hash": "9be37f582804cf43624bcdb7122bef28"
   },
   "src/server/http.rs": {
-    "mtime": 1790278279.221324,
-    "seen": 1792292743.5986347,
-    "ast_hash": "61c217f24e84b7beb5379bd5de654f3c",
-    "semantic_hash": "61c217f24e84b7beb5379bd5de654f3c"
+    "mtime": 1793953713.588094,
+    "seen": 1793954415.7441142,
+    "ast_hash": "4150e0c161a4585a73ff220977288e8d",
+    "semantic_hash": ""
   },
   "src/server/mod.rs": {
     "mtime": 1786901879.8317957,
@@ -617,154 +617,16 @@
     "ast_hash": "24dd9da4ecf2dbea4416abfa0996d6b7",
     "semantic_hash": ""
   },
-  "windows/App.xaml": {
-    "mtime": 1792410685.3727753,
-    "seen": 1792410984.4259477,
-    "ast_hash": "df1321d7d16306c9b5c3a026ceb2128d",
+  "src/bin/sharedash-gui.rs": {
+    "mtime": 1793954128.3961754,
+    "seen": 1793954415.7440348,
+    "ast_hash": "a7640a1a6b6b6c2d006e3835dfb0b3d9",
     "semantic_hash": ""
   },
-  "windows/App.xaml.cs": {
-    "mtime": 1792414754.9633,
-    "seen": 1792414906.5880797,
-    "ast_hash": "974752bf767547746c7def1dbde40ec6",
-    "semantic_hash": ""
-  },
-  "windows/AssemblyInfo.cs": {
-    "mtime": 1792410236.0105014,
-    "seen": 1792410984.42598,
-    "ast_hash": "8a158a8a488c0dd7d226a06783fc2860",
-    "semantic_hash": ""
-  },
-  "windows/Converters/UiConverters.cs": {
-    "mtime": 1792410813.987183,
-    "seen": 1792410984.4259853,
-    "ast_hash": "db89817d77074a6eec064972a3b9b94b",
-    "semantic_hash": ""
-  },
-  "windows/MainWindow.xaml": {
-    "mtime": 1792416931.383383,
-    "seen": 1792416985.681382,
-    "ast_hash": "ff67b0ef21914f25e6cb524f5aa17c1c",
-    "semantic_hash": ""
-  },
-  "windows/MainWindow.xaml.cs": {
-    "mtime": 1792412070.4956498,
-    "seen": 1792412207.6266506,
-    "ast_hash": "f2d9caa4847e648179f4d452c517c852",
-    "semantic_hash": ""
-  },
-  "windows/Models/AdapterInfo.cs": {
-    "mtime": 1792410442.3329422,
-    "seen": 1792410984.4259973,
-    "ast_hash": "c9f4c9e13e3279c4745adb371ebe8fc9",
-    "semantic_hash": ""
-  },
-  "windows/Models/BleDevice.cs": {
-    "mtime": 1792410453.5746965,
-    "seen": 1792410984.4260006,
-    "ast_hash": "2f7b3fe733aff3eabb686f3908324eaa",
-    "semantic_hash": ""
-  },
-  "windows/Models/DeviceInfo.cs": {
-    "mtime": 1792410428.4798753,
-    "seen": 1792410984.4260037,
-    "ast_hash": "6abf55000ebaf1bd15b5f35b06637f46",
-    "semantic_hash": ""
-  },
-  "windows/Models/TelemetryData.cs": {
-    "mtime": 1792410475.791156,
-    "seen": 1792410984.4260068,
-    "ast_hash": "9e261614886d637991f9150d3a0ce4fc",
-    "semantic_hash": ""
-  },
-  "windows/Models/TransferItem.cs": {
-    "mtime": 1792410465.762084,
-    "seen": 1792410984.42601,
-    "ast_hash": "16a07937a2da1fcf8ac77b6fee31a6f4",
-    "semantic_hash": ""
-  },
-  "windows/Services/ApiClient.cs": {
-    "mtime": 1792414503.251253,
-    "seen": 1792414906.588123,
-    "ast_hash": "3bc6b73f5f777ac7d0aac58baddef177",
-    "semantic_hash": ""
-  },
-  "windows/Services/EngineSupervisor.cs": {
-    "mtime": 1792410506.546629,
-    "seen": 1792410984.4260163,
-    "ast_hash": "8fe0f242497d55f5d78d8c26c6c6e3c0",
-    "semantic_hash": ""
-  },
-  "windows/Services/LogService.cs": {
-    "mtime": 1792410489.7639704,
-    "seen": 1792410984.4260197,
-    "ast_hash": "2c2f46d6da4ff1ed2a41a094609cf063",
-    "semantic_hash": ""
-  },
-  "windows/Services/MultipathSender.cs": {
-    "mtime": 1792416565.6889277,
-    "seen": 1792416985.681419,
-    "ast_hash": "aedd28b89cfbed1311e7f799eefb6a0b",
-    "semantic_hash": ""
-  },
-  "windows/Services/TelemetryWebSocketClient.cs": {
-    "mtime": 1792410913.4326737,
-    "seen": 1792410984.4260254,
-    "ast_hash": "ff1402db083d1de9d0af032a11a3ec5c",
-    "semantic_hash": ""
-  },
-  "windows/ShareDash.Windows.csproj": {
-    "mtime": 1792414632.5594082,
-    "seen": 1792414906.5881453,
-    "ast_hash": "9836ed6febf5f82e44bdac5b96590791",
-    "semantic_hash": ""
-  },
-  "windows/Styles/Colors.xaml": {
-    "mtime": 1792412903.946133,
-    "seen": 1792413110.689881,
-    "ast_hash": "9c78b8b35b9905ebd27f1b1d772be4a6",
-    "semantic_hash": ""
-  },
-  "windows/Styles/Controls.xaml": {
-    "mtime": 1792414126.3963373,
-    "seen": 1792414906.5881531,
-    "ast_hash": "a1e507128d487d783a895ae4191e87d5",
-    "semantic_hash": ""
-  },
-  "windows/ViewModels/MainViewModel.cs": {
-    "mtime": 1792416741.1698527,
-    "seen": 1792416985.6814353,
-    "ast_hash": "e3fd69c8aa23c0e7b29a0674f078af39",
-    "semantic_hash": ""
-  },
-  "windows/ViewModels/RelayCommand.cs": {
-    "mtime": 1792410584.9498682,
-    "seen": 1792410984.426041,
-    "ast_hash": "9924bf16a385be2979ac4631c5de069b",
-    "semantic_hash": ""
-  },
-  "windows/ViewModels/ViewModelBase.cs": {
-    "mtime": 1792410577.5300655,
-    "seen": 1792410984.4260435,
-    "ast_hash": "65ce9c7c49ee72cf1f9841f56f48122d",
-    "semantic_hash": ""
-  },
-  "windows/Controls/ChunkGridControl.cs": {
-    "mtime": 1792416541.5247178,
-    "seen": 1792416985.6813684,
-    "ast_hash": "82e96aa4517aae94a6940d3c7e9a85d2",
-    "semantic_hash": ""
-  },
-  "windows/Controls/DualColorProgressRing.cs": {
-    "mtime": 1792416522.0623252,
-    "seen": 1792416985.6813736,
-    "ast_hash": "67a0830c4a7336b4d8079122212201b9",
-    "semantic_hash": ""
-  },
-  "windows/Models/ChunkVisualItem.cs": {
-    "mtime": 1792416498.3172634,
-    "seen": 1792416985.6813958,
-    "ast_hash": "0e1dc34456c2b77faa6f2695bb5bd950",
+  "src/gui.rs": {
+    "mtime": 1793954151.99941,
+    "seen": 1793954415.744065,
+    "ast_hash": "cb28b720c4df6b995ec41e499394612a",
     "semantic_hash": ""
   }
 }

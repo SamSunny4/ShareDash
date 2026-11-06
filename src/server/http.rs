@@ -157,4 +157,116 @@ impl Server {
 
         Ok(())
     }
+
+    /// Start the server and all background discovery services, returning the AppState
+    /// and a background JoinHandle for the HTTP/WS server (without launching the CLI loop).
+    pub async fn start_background(self) -> anyhow::Result<(AppState, tokio::task::JoinHandle<anyhow::Result<()>>)> {
+        let (telemetry_tx, _) = tokio::sync::broadcast::channel::<SchedulerTelemetry>(512);
+
+        let manifest_db = Arc::new(ManifestDb::open(&self.db_path)?);
+        let pairing_mgr = Arc::new(PairingManager::new(self.device_id.clone(), self.device_name.clone()));
+        let discovery = Arc::new(PeerDiscovery::new(
+            self.device_id.clone(),
+            self.device_name.clone(),
+            std::env::consts::OS.to_string(),
+            self.port,
+        ));
+
+        // Start local UDP peer discovery beacon
+        if let Err(e) = discovery.start().await {
+            tracing::warn!("Could not start UDP discovery: {}", e);
+        }
+
+        // Start local BLE peer discovery scanner
+        let ble_discovery = Arc::new(BleDiscovery::new());
+        if let Err(e) = ble_discovery.start().await {
+            tracing::warn!("Could not start BLE discovery: {}", e);
+        }
+
+        // Maintain ADB reverse port 54325 whenever an Android phone is plugged in via USB
+        let adb_server_port = self.port;
+        tokio::spawn(async move {
+            loop {
+                if let Ok(output) = tokio::process::Command::new("adb").arg("devices").output().await {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let has_device = text.lines().skip(1).any(|l| l.contains("\tdevice"));
+                    if has_device {
+                        let _ = tokio::process::Command::new("adb")
+                            .args(["reverse", "tcp:54325", &format!("tcp:{}", adb_server_port)])
+                            .output()
+                            .await;
+                        let _ = tokio::process::Command::new("adb")
+                            .args(["forward", "tcp:54325", "tcp:54321"])
+                            .output()
+                            .await;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+        });
+
+        let state = AppState {
+            device_id: self.device_id,
+            device_name: self.device_name,
+            server_port: self.port,
+            pairing_mgr,
+            discovery,
+            ble_discovery,
+            manifest_db,
+            telemetry_tx: telemetry_tx.clone(),
+            active_transfers: Arc::new(Mutex::new(HashMap::new())),
+            pending_pair: Arc::new(Mutex::new(None)),
+            active_paired_peer: Arc::new(Mutex::new(None)),
+            outgoing_pair: Arc::new(Mutex::new(None)),
+            active_sender_cancel_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+
+        let cors = CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+
+        let ws_telemetry_tx = telemetry_tx.clone();
+        let app = Router::new()
+            .route("/api/v1/info", get(get_device_info))
+            .route("/api/v1/peers", get(get_discovered_peers))
+            .route("/api/v1/bridges", get(get_connection_bridges))
+            .route("/api/v1/transports/detect", get(detect_transports))
+            .route("/api/v1/pair/create", post(create_pair_session))
+            .route("/api/v1/pair/verify", post(verify_pair_pin))
+            .route("/api/v1/pair/request", post(handle_incoming_pair_request))
+            .route("/api/v1/pair/incoming", get(get_pending_pair_request))
+            .route("/api/v1/pair/respond", post(respond_to_pair_request))
+            .route("/api/v1/pair/confirm", post(confirm_pair_session))
+            .route("/api/v1/pair/connect", post(connect_to_remote_peer))
+            .route("/api/v1/pair/status", get(get_pairing_status))
+            .route("/api/v1/storage/open_folder", post(open_received_folder))
+            .route("/api/v1/wifi_caps", get(get_wifi_caps_handler))
+            .route("/api/v1/wifi_connect", post(handle_wifi_connect))
+            .route("/api/v1/hotspot/start", post(handle_start_hotspot))
+            .route("/api/v1/hotspot/open-settings", post(open_windows_hotspot_settings))
+            .route("/api/v1/transfers", get(list_transfers))
+            .route("/api/v1/transfers/chunk", post(receive_transfer_chunk))
+            .route("/api/v1/transfers/send", post(upload_and_transfer_files))
+            .route("/api/v1/transfers/prepare", post(prepare_transfer))
+            .route("/api/v1/transfers/:id/cancel", post(cancel_transfer))
+            .route("/api/v1/transfers/cancel", post(cancel_all_active_transfers))
+            .route("/api/v1/benchmark/start", post(start_benchmark_transfer))
+            .route(
+                "/ws/telemetry",
+                get(move |ws| ws_telemetry_handler(ws, ws_telemetry_tx.subscribe())),
+            )
+            .layer(cors)
+            .layer(axum::extract::DefaultBodyLimit::disable())
+            .with_state(state.clone());
+
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.map_err(anyhow::Error::from)
+        });
+
+        Ok((state, handle))
+    }
 }

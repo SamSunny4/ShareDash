@@ -44,10 +44,9 @@ Thumbs.db
 *.bak
 
 # Windows .NET / WPF build artifacts
-bin/
-obj/
-**/bin/
-**/obj/
+windows/**/bin/
+windows/**/obj/
+!src/bin/
 .vs/
 *.user
 *.userosv
