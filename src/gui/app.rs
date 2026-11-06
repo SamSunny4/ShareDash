@@ -28,7 +28,7 @@ pub enum ActiveView {
 struct HardwareMonitorData {
     usb_ok: bool,
     usb_name: Option<String>,
-    _rndis_ip: Option<String>,
+    rndis_ip: Option<String>,
     pc_caps: crate::discovery::WifiCapsInfo,
     wifi_on: bool,
     paired: Option<String>,
@@ -186,6 +186,12 @@ impl ShareDashApp {
 
         self.engine.tokio_handle.spawn(async move {
             loop {
+                // If a transfer is actively taking place, pause hardware polling to give 100% USB bandwidth
+                if engine_clone.is_transfer_active.load(std::sync::atomic::Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    continue;
+                }
+
                 let (usb_ok, usb_name, rndis_ip) = engine_clone.check_usb_status().await;
                 let pc_caps = crate::hotspot::detect_pc_wifi_caps().await;
                 let wifi_on = crate::hotspot::check_pc_wifi_adapter_enabled().await;
@@ -202,7 +208,7 @@ impl ShareDashApp {
                 if tx_hw.unbounded_send(HardwareMonitorData {
                     usb_ok,
                     usb_name,
-                    _rndis_ip: rndis_ip,
+                    rndis_ip,
                     pc_caps,
                     wifi_on,
                     paired,
@@ -231,6 +237,20 @@ impl ShareDashApp {
                     view.wizard_state.pc_wifi_standard = data.pc_caps.wifi_standard;
                     view.wizard_state.pc_wifi_phy = data.pc_caps.max_phy_rate_mbps;
                     view.wizard_state.pc_wifi_enabled = data.wifi_on;
+
+                    if data.usb_ok {
+                        view.transfer_state.usb_ready = true;
+                        // Prioritize RNDIS Tethering (direct NIC ~35-42 MB/s) over ADB forward (127.0.0.1:54325, ~20 MB/s)
+                        if let Some(ref r_ip) = data.rndis_ip {
+                            view.transfer_state.usb_target_ip = r_ip.clone();
+                            view.transfer_state.usb_target_port = 54321;
+                        } else {
+                            view.transfer_state.usb_target_ip = "127.0.0.1".to_string();
+                            view.transfer_state.usb_target_port = 54325;
+                        }
+                    } else {
+                        view.transfer_state.usb_ready = false;
+                    }
 
                     if let Some(ref peer) = data.paired {
                         view.transfer_state.target_name = peer.clone();
@@ -798,8 +818,10 @@ impl Render for ShareDashApp {
                     cx.listener(|this, _, _, cx| {
                         // Proceed to send files with wizard settings
                         this.transfer_state.usb_ready = this.wizard_state.usb_ready;
-                        this.transfer_state.usb_target_ip = this.wizard_state.usb_ip.clone();
-                        this.transfer_state.usb_target_port = this.wizard_state.usb_port;
+                        if !this.wizard_state.usb_ip.is_empty() {
+                            this.transfer_state.usb_target_ip = this.wizard_state.usb_ip.clone();
+                            this.transfer_state.usb_target_port = this.wizard_state.usb_port;
+                        }
                         this.transfer_state.wifi_ready = this.wizard_state.wifi_ready;
                         if let Some(ref w_ip) = this.wizard_state.wifi_ip {
                             this.transfer_state.wifi_target_ip = w_ip.clone();

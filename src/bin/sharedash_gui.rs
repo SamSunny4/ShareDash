@@ -39,7 +39,7 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()?;
 
-    let engine = rt.block_on(async {
+    let engine: GuiEngine = rt.block_on(async {
         GuiEngine::start(args.port, args.name, args.db_path).await
     })?;
 

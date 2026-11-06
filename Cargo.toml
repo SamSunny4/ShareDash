@@ -61,3 +61,7 @@ gui = ["dep:gpui", "dep:rfd"]
 name = "sharedash-gui"
 path = "src/bin/sharedash_gui.rs"
 required-features = ["gui"]
+
+[profile.dev]
+debug = 0
+

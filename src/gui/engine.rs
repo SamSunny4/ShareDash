@@ -69,12 +69,16 @@ pub struct DiscoveredDevice {
 pub struct GuiEngine {
     pub state: AppState,
     pub tokio_handle: tokio::runtime::Handle,
+    pub is_transfer_active: Arc<std::sync::atomic::AtomicBool>,
+    adb_model_cache: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl GuiEngine {
     /// Initialize the background engine (HTTP server, discovery, telemetry)
     pub async fn start(port: u16, name: String, db_path: PathBuf) -> anyhow::Result<Self> {
         let (telemetry_tx, _) = tokio::sync::broadcast::channel::<SchedulerTelemetry>(512);
+        let is_transfer_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let adb_model_cache = Arc::new(Mutex::new(HashMap::new()));
 
         // Persistent Device ID
         let device_id_file = PathBuf::from("./sharedash_data/device_id.txt");
@@ -117,20 +121,41 @@ impl GuiEngine {
 
         // Maintain ADB reverse port 54325 for connected USB Android devices
         let adb_server_port = port;
+        let is_transfer_active_bg = is_transfer_active.clone();
         tokio::spawn(async move {
+            let mut last_configured_serial = String::new();
             loop {
+                // If a transfer is actively taking place, pause ADB background commands to avoid USB bus contention
+                if is_transfer_active_bg.load(std::sync::atomic::Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    continue;
+                }
+
                 if let Ok(output) = tokio::process::Command::new("adb").arg("devices").output().await {
                     let text = String::from_utf8_lossy(&output.stdout);
-                    let has_device = text.lines().skip(1).any(|l| l.contains("\tdevice"));
-                    if has_device {
-                        let _ = tokio::process::Command::new("adb")
-                            .args(["reverse", "tcp:54325", &format!("tcp:{}", adb_server_port)])
-                            .output()
-                            .await;
-                        let _ = tokio::process::Command::new("adb")
-                            .args(["forward", "tcp:54325", "tcp:54321"])
-                            .output()
-                            .await;
+                    let mut current_serial = None;
+                    for line in text.lines().skip(1) {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && trimmed.ends_with("device") {
+                            current_serial = trimmed.split_whitespace().next().map(|s| s.to_string());
+                            break;
+                        }
+                    }
+
+                    if let Some(serial) = current_serial {
+                        if last_configured_serial != serial {
+                            let _ = tokio::process::Command::new("adb")
+                                .args(["reverse", "tcp:54325", &format!("tcp:{}", adb_server_port)])
+                                .output()
+                                .await;
+                            let _ = tokio::process::Command::new("adb")
+                                .args(["forward", "tcp:54325", "tcp:54321"])
+                                .output()
+                                .await;
+                            last_configured_serial = serial;
+                        }
+                    } else {
+                        last_configured_serial.clear();
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -205,6 +230,8 @@ impl GuiEngine {
         Ok(Self {
             state,
             tokio_handle: tokio::runtime::Handle::current(),
+            is_transfer_active,
+            adb_model_cache,
         })
     }
 
@@ -217,23 +244,14 @@ impl GuiEngine {
         let mut usb_name = None;
         let mut rndis_ip = None;
 
-        // 1. Check ADB
-        let (adb_ok, adb_name) = self.check_adb().await;
-        if adb_ok {
-            usb_connected = true;
-            usb_name = adb_name;
-        }
-
-        // 2. Check RNDIS Tethering
+        // 1. Check RNDIS Tethering FIRST (Direct hardware line speed ~35-42 MB/s)
         if let Some((ip, name)) = hotspot::detect_usb_tethering_peer_detailed().await {
             rndis_ip = Some(ip);
-            if usb_name.is_none() {
-                usb_name = Some(name);
-            }
+            usb_name = Some(name);
             usb_connected = true;
         }
 
-        // 3. Sweep direct USB network peers
+        // 2. Check direct USB network peers if not already detected
         if !usb_connected {
             let direct_peers = hotspot::scan_direct_usb_pc_peers().await;
             if let Some(peer) = direct_peers.into_iter().find(|p| {
@@ -243,10 +261,17 @@ impl GuiEngine {
                     || p.ip.starts_with("192.168.43.")
             }) {
                 rndis_ip = Some(peer.ip);
-                if usb_name.is_none() {
-                    usb_name = Some(peer.device_name);
-                }
+                usb_name = Some(peer.device_name);
                 usb_connected = true;
+            }
+        }
+
+        // 3. Check ADB (Fallback fast-path ~20 MB/s or device identification)
+        let (adb_ok, adb_name) = self.check_adb().await;
+        if adb_ok {
+            usb_connected = true;
+            if usb_name.is_none() {
+                usb_name = adb_name;
             }
         }
 
@@ -265,13 +290,28 @@ impl GuiEngine {
                     let trimmed = line.trim();
                     if !trimmed.is_empty() && trimmed.ends_with("device") {
                         let serial = trimmed.split_whitespace().next().unwrap_or("Android");
-                        let model = tokio::process::Command::new(&adb_path)
-                            .args(["shell", "getprop", "ro.product.model"])
-                            .output()
-                            .await
-                            .ok()
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                            .filter(|s| !s.is_empty());
+
+                        // Check model cache first to avoid running `adb shell getprop` every 1.5s
+                        let cached_model = {
+                            let cache = self.adb_model_cache.lock();
+                            cache.get(serial).cloned()
+                        };
+
+                        let model = if let Some(m) = cached_model {
+                            Some(m)
+                        } else {
+                            let m = tokio::process::Command::new(&adb_path)
+                                .args(["shell", "getprop", "ro.product.model"])
+                                .output()
+                                .await
+                                .ok()
+                                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                                .filter(|s| !s.is_empty());
+                            if let Some(ref m_val) = m {
+                                self.adb_model_cache.lock().insert(serial.to_string(), m_val.clone());
+                            }
+                            m
+                        };
 
                         let display_name = model
                             .map(|m| format!("{} ({})", m, serial))
@@ -635,6 +675,16 @@ impl GuiEngine {
         let file_size_mb = file_size as f64 / (1024.0 * 1024.0);
         let start_time = Instant::now();
 
+        // Mark transfer active to pause background hardware polling & ADB commands
+        self.is_transfer_active.store(true, std::sync::atomic::Ordering::SeqCst);
+        struct TransferGuard(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for TransferGuard {
+            fn drop(&mut self) {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _guard = TransferGuard(self.is_transfer_active.clone());
+
         let channel_states: Vec<(Arc<Mutex<ChannelStats>>, String, u16, String)> = targets
             .iter()
             .map(|(ip, port, name)| {
@@ -714,7 +764,7 @@ impl GuiEngine {
         let mut handles = Vec::new();
 
         for (state, ip, port, name) in &channel_states {
-            let worker_count = if name.contains("USB") { 6 } else { 4 };
+            let worker_count = if name.contains("USB") { 4 } else { 4 };
             for _ in 0..worker_count {
                 let h = self.tokio_handle.spawn(run_gui_chunk_worker(
                     ip.clone(),
@@ -831,16 +881,14 @@ impl GuiWorkDispatcher {
         let mut chunks = Vec::new();
         let mut unassigned = std::collections::VecDeque::new();
 
-        let base_chunk_size: u64 = if total_bytes < 20 * 1024 * 1024 {
-            2 * 1024 * 1024
-        } else if total_bytes < 100 * 1024 * 1024 {
-            4 * 1024 * 1024
-        } else if total_bytes < 500 * 1024 * 1024 {
-            8 * 1024 * 1024
-        } else if total_bytes < 2 * 1024 * 1024 * 1024 {
-            16 * 1024 * 1024
+        // Dynamic Chunk Sizing tuned for mobile buffer safety & line-rate USB/Wi-Fi:
+        // Capped at 4 MB to prevent bufferbloat and socket stall on half-duplex USB 2.0 links.
+        let base_chunk_size: u64 = if total_bytes < 10 * 1024 * 1024 {
+            1024 * 1024 // 1 MB for < 10 MB
+        } else if total_bytes < 50 * 1024 * 1024 {
+            2 * 1024 * 1024 // 2 MB for 10 - 50 MB
         } else {
-            32 * 1024 * 1024
+            4 * 1024 * 1024 // 4 MB for >= 50 MB
         };
 
         let mut current_offset: u64 = 0;
@@ -856,12 +904,10 @@ impl GuiWorkDispatcher {
         } else {
             while current_offset < total_bytes {
                 let remaining = total_bytes - current_offset;
-                let chunk_size = if remaining <= 16 * 1024 * 1024 && base_chunk_size > 4 * 1024 * 1024 {
-                    4 * 1024 * 1024
-                } else if remaining <= 48 * 1024 * 1024 && base_chunk_size > 8 * 1024 * 1024 {
-                    8 * 1024 * 1024
-                } else if remaining <= 96 * 1024 * 1024 && base_chunk_size > 16 * 1024 * 1024 {
-                    16 * 1024 * 1024
+                let chunk_size = if remaining <= 8 * 1024 * 1024 && base_chunk_size > 2 * 1024 * 1024 {
+                    2 * 1024 * 1024
+                } else if remaining <= 2 * 1024 * 1024 {
+                    1024 * 1024
                 } else {
                     base_chunk_size
                 };
@@ -1022,6 +1068,7 @@ async fn run_gui_chunk_worker(
 
         let chunk_body = bytes::Bytes::copy_from_slice(slice);
 
+        let is_usb = transport_name.contains("USB");
         let req = client
             .post(&url_chunk)
             .header("x-transfer-id", &transfer_id)
@@ -1032,6 +1079,8 @@ async fn run_gui_chunk_worker(
             .header("x-chunk-length", chunk.length.to_string())
             .header("x-chunk-crc32", &chunk_crc)
             .header("x-total-chunks", total_chunks.to_string())
+            .header("x-transport", &transport_name)
+            .header("x-transport-kind", if is_usb { "USB" } else { "WIFI" })
             .header("Content-Type", "application/octet-stream")
             .header("Connection", "keep-alive")
             .body(chunk_body);

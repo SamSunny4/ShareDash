@@ -1271,13 +1271,23 @@ class MainActivity : ComponentActivity() {
             verified.add(TransportEndpoint(target.ipAddress, target.port, name, kind))
         }
 
+        // Prioritize hardware USB NIC (RNDIS / Tethering, e.g. 192.168.42.x, ~35-42 MB/s)
+        // over ADB reverse loopback (127.0.0.1:54325, ~20 MB/s user-space proxy)
+        verified.sortWith(compareBy<TransportEndpoint> {
+            if (it.kind == TransportKind.USB && it.ip != "127.0.0.1") 0
+            else if (it.kind == TransportKind.USB) 1
+            else 2
+        })
+
         Log.i("MainActivity", "Multipath endpoints resolved: ${verified.map { "${it.name} (${it.ip}:${it.port})" }}")
         verified
     }
 
     private suspend fun resolveBestTargetEndpoint(target: DiscoveredPeer): Pair<String, Int>? {
         val endpoints = resolveMultipathEndpoints(target)
-        val best = endpoints.firstOrNull { it.kind == TransportKind.USB } ?: endpoints.firstOrNull()
+        val best = endpoints.firstOrNull { it.kind == TransportKind.USB && it.ip != "127.0.0.1" }
+            ?: endpoints.firstOrNull { it.kind == TransportKind.USB }
+            ?: endpoints.firstOrNull()
         return best?.let { it.ip to it.port }
     }
 
@@ -1451,7 +1461,8 @@ class MainActivity : ComponentActivity() {
             }
 
             // Identify USB and Wi-Fi endpoints for simultaneous multipath streaming
-            val usbEndpoint = endpoints.firstOrNull { it.kind == TransportKind.USB }
+            val usbEndpoint = endpoints.firstOrNull { it.kind == TransportKind.USB && it.ip != "127.0.0.1" }
+                ?: endpoints.firstOrNull { it.kind == TransportKind.USB }
             val wifiEndpoint = endpoints.firstOrNull { it.kind != TransportKind.USB }
             val hasUsb = usbEndpoint != null
             val hasWifi = wifiEndpoint != null
