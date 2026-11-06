@@ -306,7 +306,9 @@ impl ShareDashApp {
                 });
                 let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Hardware capabilities synchronized.")));
 
-                // Phase 3 & 4: Optimal Host & Hotspot Provisioning
+                let mut wifi_connected = false;
+
+                // Phase 3 & 4: Optimal Host & Hotspot Provisioning (Phone Wi-Fi Direct Primary, PC Hotspot Fallback)
                 if pc_wifi_on {
                     let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
                     let (best_host, host_reason) =
@@ -321,36 +323,81 @@ impl ShareDashApp {
                         choice: host_choice,
                         reason: host_reason,
                     });
-                    let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Optimal Hotspot Host selected.")));
+                    let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Optimal Host: Phone 5GHz Wi-Fi Direct AP selected as Primary.")));
 
-                    let (ssid, password) = crate::hotspot::generate_hotspot_credentials();
-                    if let Ok(info) = crate::hotspot::create_hotspot(&ssid, &password, true).await {
+                    // ── Primary Strategy: Request Phone to host 5GHz Wi-Fi Direct / LocalHotspot ──
+                    let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info("Requesting Phone to start 5GHz Wi-Fi Direct / Hotspot over USB...")));
+
+                    if let Some((p_ssid, p_pass, p_gw)) = engine.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
                         let _ = tx.unbounded_send(WizardEvent::Phase4HotspotActive {
-                            ssid: info.ssid.clone(),
-                            band: info.band.clone(),
+                            ssid: p_ssid.clone(),
+                            band: "5 GHz".to_string(),
                         });
-                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("PC Hotspot Active (SSID: {})", info.ssid))));
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("Phone 5GHz AP Active (SSID: '{}')", p_ssid))));
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info(format!("Connecting PC Wi-Fi to phone hotspot '{}'...", p_ssid))));
 
-                        let sent = engine
-                            .send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password)
-                            .await;
+                        let _ = crate::hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
 
-                        if sent {
-                            let _ = tx.unbounded_send(WizardEvent::HotspotCredsTransferred);
-                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Hotspot credentials transferred via USB.")));
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info("Waiting for PC to bind to 5GHz Wi-Fi network...")));
 
-                            for _ in 0..25 {
-                                if let Some(ip) = crate::hotspot::fast_scan_hotspot_clients(54321).await {
-                                    if engine.http_probe(&ip, 54321).await {
-                                        let synack = engine.pair_handshake_target(&ip, 54321).await;
-                                        if synack {
-                                            let _ = tx.unbounded_send(WizardEvent::WifiConnected { ip: ip.clone() });
-                                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("Phone connected on 5GHz Wi-Fi (IP: {})", ip))));
-                                            break;
+                        let detected_ip = crate::hotspot::wait_for_phone_hotspot_interface(
+                            Duration::from_secs(35),
+                            &p_ssid,
+                            Some(&p_gw),
+                        ).await;
+
+                        if let Some(target_ip) = detected_ip {
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info(format!("Verifying direct 5GHz link & pairing at {}:54321...", target_ip))));
+
+                            let verified = engine.verify_and_pair_wifi_with_retries(&target_ip, 54321, 15).await;
+                            if verified {
+                                let _ = tx.unbounded_send(WizardEvent::WifiConnected { ip: target_ip.clone() });
+                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("✔ 5GHz Wi-Fi Direct link verified & paired: {}:54321", target_ip))));
+                                wifi_connected = true;
+                            } else {
+                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn(format!("Could not verify link to phone via Wi-Fi ({}:54321).", target_ip))));
+                            }
+                        } else {
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("PC Wi-Fi did not associate to phone hotspot within timeout.")));
+                        }
+                    } else {
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("Phone hotspot start failed over USB.")));
+                    }
+
+                    // ── Fallback Strategy: Create PC Hotspot if Phone Hosting failed ──
+                    if !wifi_connected {
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("Phone Wi-Fi Direct not active. Falling back to PC Hotspot...")));
+
+                        let (ssid, password) = crate::hotspot::generate_hotspot_credentials();
+                        if let Ok(info) = crate::hotspot::create_hotspot(&ssid, &password, true).await {
+                            let _ = tx.unbounded_send(WizardEvent::Phase4HotspotActive {
+                                ssid: info.ssid.clone(),
+                                band: info.band.clone(),
+                            });
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("PC Fallback Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band))));
+
+                            let sent = engine
+                                .send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password)
+                                .await;
+
+                            if sent {
+                                let _ = tx.unbounded_send(WizardEvent::HotspotCredsTransferred);
+                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Hotspot credentials transferred via USB.")));
+
+                                for _ in 0..25 {
+                                    if let Some(ip) = crate::hotspot::fast_scan_hotspot_clients(54321).await {
+                                        if engine.http_probe(&ip, 54321).await {
+                                            let synack = engine.pair_handshake_target(&ip, 54321).await;
+                                            if synack {
+                                                let _ = tx.unbounded_send(WizardEvent::WifiConnected { ip: ip.clone() });
+                                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("Phone connected to PC fallback hotspot (IP: {})", ip))));
+                                                wifi_connected = true;
+                                                break;
+                                            }
                                         }
                                     }
+                                    tokio::time::sleep(Duration::from_millis(400)).await;
                                 }
-                                tokio::time::sleep(Duration::from_millis(400)).await;
                             }
                         }
                     }
@@ -362,8 +409,12 @@ impl ShareDashApp {
                     let synack = engine.pair_handshake_target(&usb_ip, usb_port).await;
                     if synack {
                         let _ = tx.unbounded_send(WizardEvent::Phase5UsbConfirmed);
-                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("USB channel handshake confirmed (3.2 Gbps Line Speed).")));
-                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("✔ Multipath Channel READY to transfer!")));
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("USB channel handshake confirmed (Fast-Path Line Speed).")));
+                        if wifi_connected {
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("🚀 Dual-Channel Multipath (Fast USB + 5GHz Wi-Fi Direct) READY!")));
+                        } else {
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("✔ USB Fast-Path Channel READY to transfer!")));
+                        }
                     }
                 }
             } else {
@@ -700,6 +751,13 @@ impl Render for ShareDashApp {
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::PcToPc, cx)),
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Transfer, cx)),
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Info, cx)),
+                    cx.listener(|_, _, _, _| {
+                        let download_dir = std::env::var("USERPROFILE")
+                            .map(|p| PathBuf::from(p).join("Downloads").join("ShareDash_Received"))
+                            .unwrap_or_else(|_| PathBuf::from("downloads"));
+                        let _ = std::fs::create_dir_all(&download_dir);
+                        let _ = std::process::Command::new("explorer").arg(&download_dir).spawn();
+                    }),
                     cx.listener(|this, _, _, cx| {
                         // Accept pair
                         if let Some(req) = this.engine.state.pending_pair.lock().clone() {

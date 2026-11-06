@@ -31,6 +31,7 @@ pub fn render_home_view(
     on_select_pc2pc: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_transfer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_info: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_downloads: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_accept_pair: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_reject_pair: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
@@ -110,14 +111,60 @@ pub fn render_home_view(
         );
     }
 
-    // ── Hardware Status Overview Strip ────────────────────────
+    // ── 1. Top Brand & Profile Bar (matching Android HomeScreen) ──
+    let (status_text, status_color) = if let Some(ref peer) = status.paired_peer {
+        (format!("Connected to {}", peer), theme::accent_green())
+    } else if status.usb_connected {
+        let name = status.usb_name.as_deref().unwrap_or("Fast-Path");
+        (format!("USB Cable Detected: {}", name), theme::accent_cyan())
+    } else {
+        ("Waiting for Connection".to_string(), theme::text_muted())
+    };
+
+    root = root.child(brand_top_bar(
+        &status.device_name,
+        &status_text,
+        status_color,
+        on_open_downloads,
+        on_select_info,
+    ));
+
+    let on_wizard = std::sync::Arc::new(on_select_wizard);
+    let on_pc2pc = std::sync::Arc::new(on_select_pc2pc);
+
+    let w1 = on_wizard.clone();
+    let w2 = on_wizard.clone();
+    let w3 = on_wizard.clone();
+
+    let p1 = on_pc2pc.clone();
+    let p2 = on_pc2pc.clone();
+    let p3 = on_pc2pc.clone();
+
+    // ── 2. Mode Selector Segmented Pill (Phone to PC vs PC to PC) ──
+    root = root.child(mode_pill_selector(
+        false,
+        move |e, w, a| w1(e, w, a),
+        move |e, w, a| p1(e, w, a),
+    ));
+
+    // ── 3. Hero Connection Hub (matching Android glowing central hub) ──
+    root = root.child(hero_connection_hub(
+        status.usb_connected,
+        status.usb_name.as_deref(),
+        status.wifi_enabled,
+        status.paired_peer.as_deref(),
+        move |e, w, a| w2(e, w, a),
+        move |e, w, a| p2(e, w, a),
+    ));
+
+    // ── 4. Hardware Channel Status Overview Chips ─────────────
     let usb_label = if status.usb_connected {
         format!(
-            "⚡ USB: Connected ({})",
+            "⚡ USB: Linked ({})",
             status.usb_name.as_deref().unwrap_or("Fast-Path")
         )
     } else {
-        "⚡ USB: Not connected".to_string()
+        "⚡ USB: Disconnected".to_string()
     };
 
     let wifi_label = format!(
@@ -141,7 +188,7 @@ pub fn render_home_view(
             .w_full()
             .child(channel_badge(
                 "⚡",
-                "USB Link",
+                "USB Fast-Path",
                 &usb_label,
                 status.usb_connected,
             ))
@@ -153,32 +200,13 @@ pub fn render_home_view(
             ))
             .child(channel_badge(
                 "🔒",
-                "Pairing",
+                "Peer Handshake",
                 &paired_label,
                 status.paired_peer.is_some(),
             )),
     );
 
-    // ── Mode Selection Header ────────────────────────────────
-    root = root.child(
-        div()
-            .pt_2()
-            .child(
-                div()
-                    .text_size(px(18.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .child("Select Transfer Mode"),
-            )
-            .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(theme::text_secondary())
-                    .child("Multipath zero-latency file transfer between Windows PC and Android / PC"),
-            ),
-    );
-
-    // ── Mode Cards Grid (Options 1, 2, 3, Transfer) ───────────
+    // ── 5. Quick Feature Mode Cards ───────────────────────────
     root = root.child(
         div()
             .flex()
@@ -189,37 +217,28 @@ pub fn render_home_view(
                 card_button(
                     "card-phone-wizard",
                     "📱",
-                    "[1] Auto-Connect Wizard (PC ↔ Phone: USB → BLE → Wi-Fi)",
-                    "Recommended: Automatic multi-gigabit link setup. Auto-detects USB cable, exchanges specs, and sets up 5GHz Wi-Fi aggregation (~3+ Gbps line speed).",
+                    "Auto-Connect Phone Wizard (USB Fast-Path → 5GHz Wi-Fi Direct)",
+                    "Automatic multi-gigabit link setup. Auto-detects USB cable, exchanges specs, and connects to Phone 5GHz Wi-Fi Direct AP (~3+ Gbps combined line speed).",
                 )
-                .on_click(on_select_wizard),
+                .on_click(move |e, w, a| w3(e, w, a)),
             )
             .child(
                 card_button(
                     "card-pc2pc-wizard",
                     "💻",
-                    "[2] PC-to-PC Wireless Mode (Bluetooth Discovery → Fast Hotspot)",
-                    "Peer-to-peer wireless between two PCs without routers or internet. Bluetooth LE beacons handshake to optimal 5GHz/6GHz mobile hotspot.",
+                    "PC-to-PC Wireless Mode (Bluetooth LE Radar → Direct Hotspot)",
+                    "Direct peer-to-peer transmission between PCs without router or internet. Sweeps Bluetooth radar and handshakes to optimal 5GHz/6GHz hotspot.",
                 )
-                .on_click(on_select_pc2pc),
+                .on_click(move |e, w, a| p3(e, w, a)),
             )
             .child(
                 card_button(
                     "card-transfer-direct",
                     "🚀",
                     "Direct File & Folder Sender (Multipath)",
-                    "Send files or entire directory trees with live parallel chunk streaming across USB and Wi-Fi simultaneously.",
+                    "Select files or entire folder directories to stream simultaneously across USB and Wi-Fi Direct with real-time speedometers.",
                 )
                 .on_click(on_select_transfer),
-            )
-            .child(
-                card_button(
-                    "card-network-info",
-                    "🔧",
-                    "[3] Network Interfaces & Hardware Info",
-                    "Inspect active subnets, USB tethering interfaces, Wi-Fi hardware standard, PHY link rate, and local IP addresses.",
-                )
-                .on_click(on_select_info),
             ),
     );
 

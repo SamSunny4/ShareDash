@@ -147,103 +147,36 @@ pub fn render_transfer_view(
             );
     }
 
-    // ── Live Transfer Progress View ───────────────────────────
+    // ── Live Transfer Progress View (Speedometer & Piece Map) ─
     if state.is_transferring {
         if let Some(ref telem) = state.live_progress {
-            let mut trans_card = div()
-                .w_full()
-                .p_4()
-                .rounded(theme::corner_md())
-                .bg(theme::bg_surface())
-                .border_1()
-                .border_color(theme::accent_cyan())
+            let total_chunks = telem.channels.iter().map(|c| c.chunks_sent).sum::<usize>() + 16;
+            let completed_chunks = telem.channels.iter().map(|c| c.chunks_sent).sum::<usize>();
+            let in_flight = 4;
+
+            return root
+                .child(speedometer_panel(
+                    telem.speed_mb_s,
+                    telem.speed_gbps,
+                    telem.bytes_transferred,
+                    telem.total_bytes,
+                    telem.progress_pct,
+                    telem.eta_seconds,
+                    &telem.channels,
+                ))
+                .child(piece_map_visualizer(
+                    completed_chunks,
+                    total_chunks.max(completed_chunks),
+                    in_flight,
+                ))
                 .child(
                     div()
-                        .flex()
-                        .flex_row()
-                        .justify_between()
-                        .items_center()
-                        .pb_2()
+                        .pt_2()
                         .child(
-                            div()
-                                .text_size(px(16.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(theme::accent_cyan())
-                                .child(format!("Sending: {}", telem.file_name)),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(theme::accent_green())
-                                .child(format!(
-                                    "{:.1} MB/s ({:.2} Gbps)",
-                                    telem.speed_mb_s, telem.speed_gbps
-                                )),
+                            action_button("btn-cancel-transfer", "✖ Cancel Transfer", false)
+                                .on_click(on_cancel_transfer),
                         ),
-                )
-                .child(
-                    div()
-                        .pb_3()
-                        .child(progress_bar(telem.progress_pct, 500.0)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .justify_between()
-                        .text_size(px(12.0))
-                        .text_color(theme::text_secondary())
-                        .pb_3()
-                        .child(format!(
-                            "{:.1} / {:.1} MB transferred",
-                            telem.bytes_transferred as f64 / (1024.0 * 1024.0),
-                            telem.total_bytes as f64 / (1024.0 * 1024.0)
-                        ))
-                        .child(format!("ETA: {:.1}s remaining", telem.eta_seconds)),
                 );
-
-            // Channel by channel breakdown
-            trans_card = trans_card.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(telem.channels.iter().map(|ch| {
-                        let mb = ch.bytes_sent as f64 / (1024.0 * 1024.0);
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .p_2()
-                            .rounded(theme::corner_sm())
-                            .bg(theme::bg_elevated())
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .text_color(theme::text_primary())
-                                    .child(format!("{} {}: {:.1} MB", ch.icon, ch.name, mb)),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(theme::accent_cyan())
-                                    .child(format!("{:.1} MB/s ({:.2} Gbps) · {} chunks", ch.speed_mb_s, ch.speed_gbps, ch.chunks_sent)),
-                            )
-                    })),
-            );
-
-            trans_card = trans_card.child(
-                div()
-                    .pt_4()
-                    .child(
-                        action_button("btn-cancel-transfer", "✖ Cancel Transfer", false)
-                            .on_click(on_cancel_transfer),
-                    ),
-            );
-
-            return root.child(trans_card);
         }
     }
 

@@ -106,13 +106,13 @@ pub fn render_pc2pc_view(
     let p1_card = div()
         .w_full()
         .p_4()
-        .rounded(theme::corner_md())
+        .rounded(theme::corner_lg())
         .bg(theme::bg_surface())
         .border_1()
         .border_color(if state.current_phase == 1 {
             theme::accent_cyan()
         } else {
-            theme::border_default()
+            theme::border_card()
         })
         .child(phase_header(1, "Local Wi-Fi & Bluetooth Radio Verification"))
         .child(tree_item(
@@ -138,13 +138,13 @@ pub fn render_pc2pc_view(
         let mut p2_card = div()
             .w_full()
             .p_4()
-            .rounded(theme::corner_md())
+            .rounded(theme::corner_lg())
             .bg(theme::bg_surface())
             .border_1()
             .border_color(if state.current_phase == 2 {
                 theme::accent_cyan()
             } else {
-                theme::border_default()
+                theme::border_card()
             })
             .child(phase_header(2, "Bluetooth LE Discovery & Radar Scan"));
 
@@ -259,13 +259,13 @@ pub fn render_pc2pc_view(
         let p3_card = div()
             .w_full()
             .p_4()
-            .rounded(theme::corner_md())
+            .rounded(theme::corner_lg())
             .bg(theme::bg_surface())
             .border_1()
             .border_color(if state.current_phase == 3 || state.current_phase == 4 {
                 theme::accent_cyan()
             } else {
-                theme::border_default()
+                theme::border_card()
             })
             .child(phase_header(3, "Optimal Band Selection & Hotspot Provisioning"))
             .child(status_ok(&format!(
@@ -284,7 +284,7 @@ pub fn render_pc2pc_view(
         let mut p5_card = div()
             .w_full()
             .p_4()
-            .rounded(theme::corner_md())
+            .rounded(theme::corner_lg())
             .bg(theme::bg_surface())
             .border_1()
             .border_color(theme::accent_green())
@@ -317,10 +317,10 @@ pub fn render_pc2pc_view(
             .flex_col()
             .w_full()
             .p_3()
-            .rounded(theme::corner_md())
+            .rounded(theme::corner_lg())
             .bg(theme::bg_surface())
             .border_1()
-            .border_color(theme::border_default())
+            .border_color(theme::border_card())
             .child(
                 div()
                     .text_size(px(13.0))
