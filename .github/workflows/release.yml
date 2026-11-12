@@ -36,7 +36,7 @@ jobs:
           Get-FileHash sharedash-windows-x86_64.zip -Algorithm SHA256 | Out-File -Encoding UTF8 sharedash-windows-x86_64.zip.sha256
 
       - name: Upload Windows Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-release
           path: |
@@ -71,7 +71,7 @@ jobs:
           sha256sum ShareDash.apk > ShareDash.apk.sha256
 
       - name: Upload Android Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-release
           path: |
