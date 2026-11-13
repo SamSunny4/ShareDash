@@ -1,10 +1,9 @@
 /**
- * ShareDash — Interactive Application Logic & Canvas Visualizer
- * Pure Vanilla JavaScript (Zero Dependencies)
+ * ShareDash — Application Logic
+ * Vanilla JavaScript, zero dependencies
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  initTheme();
   initNavbar();
   initSpeedCalculator();
   initArchitectureTabs();
@@ -13,290 +12,317 @@ document.addEventListener('DOMContentLoaded', () => {
   initCopyButtons();
   initGitHubStars();
   initMultipathCanvas();
+  initScrollReveal();
 });
 
 /* ==========================================================================
-   1. Theme Management (Dark / Light Mode)
-   ========================================================================== */
-function initTheme() {
-  const toggleBtn = document.getElementById('themeToggle');
-  const htmlEl = document.documentElement;
-  
-  // Check persisted theme or system preference
-  const savedTheme = localStorage.getItem('sharedash_theme');
-  if (savedTheme) {
-    htmlEl.setAttribute('data-theme', savedTheme);
-  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-    htmlEl.setAttribute('data-theme', 'light');
-  }
-
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      const current = htmlEl.getAttribute('data-theme') || 'dark';
-      const target = current === 'dark' ? 'light' : 'dark';
-      htmlEl.setAttribute('data-theme', target);
-      localStorage.setItem('sharedash_theme', target);
-    });
-  }
-}
-
-/* ==========================================================================
-   2. Navbar Scroll State & Mobile Menu Toggle
+   1. Navbar — Scroll State & Mobile Menu
    ========================================================================== */
 function initNavbar() {
-  const navbarWrapper = document.querySelector('.navbar-wrapper');
+  const nav = document.querySelector('.nav');
   const mobileMenuBtn = document.getElementById('mobileMenuBtn');
   const navLinks = document.getElementById('navLinks');
-  const navLinkItems = document.querySelectorAll('.nav-links a');
+  const navLinkItems = document.querySelectorAll('.nav__links a');
 
-  // Sticky scroll class
+  // Scroll spy
+  let ticking = false;
   window.addEventListener('scroll', () => {
-    if (window.scrollY > 40) {
-      navbarWrapper?.classList.add('scrolled');
-    } else {
-      navbarWrapper?.classList.remove('scrolled');
+    if (!ticking) {
+      requestAnimationFrame(() => {
+        const scrollY = window.scrollY;
+
+        // Compact nav on scroll
+        if (scrollY > 40) {
+          nav?.classList.add('scrolled');
+        } else {
+          nav?.classList.remove('scrolled');
+        }
+
+        // Active section highlight
+        const sections = document.querySelectorAll('section[id]');
+        const scrollPos = scrollY + 100;
+        let currentSection = '';
+
+        sections.forEach(sec => {
+          const top = sec.offsetTop;
+          const height = sec.offsetHeight;
+          if (scrollPos >= top && scrollPos < top + height) {
+            currentSection = sec.getAttribute('id');
+          }
+        });
+
+        navLinkItems.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === `#${currentSection}`) {
+            link.classList.add('active');
+          }
+        });
+
+        ticking = false;
+      });
+      ticking = true;
     }
-
-    // Scroll spy for active section
-    let currentSection = '';
-    const sections = document.querySelectorAll('section[id]');
-    const scrollPos = window.scrollY + 120;
-
-    sections.forEach(sec => {
-      const top = sec.offsetTop;
-      const height = sec.offsetHeight;
-      if (scrollPos >= top && scrollPos < top + height) {
-        currentSection = sec.getAttribute('id');
-      }
-    });
-
-    navLinkItems.forEach(link => {
-      link.classList.remove('active');
-      if (link.getAttribute('href') === `#${currentSection}`) {
-        link.classList.add('active');
-      }
-    });
   });
 
-  // Mobile drawer toggle
+  // Mobile menu toggle
   if (mobileMenuBtn && navLinks) {
     mobileMenuBtn.addEventListener('click', () => {
       navLinks.classList.toggle('open');
+      const isOpen = navLinks.classList.contains('open');
+      mobileMenuBtn.setAttribute('aria-expanded', isOpen);
     });
 
-    // Close when clicking any link
     navLinkItems.forEach(link => {
       link.addEventListener('click', () => {
         navLinks.classList.remove('open');
+        mobileMenuBtn.setAttribute('aria-expanded', 'false');
       });
     });
   }
 }
 
 /* ==========================================================================
-   3. Real-Time Interactive Transfer Speed Calculator
+   2. Speed Calculator
    ========================================================================== */
 function initSpeedCalculator() {
   const slider = document.getElementById('fileSizeSlider');
   const sizeDisplay = document.getElementById('calcSizeDisplay');
-  const timeSavedBanner = document.getElementById('timeSavedVal');
+  const timeSavedVal = document.getElementById('timeSavedVal');
 
-  // ETAs & Bar elements
-  const etaShareDashMultipath = document.getElementById('etaShareDashMultipath');
-  const etaShareDashUsb = document.getElementById('etaShareDashUsb');
-  const etaQuickShare = document.getElementById('etaQuickShare');
-  const etaAirDrop = document.getElementById('etaAirDrop');
-  const etaLocalSend = document.getElementById('etaLocalSend');
-  const etaBluetooth = document.getElementById('etaBluetooth');
+  const etaEls = {
+    multipath: document.getElementById('etaShareDashMultipath'),
+    quickShare: document.getElementById('etaQuickShare'),
+    airDrop: document.getElementById('etaAirDrop'),
+    localSend: document.getElementById('etaLocalSend'),
+    bluetooth: document.getElementById('etaBluetooth'),
+  };
 
-  const barShareDashMultipath = document.getElementById('barShareDashMultipath');
-  const barShareDashUsb = document.getElementById('barShareDashUsb');
-  const barQuickShare = document.getElementById('barQuickShare');
-  const barAirDrop = document.getElementById('barAirDrop');
-  const barLocalSend = document.getElementById('barLocalSend');
-  const barBluetooth = document.getElementById('barBluetooth');
+  const barEls = {
+    multipath: document.getElementById('barShareDashMultipath'),
+    quickShare: document.getElementById('barQuickShare'),
+    airDrop: document.getElementById('barAirDrop'),
+    localSend: document.getElementById('barLocalSend'),
+    bluetooth: document.getElementById('barBluetooth'),
+  };
 
-  // Hardware benchmark speeds (MB/s)
   const SPEEDS = {
-    multipath: 78.7,
-    usbOnly: 107.2,
+    multipath: 100.0,
     quickShare: 42.0,
     airDrop: 38.0,
     localSend: 32.0,
-    bluetooth: 2.0
+    bluetooth: 2.0,
   };
 
   function formatTime(seconds) {
-    if (seconds < 60) {
-      return `${seconds.toFixed(1)}s`;
-    }
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
     const mins = Math.floor(seconds / 60);
-    const remSecs = (seconds % 60).toFixed(0);
-    return `${mins}m ${remSecs}s`;
+    const secs = (seconds % 60).toFixed(0);
+    return `${mins}m ${secs}s`;
   }
 
-  function updateCalculations() {
+  function update() {
     if (!slider) return;
     const sizeGB = parseFloat(slider.value);
     const sizeMB = sizeGB * 1024;
 
-    // Display formatted size
-    if (sizeGB === 2.8) {
-      sizeDisplay.textContent = '2.8 GB (Movie File Benchmark)';
-    } else if (sizeGB < 1) {
-      sizeDisplay.textContent = `${(sizeGB * 1000).toFixed(0)} MB`;
-    } else {
-      sizeDisplay.textContent = `${sizeGB.toFixed(1)} GB`;
+    // Display
+    if (sizeDisplay) {
+      if (sizeGB < 1) {
+        sizeDisplay.textContent = `${(sizeGB * 1000).toFixed(0)} MB`;
+      } else {
+        sizeDisplay.textContent = `${sizeGB.toFixed(1)} GB`;
+      }
     }
 
-    // Compute durations
-    const tMultipath = sizeMB / SPEEDS.multipath;
-    const tUsb = sizeMB / SPEEDS.usbOnly;
-    const tQuickShare = sizeMB / SPEEDS.quickShare;
-    const tAirDrop = sizeMB / SPEEDS.airDrop;
-    const tLocalSend = sizeMB / SPEEDS.localSend;
-    const tBluetooth = sizeMB / SPEEDS.bluetooth;
-
-    // Update text
-    if (etaShareDashMultipath) etaShareDashMultipath.textContent = formatTime(tMultipath);
-    if (etaShareDashUsb) etaShareDashUsb.textContent = formatTime(tUsb);
-    if (etaQuickShare) etaQuickShare.textContent = formatTime(tQuickShare);
-    if (etaAirDrop) etaAirDrop.textContent = formatTime(tAirDrop);
-    if (etaLocalSend) etaLocalSend.textContent = formatTime(tLocalSend);
-    if (etaBluetooth) etaBluetooth.textContent = formatTime(tBluetooth);
-
-    // Compute time saved vs Quick Share
-    const savedSeconds = tQuickShare - tMultipath;
-    if (timeSavedBanner) {
-      timeSavedBanner.textContent = formatTime(savedSeconds);
+    // Durations
+    const times = {};
+    for (const [key, speed] of Object.entries(SPEEDS)) {
+      times[key] = sizeMB / speed;
     }
 
-    // Relative bar widths (normalized against fastest)
-    const baseSpeed = SPEEDS.multipath;
-    if (barShareDashMultipath) barShareDashMultipath.style.width = '100%';
-    if (barShareDashUsb) barShareDashUsb.style.width = `${Math.min(100, (SPEEDS.multipath / SPEEDS.usbOnly) * 100)}%`;
-    if (barQuickShare) barQuickShare.style.width = `${(SPEEDS.quickShare / baseSpeed) * 100}%`;
-    if (barAirDrop) barAirDrop.style.width = `${(SPEEDS.airDrop / baseSpeed) * 100}%`;
-    if (barLocalSend) barLocalSend.style.width = `${(SPEEDS.localSend / baseSpeed) * 100}%`;
-    if (barBluetooth) barBluetooth.style.width = `${Math.max(3, (SPEEDS.bluetooth / baseSpeed) * 100)}%`;
+    // ETAs
+    for (const [key, el] of Object.entries(etaEls)) {
+      if (el) el.textContent = formatTime(times[key]);
+    }
+
+    // Time saved vs Quick Share
+    if (timeSavedVal) {
+      timeSavedVal.textContent = formatTime(times.quickShare - times.multipath);
+    }
+
+    // Bars: Lower is better (Transfer Duration).
+    // Normalize against LocalSend at 75% width so Bluetooth (taking 23+ minutes) maxes at 100%.
+    // Shorter bar = less waiting time = faster transfer!
+    const benchmarkNorm = times.localSend / 0.75;
+    if (barEls.multipath) barEls.multipath.style.width = `${Math.max(6, Math.min(100, (times.multipath / benchmarkNorm) * 100))}%`;
+    if (barEls.quickShare) barEls.quickShare.style.width = `${Math.min(100, (times.quickShare / benchmarkNorm) * 100)}%`;
+    if (barEls.airDrop) barEls.airDrop.style.width = `${Math.min(100, (times.airDrop / benchmarkNorm) * 100)}%`;
+    if (barEls.localSend) barEls.localSend.style.width = `${Math.min(100, (times.localSend / benchmarkNorm) * 100)}%`;
+    if (barEls.bluetooth) barEls.bluetooth.style.width = '100%';
   }
 
   if (slider) {
-    slider.addEventListener('input', updateCalculations);
-    updateCalculations();
+    slider.addEventListener('input', update);
+    update();
   }
 }
 
 /* ==========================================================================
-   4. Architecture Tabs
+   3. Architecture Tabs
    ========================================================================== */
 function initArchitectureTabs() {
-  const tabBtns = document.querySelectorAll('.arch-tab-btn');
-  const tabContents = document.querySelectorAll('.arch-tab-content');
+  const tabs = document.querySelectorAll('.arch__tab');
+  const contents = document.querySelectorAll('.arch__content');
 
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const targetId = `tab-${btn.getAttribute('data-tab')}`;
-      tabBtns.forEach(b => b.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-
-      btn.classList.add('active');
-      const targetContent = document.getElementById(targetId);
-      if (targetContent) targetContent.classList.add('active');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetId = `tab-${tab.getAttribute('data-tab')}`;
+      tabs.forEach(t => t.classList.remove('active'));
+      contents.forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      const target = document.getElementById(targetId);
+      if (target) target.classList.add('active');
     });
   });
 }
 
 /* ==========================================================================
-   5. Terminal CLI Tabs
+   4. Terminal CLI Tabs
    ========================================================================== */
 function initTerminalTabs() {
-  const cliBtns = document.querySelectorAll('.cli-tab-btn');
-  const cliScreens = document.querySelectorAll('.cli-screen');
+  const tabs = document.querySelectorAll('.terminal__tab');
+  const views = document.querySelectorAll('.cli-view');
 
-  cliBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const targetId = `cli-${btn.getAttribute('data-cli')}`;
-      cliBtns.forEach(b => b.classList.remove('active'));
-      cliScreens.forEach(s => s.classList.remove('active'));
-
-      btn.classList.add('active');
-      const targetScreen = document.getElementById(targetId);
-      if (targetScreen) targetScreen.classList.add('active');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetId = `cli-${tab.getAttribute('data-cli')}`;
+      tabs.forEach(t => t.classList.remove('active'));
+      views.forEach(v => v.classList.remove('active'));
+      tab.classList.add('active');
+      const target = document.getElementById(targetId);
+      if (target) target.classList.add('active');
     });
   });
 }
 
 /* ==========================================================================
-   6. FAQ Accordion
+   5. FAQ Accordion
    ========================================================================== */
 function initFaqAccordion() {
-  const faqItems = document.querySelectorAll('.faq-item');
+  const items = document.querySelectorAll('.faq__item');
 
-  faqItems.forEach(item => {
-    const questionBtn = item.querySelector('.faq-question');
-    if (questionBtn) {
-      questionBtn.addEventListener('click', () => {
+  items.forEach(item => {
+    const btn = item.querySelector('.faq__question');
+    if (btn) {
+      btn.addEventListener('click', () => {
         const isOpen = item.classList.contains('open');
-        // Close other items
-        faqItems.forEach(other => {
-          if (other !== item) other.classList.remove('open');
+        items.forEach(other => {
+          if (other !== item) {
+            other.classList.remove('open');
+            other.querySelector('.faq__question')?.setAttribute('aria-expanded', 'false');
+          }
         });
         item.classList.toggle('open', !isOpen);
+        btn.setAttribute('aria-expanded', !isOpen);
       });
     }
   });
 }
 
 /* ==========================================================================
-   7. Copy to Clipboard
+   6. Copy to Clipboard
    ========================================================================== */
 function initCopyButtons() {
-  const copyBtns = document.querySelectorAll('.copy-cmd-btn');
-
-  copyBtns.forEach(btn => {
+  document.querySelectorAll('.code-copy__btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const textToCopy = btn.getAttribute('data-copy');
-      if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy).then(() => {
-          const original = btn.textContent;
-          btn.textContent = '✔';
-          btn.style.color = '#10b981';
-          setTimeout(() => {
-            btn.textContent = original;
-            btn.style.color = '';
-          }, 2000);
+      const text = btn.getAttribute('data-copy');
+      if (!text) return;
+
+      const setSuccess = () => {
+        const svg = btn.querySelector('svg');
+        if (svg) {
+          const original = svg.innerHTML;
+          svg.innerHTML = '<polyline points="20 6 9 17 4 12" fill="none" stroke="#35C995" stroke-width="2"></polyline>';
+          setTimeout(() => { svg.innerHTML = original; }, 2000);
+        }
+      };
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(setSuccess).catch(() => {
+          fallbackCopy(text, setSuccess);
         });
+      } else {
+        fallbackCopy(text, setSuccess);
       }
     });
   });
 }
 
+function fallbackCopy(text, onSuccess) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    const successful = document.execCommand('copy');
+    if (successful && onSuccess) onSuccess();
+  } catch (err) {
+    console.error('Fallback copy failed: ', err);
+  }
+  document.body.removeChild(textarea);
+}
+
 /* ==========================================================================
-   8. Fetch GitHub Stars with Fallback
+   7. GitHub Stars
    ========================================================================== */
 function initGitHubStars() {
-  const starsBadge = document.getElementById('ghStarsCount');
-  if (!starsBadge) return;
+  const badge = document.getElementById('ghStarsCount');
+  if (!badge) return;
 
   fetch('https://api.github.com/repos/SamSunny4/ShareDash')
     .then(res => {
-      if (!res.ok) throw new Error('API Rate limit or offline');
+      if (!res.ok) throw new Error('API limit');
       return res.json();
     })
     .then(data => {
       if (data && typeof data.stargazers_count === 'number') {
-        starsBadge.textContent = `⭐ ${data.stargazers_count}`;
+        badge.textContent = `${data.stargazers_count}`;
       }
     })
     .catch(() => {
-      // Graceful fallback
-      starsBadge.textContent = '⭐ MIT';
+      badge.textContent = 'MIT';
     });
 }
 
 /* ==========================================================================
-   9. High-Performance Multipath Canvas Visualizer
+   8. Scroll Reveal
+   ========================================================================== */
+function initScrollReveal() {
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReducedMotion) return;
+
+  const elements = document.querySelectorAll('.reveal');
+  if (!elements.length) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, {
+    threshold: 0.1,
+    rootMargin: '0px 0px -40px 0px'
+  });
+
+  elements.forEach(el => observer.observe(el));
+}
+
+/* ==========================================================================
+   9. Multipath Canvas Visualizer
    ========================================================================== */
 function initMultipathCanvas() {
   const canvas = document.getElementById('multipathCanvas');
@@ -308,229 +334,200 @@ function initMultipathCanvas() {
   const usbValEl = document.getElementById('usbRateVal');
   const wifiValEl = document.getElementById('wifiRateVal');
   const totalValEl = document.getElementById('totalRateVal');
-  const fpsEl = document.getElementById('liveFpsMeter');
 
   let width = canvas.width;
   let height = canvas.height;
 
-  // Particle Streams
+  const BLUE = '#4399F5';
+  const GREEN = '#35C995';
+  const SKY = '#60a5fa';
+
+  // Particles
   const usbParticles = [];
   const wifiParticles = [];
-  const blePulses = [];
 
-  const USB_COLOR = '#00f2fe';
-  const WIFI_COLOR = '#10b981';
-  const BLE_COLOR = '#60a5fa';
-
-  // Spawn initial particles
-  for (let i = 0; i < 28; i++) {
+  for (let i = 0; i < 22; i++) {
     usbParticles.push({
       progress: Math.random(),
-      speed: 0.006 + Math.random() * 0.004,
-      size: 2.5 + Math.random() * 2,
-      opacity: 0.6 + Math.random() * 0.4
+      speed: 0.005 + Math.random() * 0.003,
+      size: 2 + Math.random() * 1.5,
+      opacity: 0.5 + Math.random() * 0.5
     });
   }
 
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 28; i++) {
     wifiParticles.push({
       progress: Math.random(),
-      speed: 0.007 + Math.random() * 0.005,
-      size: 2.5 + Math.random() * 2,
-      opacity: 0.6 + Math.random() * 0.4
+      speed: 0.006 + Math.random() * 0.004,
+      size: 2 + Math.random() * 1.5,
+      opacity: 0.5 + Math.random() * 0.5
     });
   }
 
-  let bleTimer = 0;
-  let lastFrameTime = performance.now();
-  let frameCount = 0;
-  let fpsTimer = 0;
+  let lastTime = performance.now();
+  let jitterTimer = 0;
+
+  // Check reduced motion
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReducedMotion) {
+    // Draw a static frame
+    drawStaticFrame();
+    return;
+  }
+
+  function drawStaticFrame() {
+    ctx.clearRect(0, 0, width, height);
+    const pcX = 70, pcY = height / 2;
+    const andX = width - 70, andY = height / 2;
+    const usbY = height / 2 - 50;
+    const wifiY = height / 2 + 50;
+
+    // Tracks
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(67, 153, 245, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(pcX + 30, pcY);
+    ctx.bezierCurveTo(pcX + 100, usbY, andX - 100, usbY, andX - 30, andY);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(53, 201, 149, 0.3)';
+    ctx.beginPath();
+    ctx.moveTo(pcX + 30, pcY);
+    ctx.bezierCurveTo(pcX + 100, wifiY, andX - 100, wifiY, andX - 30, andY);
+    ctx.stroke();
+
+    // Labels
+    ctx.font = '500 10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = BLUE;
+    ctx.fillText('USB', width / 2, usbY - 8);
+    ctx.fillStyle = GREEN;
+    ctx.fillText('Phone 5GHz Wi-Fi', width / 2, wifiY + 18);
+
+    // Nodes
+    drawNode(ctx, pcX, pcY, 'Windows PC', BLUE);
+    drawNode(ctx, andX, andY, 'Android', GREEN);
+  }
 
   function render(now) {
-    const dt = (now - lastFrameTime) / 1000;
-    lastFrameTime = now;
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
 
-    // FPS calculation
-    frameCount++;
-    fpsTimer += dt;
-    if (fpsTimer >= 1.0) {
-      if (fpsEl) fpsEl.textContent = `${frameCount} FPS`;
-      frameCount = 0;
-      fpsTimer = 0;
-
-      // Small realistic throughput micro-fluctuations
-      const jitterUsb = 30.8 + Math.random() * 0.5;
-      const jitterWifi = 47.4 + Math.random() * 0.6;
-      const jitterTotal = (jitterUsb + jitterWifi).toFixed(1);
-
-      if (usbValEl) usbValEl.textContent = `${jitterUsb.toFixed(1)} MB/s`;
-      if (wifiValEl) wifiValEl.textContent = `${jitterWifi.toFixed(1)} MB/s`;
-      if (totalValEl) totalValEl.textContent = `${jitterTotal} MB/s`;
+    // Throughput jitter every ~1s (100+ MB/s aggregate)
+    jitterTimer += dt;
+    if (jitterTimer >= 1.0) {
+      jitterTimer = 0;
+      const usbRate = 53.8 + Math.random() * 0.8;
+      const wifiRate = 48.2 + Math.random() * 0.7;
+      const total = (usbRate + wifiRate).toFixed(1);
+      if (usbValEl) usbValEl.textContent = `${usbRate.toFixed(1)} MB/s`;
+      if (wifiValEl) wifiValEl.textContent = `${wifiRate.toFixed(1)} MB/s`;
+      if (totalValEl) totalValEl.textContent = `${total} MB/s`;
     }
 
     ctx.clearRect(0, 0, width, height);
 
-    // Node Positions
-    const pcX = 85;
-    const pcY = height / 2;
-    const andX = width - 85;
-    const andY = height / 2;
+    const pcX = 70, pcY = height / 2;
+    const andX = width - 70, andY = height / 2;
+    const usbY = height / 2 - 50;
+    const wifiY = height / 2 + 50;
 
-    const usbPipeY = height / 2 - 60;
-    const wifiPipeY = height / 2 + 60;
-    const bleY = height / 2;
+    // Draw tracks
+    ctx.lineWidth = 2;
 
-    // 1. Draw Hardware Channel Tracks
-    ctx.lineWidth = 4;
-
-    // USB Track (Cyan)
-    ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)';
+    ctx.strokeStyle = 'rgba(67, 153, 245, 0.15)';
     ctx.beginPath();
-    ctx.moveTo(pcX + 35, pcY);
-    ctx.bezierCurveTo(pcX + 110, usbPipeY, andX - 110, usbPipeY, andX - 35, andY);
+    ctx.moveTo(pcX + 30, pcY);
+    ctx.bezierCurveTo(pcX + 100, usbY, andX - 100, usbY, andX - 30, andY);
     ctx.stroke();
 
-    // Wi-Fi Track (Emerald)
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.2)';
+    ctx.strokeStyle = 'rgba(53, 201, 149, 0.15)';
     ctx.beginPath();
-    ctx.moveTo(pcX + 35, pcY);
-    ctx.bezierCurveTo(pcX + 110, wifiPipeY, andX - 110, wifiPipeY, andX - 35, andY);
+    ctx.moveTo(pcX + 30, pcY);
+    ctx.bezierCurveTo(pcX + 100, wifiY, andX - 100, wifiY, andX - 30, andY);
     ctx.stroke();
 
-    // BLE Dashed Track (Blue)
-    ctx.setLineDash([5, 6]);
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.25)';
-    ctx.beginPath();
-    ctx.moveTo(pcX + 35, bleY);
-    ctx.lineTo(andX - 35, bleY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // 2. Animate and Draw USB Particles (Bezier Curve Interpolation)
+    // USB particles
     usbParticles.forEach(p => {
       p.progress += p.speed;
       if (p.progress > 1) p.progress = 0;
-
       const t = p.progress;
-      // Cubic Bezier interpolation: B(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
-      const p0 = { x: pcX + 35, y: pcY };
-      const p1 = { x: pcX + 110, y: usbPipeY };
-      const p2 = { x: andX - 110, y: usbPipeY };
-      const p3 = { x: andX - 35, y: andY };
-
-      const cx = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * p1.x + 3 * (1 - t) * Math.pow(t, 2) * p2.x + Math.pow(t, 3) * p3.x;
-      const cy = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * p1.y + 3 * (1 - t) * Math.pow(t, 2) * p2.y + Math.pow(t, 3) * p3.y;
+      const p0 = { x: pcX + 30, y: pcY };
+      const p1 = { x: pcX + 100, y: usbY };
+      const p2 = { x: andX - 100, y: usbY };
+      const p3 = { x: andX - 30, y: andY };
+      const cx = bezier(t, p0.x, p1.x, p2.x, p3.x);
+      const cy = bezier(t, p0.y, p1.y, p2.y, p3.y);
 
       ctx.beginPath();
       ctx.arc(cx, cy, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = USB_COLOR;
-      ctx.shadowColor = USB_COLOR;
-      ctx.shadowBlur = 10;
+      ctx.fillStyle = BLUE;
+      ctx.globalAlpha = p.opacity;
       ctx.fill();
-      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     });
 
-    // 3. Animate and Draw Wi-Fi Particles
+    // Wi-Fi particles
     wifiParticles.forEach(p => {
       p.progress += p.speed;
       if (p.progress > 1) p.progress = 0;
-
       const t = p.progress;
-      const p0 = { x: pcX + 35, y: pcY };
-      const p1 = { x: pcX + 110, y: wifiPipeY };
-      const p2 = { x: andX - 110, y: wifiPipeY };
-      const p3 = { x: andX - 35, y: andY };
-
-      const cx = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * p1.x + 3 * (1 - t) * Math.pow(t, 2) * p2.x + Math.pow(t, 3) * p3.x;
-      const cy = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * p1.y + 3 * (1 - t) * Math.pow(t, 2) * p2.y + Math.pow(t, 3) * p3.y;
+      const p0 = { x: pcX + 30, y: pcY };
+      const p1 = { x: pcX + 100, y: wifiY };
+      const p2 = { x: andX - 100, y: wifiY };
+      const p3 = { x: andX - 30, y: andY };
+      const cx = bezier(t, p0.x, p1.x, p2.x, p3.x);
+      const cy = bezier(t, p0.y, p1.y, p2.y, p3.y);
 
       ctx.beginPath();
       ctx.arc(cx, cy, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = WIFI_COLOR;
-      ctx.shadowColor = WIFI_COLOR;
-      ctx.shadowBlur = 10;
+      ctx.fillStyle = GREEN;
+      ctx.globalAlpha = p.opacity;
       ctx.fill();
-      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     });
 
-    // 4. BLE Radio Pulses
-    bleTimer += dt;
-    if (bleTimer > 1.2) {
-      blePulses.push({ x: pcX + 45, radius: 2, alpha: 0.9 });
-      bleTimer = 0;
-    }
-
-    for (let i = blePulses.length - 1; i >= 0; i--) {
-      const pulse = blePulses[i];
-      pulse.x += 160 * dt;
-      pulse.radius += 10 * dt;
-      pulse.alpha -= 0.65 * dt;
-
-      if (pulse.alpha <= 0 || pulse.x >= andX - 45) {
-        blePulses.splice(i, 1);
-        continue;
-      }
-
-      ctx.beginPath();
-      ctx.arc(pulse.x, bleY, pulse.radius, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(96, 165, 250, ${pulse.alpha})`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-
-    // 5. Draw Channel Labels at Curve Apex
-    ctx.font = '600 11px JetBrains Mono, monospace';
+    // Labels
+    ctx.font = '500 10px Inter, sans-serif';
     ctx.textAlign = 'center';
+    ctx.fillStyle = BLUE;
+    ctx.fillText('USB', width / 2, usbY - 8);
+    ctx.fillStyle = GREEN;
+    ctx.fillText('Phone 5GHz Wi-Fi', width / 2, wifiY + 18);
 
-    // USB Label
-    ctx.fillStyle = USB_COLOR;
-    ctx.fillText('⚡ USB 3.x FAST-PATH', width / 2, usbPipeY - 12);
-
-    // Wi-Fi Label
-    ctx.fillStyle = WIFI_COLOR;
-    ctx.fillText('📶 PHONE 5GHz SOFTAP', width / 2, wifiPipeY + 22);
-
-    // BLE Label
-    ctx.fillStyle = BLE_COLOR;
-    ctx.fillText('🔵 BLE GATT CONTROL', width / 2, bleY - 8);
-
-    // 6. Draw Windows PC Node
-    drawDeviceNode(ctx, pcX, pcY, '💻 Windows PC', 'Rust Engine', '#0078D6');
-
-    // 7. Draw Android Device Node
-    drawDeviceNode(ctx, andX, andY, '📱 Android', 'Compose NIO', '#10B981');
+    // Device nodes
+    drawNode(ctx, pcX, pcY, 'Windows PC', BLUE);
+    drawNode(ctx, andX, andY, 'Android', GREEN);
 
     requestAnimationFrame(render);
   }
 
-  function drawDeviceNode(context, x, y, title, subtitle, accentColor) {
-    // Outer glow ring
-    context.beginPath();
-    context.arc(x, y, 42, 0, Math.PI * 2);
-    context.fillStyle = '#0f172a';
-    context.strokeStyle = accentColor;
-    context.lineWidth = 2.5;
-    context.shadowColor = accentColor;
-    context.shadowBlur = 15;
-    context.fill();
-    context.stroke();
-    context.shadowBlur = 0;
+  function bezier(t, p0, p1, p2, p3) {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+  }
 
-    // Inner icon ring
+  function drawNode(context, x, y, label, color) {
+    // Outer circle
     context.beginPath();
     context.arc(x, y, 32, 0, Math.PI * 2);
-    context.fillStyle = '#1e293b';
+    context.fillStyle = '#0C1018';
+    context.strokeStyle = color;
+    context.lineWidth = 1.5;
+    context.fill();
+    context.stroke();
+
+    // Inner circle
+    context.beginPath();
+    context.arc(x, y, 24, 0, Math.PI * 2);
+    context.fillStyle = '#141D28';
     context.fill();
 
-    // Node Text
-    context.font = '700 12px Outfit, sans-serif';
-    context.fillStyle = '#f8fafc';
+    // Label below
+    context.font = '600 11px Inter, sans-serif';
+    context.fillStyle = '#F1F5F9';
     context.textAlign = 'center';
-    context.fillText(title, x, y + 62);
-
-    context.font = '500 10px Plus Jakarta Sans, sans-serif';
-    context.fillStyle = '#94a3b8';
-    context.fillText(subtitle, x, y + 76);
+    context.fillText(label, x, y + 50);
   }
 
   requestAnimationFrame(render);

@@ -1,21 +1,23 @@
 # ⚡ ShareDash: Technical Architecture & Operational Guide
-> **Version 1.0.0 — Next-Generation Multipath File Transfer System**  
+
+> **Version 1.0.0 — Next-Generation Multipath File Transfer System**
 > *Windows 11 & Android P2P High-Throughput Aggregation Pipeline*
 
 ---
 
 ## 📑 Table of Contents
-1. [Executive Summary & Offline Philosophy](#-executive-summary--offline-philosophy)
+
+1. [Executive Summary &amp; Offline Philosophy](#-executive-summary--offline-philosophy)
 2. [Live Benchmark Validation](#-live-benchmark-validation)
 3. [System Architecture Overview](#-system-architecture-overview)
 4. [Smart Offline Hotspot Decision Engine](#-smart-offline-hotspot-decision-engine)
-5. [The Automated Connection & Handshake Wizard](#-the-automated-connection--handshake-wizard)
+5. [The Automated Connection &amp; Handshake Wizard](#-the-automated-connection--handshake-wizard)
 6. [High-Throughput Pipelined Multipath Streaming Engine](#-high-throughput-pipelined-multipath-streaming-engine)
 7. [Android Companion App Architecture](#-android-companion-app-architecture)
-8. [Windows Core Engine & Embedded Services](#-windows-core-engine--embedded-services)
-9. [Cryptographic Security & Verification](#-cryptographic-security--verification)
+8. [Windows Core Engine &amp; Embedded Services](#-windows-core-engine--embedded-services)
+9. [Cryptographic Security &amp; Verification](#-cryptographic-security--verification)
 10. [Physical Network Interface Matrix](#-physical-network-interface-matrix)
-11. [CLI & Web UI User Interfaces](#-cli--web-ui-user-interfaces)
+11. [CLI &amp; Web UI User Interfaces](#-cli--web-ui-user-interfaces)
 12. [Repository File Map](#-repository-file-map)
 
 ---
@@ -25,12 +27,15 @@
 **ShareDash** is a high-throughput, **100% zero-cloud, zero-LAN, routerless peer-to-peer file transfer engine** engineered for maximum local data transfer speeds between Windows PCs and Android devices.
 
 ### 🚫 No LAN & No Internet Dependency
+
 Traditional file sharing tools (Quick Share, Nearby Share, AirDrop alternatives, FTP) fail or choke when:
+
 - There is no local Wi-Fi router available (e.g. outdoors, in vehicles, in secure office environments).
 - The local Wi-Fi router is congested or restricted by AP client isolation.
 - The Windows PC has no active internet connection (preventing standard Windows Mobile Hotspot via WinRT ICS).
 
 ShareDash eliminates these limitations by operating directly over **physical point-to-point hardware bridges**:
+
 - **USB 3.x Cable Fast-Path** (via direct ADB port forwarding or USB RNDIS/NCM Tethering).
 - **Dedicated 5 GHz / 6 GHz Mobile Hotspot** (smart bi-directional provisioning: PC-hosted or Phone-hosted).
 - **Wi-Fi Direct P2P** (`192.168.49.x` direct peer links).
@@ -63,11 +68,11 @@ Live tests transferring a **2799.08 MB (2.80 GB)** movie file (`Marco.2024.1080p
 
 ### 1. Performance Summary Matrix
 
-| Mode | Channels Used | Transfer Time | Average Speed | Per-Channel Breakdown | Integrity |
-| :--- | :--- | :---: | :---: | :--- | :---: |
-| 🚀 **Multipath Aggregation (Phone 5GHz AP)** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **35.55 s** | **78.7 MB/s** | **⚡ USB: 31.0 MB/s (39.4%) + 📶 Wi-Fi: 47.7 MB/s (60.6%)** | **SHA-256 ✔** |
-| ⚡ **USB Fast-Path Only** | ⚡ USB 3.x Cable | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0% | **SHA-256 ✔** |
-| ⚠️ **Multipath (PC Hotspot ICS)** | ⚡ USB + 📶 PC Hotspot | **73.83 s** | **37.9 MB/s** | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%) | **SHA-256 ✔** |
+| Mode                                               | Channels Used                        |   Transfer Time   |     Average Speed     | Per-Channel Breakdown                                             |      Integrity      |
+| :------------------------------------------------- | :----------------------------------- | :---------------: | :-------------------: | :---------------------------------------------------------------- | :------------------: |
+| 🚀 **Multipath Aggregation (Phone 5GHz AP)** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **35.55 s** |  **78.7 MB/s**  | **⚡ USB: 31.0 MB/s (39.4%) + 📶 Wi-Fi: 47.7 MB/s (60.6%)** | **SHA-256 ✔** |
+| ⚡ **USB Fast-Path Only**                    | ⚡ USB 3.x Cable                     | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0%                                                    | **SHA-256 ✔** |
+| ⚠️ **Multipath (PC Hotspot ICS)**          | ⚡ USB + 📶 PC Hotspot               | **73.83 s** |  **37.9 MB/s**  | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%)            | **SHA-256 ✔** |
 
 ### 2. Speedup & Efficiency Analysis
 
@@ -87,7 +92,7 @@ graph TB
         WinApp["Native Windows GPU GUI (Rust + GPUI)"]
         CLI["Interactive ANSI CLI Wizard (cli.rs)"]
         WebUI["Fluent Mica Web Dashboard (Axum + Embedded Assets)"]
-        
+      
         subgraph RustCore ["Core Engine"]
             Scheduler["Dynamic Multipath Scheduler (scheduler/)"]
             Chunker["High-Throughput Adaptive Chunker (storage/chunker.rs)"]
@@ -106,7 +111,7 @@ graph TB
 
     subgraph AndroidDevice ["📱 Android Device (Kotlin + Compose)"]
         AndroidUI["Jetpack Compose UI (RadarView, Speedometer, Pieces)"]
-        
+      
         subgraph AndroidCore ["Android Core Services"]
             AndroidServer["AndroidHttpServer (server/AndroidHttpServer.kt)"]
             UdpDiscovery["UdpDiscoveryManager (discovery/UdpDiscoveryManager.kt)"]
@@ -142,7 +147,7 @@ ShareDash solves this with a **bi-directional Hotspot Decision Matrix**:
 ```mermaid
 flowchart TD
     Start["Inspect PC Internet & Wi-Fi Capabilities"] --> CheckInternet{"PC Has Active Internet Connection?"}
-    
+  
     CheckInternet -- Yes --> CheckPC5G{"PC Wi-Fi Supports 5GHz Hotspot?"}
     CheckPC5G -- Yes --> PCHost["Select PC as Primary 5GHz Hotspot Host"]
     CheckPC5G -- No --> PhoneHost["Select Phone as Primary 5GHz Hotspot Host"]
@@ -171,6 +176,7 @@ flowchart TD
 ```
 
 ### Key Technical Innovations:
+
 1. **Android Radio Band Freeing**: Before starting `LocalOnlyHotspot`, the Android app invokes `wifiManager.disconnect()`. This frees the 5GHz/6GHz radio hardware from client duties, dedicating the full antenna array to SoftAP broadcast for maximum PHY throughput.
 2. **Dynamic Gateway Detection**: Rather than hardcoding `192.168.43.1`, Android dynamically parses active network interfaces (`ap0`, `wlan1`, `swlan0`, `softap0`, `rndis0`) and delivers the actual gateway IP in the direct response payload.
 3. **Sub-500ms Instant Client Detection**: When the PC hosts the hotspot, [`fast_scan_hotspot_clients()`](file:///e:/ShareDash/src/hotspot.rs) queries the Windows ARP cache and concurrently probes candidate IPs (`.2` through `.25`) with a 300ms timeout using `futures::future::join_all`, identifying the phone in **under 500 milliseconds**.
@@ -246,30 +252,40 @@ Source File (2800 MB)             ├─── Worker 3 (USB) ──> Chunk #2 (
 ```
 
 ### 1. 📦 Adaptive Chunk Sizing
+
 ShareDash scales chunk sizes to match file scale and prevent HTTP request overhead:
 
-| File Size | Chunk Size | Total Chunks | Overhead Reduction |
-| :--- | :---: | :---: | :---: |
-| **< 20 MB** | **2 MB** | ~5 chunks | Minimal latency |
-| **20 MB – 100 MB** | **4 MB** | ~15 chunks | Fast ramp-up |
-| **100 MB – 500 MB** | **8 MB** | ~35 chunks | Low overhead |
-| **500 MB – 2 GB** | **16 MB** | ~60 chunks | Optimal throughput |
+| File Size                                  |   Chunk Size   |       Total Chunks       |          Overhead Reduction          |
+| :----------------------------------------- | :-------------: | :-----------------------: | :-----------------------------------: |
+| **< 20 MB**                          | **2 MB** |         ~5 chunks         |            Minimal latency            |
+| **20 MB – 100 MB**                  | **4 MB** |        ~15 chunks        |             Fast ramp-up             |
+| **100 MB – 500 MB**                 | **8 MB** |        ~35 chunks        |             Low overhead             |
+| **500 MB – 2 GB**                   | **16 MB** |        ~60 chunks        |          Optimal throughput          |
 | **2 GB – 8 GB** (e.g. 2.8 GB movie) | **32 MB** | **Only ~87 chunks** | **98.4% less request overhead** |
-| **> 8 GB** | **64 MB** | ~150 chunks | Maximum line speed |
+| **> 8 GB**                           | **64 MB** |        ~150 chunks        |          Maximum line speed          |
 
 ### 2. 🌊 3 Pipelined In-Flight Workers Per Transport
+
 Instead of a single sequential worker waiting for HTTP acknowledgements, ShareDash spawns **3 parallel in-flight streaming workers per transport channel**:
+
 - **Continuous Saturation**: While Chunk $N$ is being acknowledged, Chunk $N+1$ is uploading over the wire, and Chunk $N+2$ is reading from disk into memory.
 - **Zero Idle Gaps**: The TCP congestion window remains wide open throughout the transfer.
 
 ### 3. ⚡ Android Concurrent `FileChannel` Disk Writes
+
 In [`AndroidHttpServer.kt`](file:///e:/ShareDash/android/app/src/main/java/com/sharedash/app/server/AndroidHttpServer.kt):
+
 - **Pre-Allocation**: The destination file is pre-allocated (`raf.setLength(fileSize)`) upon the first chunk arrival to avoid filesystem fragmentation and inode re-allocation stalls.
 - **Lock-Free Positional Writes**: Out-of-order chunks are written directly via `session.channel.write(ByteBuffer.wrap(chunkBytes), chunkOffset)` without blocking other threads, allowing concurrent writes to proceed at UFS flash line speed.
 
 ### 4. 📈 Exact Per-Channel Bandwidth Accounting
+
 Throughput metrics are computed from cumulative bytes transferred per channel divided by total elapsed seconds:
-$$\text{Speed}_{\text{channel}} = \frac{\text{Bytes Sent on Channel}}{\text{Elapsed Time}}$$
+
+$$
+\text{Speed}_{\text{channel}} = \frac{\text{Bytes Sent on Channel}}{\text{Elapsed Time}}
+$$
+
 Real-time UI meters track instantaneous delta bytes over 100ms intervals.
 
 ---
@@ -362,21 +378,23 @@ src/
 
 ## 🌐 Physical Network Interface Matrix
 
-| Interface | Subnet / Address | Nominal Speed | Use Case in ShareDash |
-| :--- | :--- | :---: | :--- |
-| **USB 3.x Cable (ADB)** | `127.0.0.1:54325` | **3.2 Gbps** | Primary fast-path channel (lowest latency, highest reliability) |
-| **USB Tethering (NDIS)** | `192.168.42.0/24` | **3.2 Gbps** | Native OS network interface over USB-C |
-| **PC 5GHz Hotspot** | `192.168.137.0/24` | **1.7 Gbps (5GHz)** | High-speed wireless direct link (PC as AP) |
-| **Phone 5GHz Hotspot** | `192.168.43.0/24` | **1.2 Gbps (5GHz)** | High-speed wireless direct link (Phone as AP) |
-| **Wi-Fi Direct P2P Group** | `192.168.49.0/24` | **1.4 Gbps (5GHz)** | Direct P2P connection without access point |
-| **Wi-Fi Direct / UDP Zero-LAN** | `Port 54321` | **Sub-second** | Direct local beaconing, peer handshake & capability exchange |
+| Interface                             | Subnet / Address     |       Nominal Speed       | Use Case in ShareDash                                           |
+| :------------------------------------ | :------------------- | :-----------------------: | :-------------------------------------------------------------- |
+| **USB 3.x Cable (ADB)**         | `127.0.0.1:54325`  |    **3.2 Gbps**    | Primary fast-path channel (lowest latency, highest reliability) |
+| **USB Tethering (NDIS)**        | `192.168.42.0/24`  |    **3.2 Gbps**    | Native OS network interface over USB-C                          |
+| **PC 5GHz Hotspot**             | `192.168.137.0/24` | **1.7 Gbps (5GHz)** | High-speed wireless direct link (PC as AP)                      |
+| **Phone 5GHz Hotspot**          | `192.168.43.0/24`  | **1.2 Gbps (5GHz)** | High-speed wireless direct link (Phone as AP)                   |
+| **Wi-Fi Direct P2P Group**      | `192.168.49.0/24`  | **1.4 Gbps (5GHz)** | Direct P2P connection without access point                      |
+| **Wi-Fi Direct / UDP Zero-LAN** | `Port 54321`       |   **Sub-second**   | Direct local beaconing, peer handshake & capability exchange    |
 
 ---
 
 ## 🖥️ CLI & Web UI User Interfaces
 
 ### 1. Wifite-Style Terminal Interface (Default)
+
 Runs in standard Windows PowerShell or Windows Terminal with zero GUI dependencies:
+
 - Real-time ANSI progress bars with per-channel speed breakdowns (USB vs. Wi-Fi).
 - Animated spinners, color-coded status badges, and transfer summary tables.
 - Interactive mode selection (`1: USB only`, `2: Wi-Fi only`, `3: Multipath Aggregation`).
@@ -401,7 +419,9 @@ Runs in standard Windows PowerShell or Windows Terminal with zero GUI dependenci
 ```
 
 ### 2. Fluent Mica Web Dashboard
+
 Accessible at `http://127.0.0.1:54321` or launched via [`run_windows_app.bat`](file:///e:/ShareDash/run_windows_app.bat):
+
 - **Quick Share Radar**: Concentric pulsing wave displaying nearby devices.
 - **Dynamic Speedometers**: Live dual-needle throughput gauges for USB and Wi-Fi.
 - **Piece Grid Visualizer**: Canvas grid displaying each chunk block as it is sent and acknowledged.
@@ -412,4 +432,3 @@ Accessible at `http://127.0.0.1:54321` or launched via [`run_windows_app.bat`](f
 ## 🏁 Summary
 
 ShareDash demonstrates that device-to-device file transfers do not require cloud middleboxes, local Wi-Fi routers, or active internet connections. By dynamically discovering capabilities over **direct Wi-Fi Direct and Zero-LAN UDP beaconing**, establishing high-speed **5 GHz Hotspot** and **USB 3.x Cable** connections, and orchestrating them via an **asynchronous pipelined multipath streaming engine**, ShareDash achieves **multi-gigabit throughput** with **100% cryptographic integrity**.
-
