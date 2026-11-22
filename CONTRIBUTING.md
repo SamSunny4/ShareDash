@@ -1,128 +1,105 @@
-# 🤝 Contributing to ShareDash
+# Contributing
 
-Thank you for your interest in contributing to **ShareDash**! Whether you are fixing a bug, adding high-performance network transport algorithms, polishing the Android Jetpack Compose UI, or writing documentation, your help is warmly welcomed.
+ShareDash is an early-stage local file-transfer project. Changes should make the implemented behavior easier to use, verify, and maintain.
 
----
+Read the [architecture guide](HOW_IT_WORKS.md) before changing transfer code. The desktop HTTP path and binary-protocol library have different behavior and validation requirements.
 
-## 🧭 Table of Contents
-- [Code of Conduct](#-code-of-conduct)
-- [How Can I Contribute?](#-how-can-i-contribute)
-- [Development Setup](#-development-setup)
-  - [Rust Core Engine (PC)](#1-rust-core-engine-windows--linux)
-  - [Android Companion App](#2-android-companion-app)
-- [Coding Guidelines & Standards](#-coding-guidelines--standards)
-- [Commit Message Conventions](#-commit-message-conventions)
-- [Submitting a Pull Request](#-submitting-a-pull-request)
+## Development setup
 
----
+For the Windows application, install Rust with the MSVC toolchain, Visual Studio C++ build tools, and a Windows SDK. Use the repository's lockfile:
 
-## 📜 Code of Conduct
-This project and everyone participating in it is governed by the [ShareDash Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
-
----
-
-## 💡 How Can I Contribute?
-- **⭐ Star & Share**: Help more people discover ShareDash by starring the repo and sharing benchmarks!
-- **🐛 Report Bugs**: Submit structured bug reports via [GitHub Issues](https://github.com/SamSunny4/ShareDash/issues/new/choose).
-- **✨ Suggest Features**: Propose enhancements, new physical transport channels, or UI improvements.
-- **💻 Submit Pull Requests**: Implement bug fixes, performance boosts, or new platform ports.
-
----
-
-## 🛠️ Development Setup
-
-### 1. Rust Core Engine (Windows / Linux)
-Requirements:
-- **Rust 1.78+**: Install via [rustup.rs](https://rustup.rs/)
-- **Git**
-
-```bash
-# Clone the repository
+```powershell
 git clone https://github.com/SamSunny4/ShareDash.git
 cd ShareDash
-
-# Verify compilation
-cargo check --all-targets
-
-# Run the test suite
-cargo test --lib --release
-
-# Run integration tests
-cargo test --test protocol_test
-cargo test --test corruption_test
-cargo test --test test_tether_detection
-
-# Run with debug logging
-RUST_LOG=debug cargo run --release
+cargo check --locked --all-targets
+cargo check --locked --features gui --bin sharedash-gui
+cargo run --locked --features gui --bin sharedash-gui
 ```
 
-### 2. Android Companion App
-Requirements:
-- **Android Studio** (Koala / Ladybug or newer)
-- **JDK 17**
-- **Android SDK API 34+**
-- **Physical Android device** with Developer Options & USB Debugging enabled
+The GUI is optional. Always include `--features gui` when validating desktop changes. Windows is the target for the desktop/network orchestration; do not assume the full application is supported on another OS because a module contains platform-specific branches.
 
-```bash
+The repository limits Cargo to one build job in [.cargo/config.toml](.cargo/config.toml). A first GUI build can take substantially longer than an incremental build.
+
+For debug logs in PowerShell:
+
+```powershell
+$env:RUST_LOG = "sharedash=debug,tower_http=info"
+cargo run --locked --features gui --bin sharedash-gui
+```
+
+For the Android companion, use Java 17, Android SDK 35, and the checked-in Windows wrapper:
+
+```powershell
 cd android
-
-# Compile debug APK
-./gradlew assembleDebug
-
-# Install on connected device via ADB
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+.\gradlew.bat assembleDebug
 ```
 
----
+## Choose the correct layer
 
-## 📐 Coding Guidelines & Standards
+| Change | Start here |
+| --- | --- |
+| Desktop layout, typography, labels, or reusable controls | `src/gui/*_view.rs`, `src/gui/widgets.rs`, `src/gui/theme.rs` |
+| Desktop navigation or UI event handling | `src/gui/app.rs` |
+| Desktop HTTP sender and folder packaging | `src/gui/engine.rs` |
+| HTTP receive behavior and API contracts | `src/server/api.rs` |
+| Discovery and network setup | `src/discovery/`, `src/hotspot.rs` |
+| Binary framing, encryption, or scheduler | `src/protocol/`, `src/scheduler/`, `src/storage/` |
+| Terminal interface | `src/cli.rs`, `src/cli_widgets.rs` |
+| Android interface | `android/app/src/main/java/com/sharedash/app/ui/` |
 
-### Rust Core
-- Format all code with `cargo fmt --all` before committing.
-- Run `cargo clippy --all-targets` and ensure no unhandled warnings remain.
-- Favor explicit error handling with `anyhow` or custom typed errors; avoid `unwrap()` in production paths.
-- Ensure all transport channels respect cancellation tokens (`tokio_util::sync::CancellationToken`) for clean disconnects.
+Keep changes within the requested scope. Presentation changes should preserve engine behavior, API contracts, and existing callbacks unless the change explicitly calls for a behavioral fix.
 
-### Android / Kotlin
-- Follow official Kotlin coding conventions and Jetpack Compose best practices.
-- Avoid performing disk I/O or cryptographic verification on the main/UI thread (use `Dispatchers.IO`).
-- Maintain Material 3 Expressive UI theming.
+## Validation
 
----
+Run the checks relevant to your changes:
 
-## 💬 Commit Message Conventions
-We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
-
-```text
-<type>(<scope>): <short summary>
-
-[optional body]
-
-[optional footer(s)]
+```powershell
+cargo check --locked --all-targets
+cargo check --locked --features gui --bin sharedash-gui
+cargo test --locked --lib
+cargo test --locked --test protocol_test --test corruption_test --test failover_test
 ```
 
-### Types:
-- `feat`: A new feature (e.g., `feat(transport): add WebRTC browser fallback channel`)
-- `fix`: A bug fix (e.g., `fix(ble): resolve peripheral advertisement drop on Android 14`)
-- `perf`: A code change that improves performance (e.g., `perf(chunker): reduce sparse write mutex contention`)
-- `docs`: Documentation changes (e.g., `docs(readme): add comparison matrix`)
-- `refactor`: A code refactor that neither fixes a bug nor adds a feature
-- `test`: Adding or updating test suites
-- `ci`: Changes to CI/CD workflows and configuration
+Formatting and lint checks:
 
----
+```powershell
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets
+cargo clippy --locked --features gui --bin sharedash-gui
+```
 
-## 🚀 Submitting a Pull Request
+For a scoped change, format the Rust files you touched with `rustfmt --edition 2021 <files>`. Avoid unrelated formatting churn; report pre-existing repository-wide failures separately.
 
-1. **Fork the repository** on GitHub.
-2. **Create a topic branch** from `main`:
-   ```bash
-   git checkout -b feat/my-awesome-feature
-   ```
-3. **Make your changes** and commit using Conventional Commits.
-4. **Run the test suite** locally to ensure everything passes:
-   ```bash
-   cargo test --lib --release
-   ```
-5. **Push to your fork** and open a Pull Request against the `main` branch.
-6. Fill out the [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md) completely.
+### Desktop review
+
+Check the default window and the minimum supported window size. Exercise overview navigation, connection steps, empty discovery, native file/folder dialogs, mode selection, preparing/active/completed/error states, and long filenames. Verify that overflowing content remains reachable by scrolling.
+
+### Transfer review
+
+Use disposable fixtures and record the hardware and software versions. Test each available connection mode, both transfer directions, cancellation, disconnection, and destination hashes. Include a large file and a nested folder.
+
+Simulation tests do not validate the actual desktop HTTP path or Android interoperability. A passed GUI build is not evidence of a successful hardware transfer.
+
+### Benchmarking
+
+Read [scripts/README.md](scripts/README.md) before running hardware scripts. Some scripts install or launch the Android app, create large files, and change ADB forwarding. Distinguish simulated results from physical measurements.
+
+## Code and documentation standards
+
+- Keep blocking file/network work off the GPUI render path.
+- Make errors actionable and avoid unsupported security or throughput claims.
+- Use the shared theme and widget helpers for desktop changes.
+- Preserve units: bytes, MiB/s, Mbps, and link rates are different quantities.
+- Document implemented behavior separately from planned capabilities.
+- Add tests for meaningful behavioral changes; use compilation and visual inspection for presentation changes.
+- Do not commit credentials, personal logs, received files, or generated build output.
+
+If the local graphify workflow is installed, query the graph before architecture work and run `graphify update .` after code changes. The source code remains authoritative when generated summaries disagree.
+
+## Pull requests
+
+Describe the problem, the resulting behavior, and the scope. Include the checks actually run and any hardware or environment limitations. Attach relevant UI screenshots for visual changes.
+
+Use a focused branch and a descriptive commit message. The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) provides the review checklist.
+
+For bugs, use [GitHub Issues](https://github.com/SamSunny4/ShareDash/issues/new/choose) and include reproduction steps. Follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).

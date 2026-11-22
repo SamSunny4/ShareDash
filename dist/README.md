@@ -1,23 +1,26 @@
-# 📦 ShareDash Distribution Artifacts
+# Distribution artifacts
 
-Pre-built binaries and companion packages for Windows and Android.
+This directory contains checked-in packages. They may predate the current source tree; filenames alone do not establish a build revision or signing status.
 
-## 📥 Artifacts
+| File | Description |
+| --- | --- |
+| `sharedash.exe` | Windows terminal client and HTTP service |
+| `sharedash.apk` | Packaged Android companion |
+| `ShareDash-debug.apk` | Android debug package |
 
-| Artifact | Platform | Description |
-| :--- | :--- | :--- |
-| `sharedash.exe` | Windows 10 / 11 (x86_64) | Standalone desktop engine & Quick Share CLI wizard with embedded Fluent Web dashboard. |
-| `sharedash.apk` | Android 8.0+ (API 26+) | Companion Android app with USB-First flow, Bluetooth Low Energy discovery, and System Share Sheet target. |
-| `ShareDash-debug.apk` | Android 8.0+ | Debug build of the Android companion app. |
+A desktop GUI executable is not currently checked into this directory. Build the current GUI from the repository root:
 
-## 🚀 Installation & Usage
+```powershell
+cargo build --locked --release --features gui --bin sharedash-gui
+.\target\release\sharedash-gui.exe
+```
 
-### Windows:
-Run `sharedash.exe` directly or use the project launcher `run_windows_app.bat`.
+The existing `run_windows_app.bat` launches the development GUI through Cargo; it does not run `dist/sharedash.exe`.
 
-### Android:
-Install via ADB:
-```bash
+To install a packaged Android app from the repository root:
+
+```powershell
 adb install -r dist/sharedash.apk
 ```
-Or transfer `sharedash.apk` to your phone and install via your file manager.
+
+For source builds, prerequisites, and connection instructions, see the [README](../README.md) and [desktop guide](../DESKTOP_GUIDE.md). Published assets, when available, are listed under [GitHub Releases](https://github.com/SamSunny4/ShareDash/releases).

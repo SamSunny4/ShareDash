@@ -1,434 +1,195 @@
-# ⚡ ShareDash: Technical Architecture & Operational Guide
+# How ShareDash works
 
-> **Version 1.0.0 — Next-Generation Multipath File Transfer System**
-> *Windows 11 & Android P2P High-Throughput Aggregation Pipeline*
+This document describes the implementation in this repository. The native desktop transfer path and the reusable binary-protocol modules are separate paths; features in one should not be assumed to apply to the other.
 
----
-
-## 📑 Table of Contents
-
-1. [Executive Summary &amp; Offline Philosophy](#-executive-summary--offline-philosophy)
-2. [Live Benchmark Validation](#-live-benchmark-validation)
-3. [System Architecture Overview](#-system-architecture-overview)
-4. [Smart Offline Hotspot Decision Engine](#-smart-offline-hotspot-decision-engine)
-5. [The Automated Connection &amp; Handshake Wizard](#-the-automated-connection--handshake-wizard)
-6. [High-Throughput Pipelined Multipath Streaming Engine](#-high-throughput-pipelined-multipath-streaming-engine)
-7. [Android Companion App Architecture](#-android-companion-app-architecture)
-8. [Windows Core Engine &amp; Embedded Services](#-windows-core-engine--embedded-services)
-9. [Cryptographic Security &amp; Verification](#-cryptographic-security--verification)
-10. [Physical Network Interface Matrix](#-physical-network-interface-matrix)
-11. [CLI &amp; Web UI User Interfaces](#-cli--web-ui-user-interfaces)
-12. [Repository File Map](#-repository-file-map)
-
----
-
-## 🌟 Executive Summary & Offline Philosophy
-
-**ShareDash** is a high-throughput, **100% zero-cloud, zero-LAN, routerless peer-to-peer file transfer engine** engineered for maximum local data transfer speeds between Windows PCs and Android devices.
-
-### 🚫 No LAN & No Internet Dependency
-
-Traditional file sharing tools (Quick Share, Nearby Share, AirDrop alternatives, FTP) fail or choke when:
-
-- There is no local Wi-Fi router available (e.g. outdoors, in vehicles, in secure office environments).
-- The local Wi-Fi router is congested or restricted by AP client isolation.
-- The Windows PC has no active internet connection (preventing standard Windows Mobile Hotspot via WinRT ICS).
-
-ShareDash eliminates these limitations by operating directly over **physical point-to-point hardware bridges**:
-
-- **USB 3.x Cable Fast-Path** (via direct ADB port forwarding or USB RNDIS/NCM Tethering).
-- **Dedicated 5 GHz / 6 GHz Mobile Hotspot** (smart bi-directional provisioning: PC-hosted or Phone-hosted).
-- **Wi-Fi Direct P2P** (`192.168.49.x` direct peer links).
-- **Zero-LAN UDP Multicast / Broadcast** (sub-second zero-touch peer discovery and pairing).
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       ShareDash Offline P2P Pipeline                        │
-│                                                                             │
-│    Windows PC                                             Android Device    │
-│  ┌────────────┐     ⚡ USB 3.x Fast-Path (3 In-Flight Streams)   ┌────────────────┐ │
-│  │            │ ═══════════════════════════════════════════════> │                │ │
-│  │ Rust Core  │                                                  │ Kotlin / JVM   │ │
-│  │ / Win App  │     📶 5GHz Wi-Fi Hotspot (3 In-Flight Streams)  │ Concurrent     │ │
-│  │            │ ───────────────────────────────────────────────> │ FileChannel    │ │
-│  │            │     📡 Wi-Fi Direct & UDP Zero-LAN Signaling     │ Disk Writer    │ │
-│  └────────────┘ < - - - - - - - - - - - - - - - - - - - - - - - > └────────────────┘ │
-│                                                                             │
-│                 🚀 Up to 150+ MB/s Aggregate Line-Speed Transfer            │
-│                 🛡️ 100% SHA-256 Bit-Level Verified Integrity                │
-│                 🚫 Zero Cloud • Zero Router • Zero Internet                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 📊 Live Benchmark Validation
-
-Live tests transferring a **2799.08 MB (2.80 GB)** movie file (`Marco.2024.1080p.SLIV.WEB-DL.D...`) across physical hardware produced the following performance metrics:
-
-### 1. Performance Summary Matrix
-
-| Mode                                               | Channels Used                        |   Transfer Time   |     Average Speed     | Per-Channel Breakdown                                             |      Integrity      |
-| :------------------------------------------------- | :----------------------------------- | :---------------: | :-------------------: | :---------------------------------------------------------------- | :------------------: |
-| 🚀 **Multipath Aggregation (Phone 5GHz AP)** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **35.55 s** |  **78.7 MB/s**  | **⚡ USB: 31.0 MB/s (39.4%) + 📶 Wi-Fi: 47.7 MB/s (60.6%)** | **SHA-256 ✔** |
-| ⚡ **USB Fast-Path Only**                    | ⚡ USB 3.x Cable                     | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0%                                                    | **SHA-256 ✔** |
-| ⚠️ **Multipath (PC Hotspot ICS)**          | ⚡ USB + 📶 PC Hotspot               | **73.83 s** |  **37.9 MB/s**  | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%)            | **SHA-256 ✔** |
-
-### 2. Speedup & Efficiency Analysis
-
-- **Phone 5GHz Hotspot vs. PC Hotspot**: **4.92× faster Wi-Fi throughput** ($47.7\text{ MB/s}$ vs. $9.7\text{ MB/s}$). Windows Internet Connection Sharing (ICS) introduces driver-level NAT packet filtering bottlenecks that cap PC SoftAP speeds to ~10 MB/s. Android 5GHz Wi-Fi Direct Group Owner runs unthrottled at line speed.
-- **Multipath Aggregation**: Phone 5GHz Wi-Fi and USB-C operate concurrently with 32 MB chunks, cutting transfer time in half compared to PC Hotspot mode.
-- **Integrity**: 32 MB chunks streamed, written out-of-order via `FileChannel`, and verified with zero corrupted bits.
-
----
-
-## 🏗️ System Architecture Overview
-
-ShareDash uses a dual-engine architecture: a high-performance **Rust backend** on the desktop and a reactive **Kotlin / Jetpack Compose app** on Android.
-
-```mermaid
-graph TB
-    subgraph WindowsPC ["💻 Windows Desktop (Rust 2021 + GPUI)"]
-        WinApp["Native Windows GPU GUI (Rust + GPUI)"]
-        CLI["Interactive ANSI CLI Wizard (cli.rs)"]
-        WebUI["Fluent Mica Web Dashboard (Axum + Embedded Assets)"]
-      
-        subgraph RustCore ["Core Engine"]
-            Scheduler["Dynamic Multipath Scheduler (scheduler/)"]
-            Chunker["High-Throughput Adaptive Chunker (storage/chunker.rs)"]
-            Verifier["SHA-256 & BLAKE3 Verifier (storage/verifier.rs)"]
-            ManifestDB["SQLite WAL Manifest Store (storage/manifest_db.rs)"]
-            HotspotMgr["Smart Hotspot Engine - WinRT / Netsh (hotspot.rs)"]
-            UdpScanner["UDP Discovery Beacon Engine (discovery/mdns.rs)"]
-        end
-    end
-
-    subgraph Channels ["Direct Physical Transport Layer"]
-        USB_CH["⚡ USB 3.x Fast-Path (ADB tcp:54325 -> 54321 / RNDIS)"]
-        WIFI_CH["📶 Dedicated 5GHz / 6GHz Direct Hotspot (TCP 54321)"]
-        P2P_CH["📡 Wi-Fi Direct / Zero-LAN UDP Beaconing (Port 54321)"]
-    end
-
-    subgraph AndroidDevice ["📱 Android Device (Kotlin + Compose)"]
-        AndroidUI["Jetpack Compose UI (RadarView, Speedometer, Pieces)"]
-      
-        subgraph AndroidCore ["Android Core Services"]
-            AndroidServer["AndroidHttpServer (server/AndroidHttpServer.kt)"]
-            UdpDiscovery["UdpDiscoveryManager (discovery/UdpDiscoveryManager.kt)"]
-            HotspotService["HotspotManager - 5GHz SoftAP & Band Freeing (discovery/HotspotManager.kt)"]
-            StorageWriter["Concurrent FileChannel Disk Writer (server/AndroidHttpServer.kt)"]
-            FGService["Foreground Transfer Service (service/)"]
-        end
-    end
-
-    WinApp <--> RustCore
-    CLI <--> RustCore
-    WebUI <--> RustCore
-
-    RustCore <==> USB_CH
-    RustCore <==> WIFI_CH
-    RustCore <--> P2P_CH
-
-    USB_CH <==> AndroidCore
-    WIFI_CH <==> AndroidCore
-    P2P_CH <--> AndroidCore
-
-    AndroidCore <--> AndroidUI
-```
-
----
-
-## 📡 Smart Offline Hotspot Decision Engine
-
-Windows Mobile Hotspot via WinRT (`NetworkOperatorTetheringManager`) strictly requires an active Internet Connection Profile. When no internet is present or PC Wi-Fi is occupied, Windows refuses to host an AP.
-
-ShareDash solves this with a **bi-directional Hotspot Decision Matrix**:
+## Component boundaries
 
 ```mermaid
 flowchart TD
-    Start["Inspect PC Internet & Wi-Fi Capabilities"] --> CheckInternet{"PC Has Active Internet Connection?"}
-  
-    CheckInternet -- Yes --> CheckPC5G{"PC Wi-Fi Supports 5GHz Hotspot?"}
-    CheckPC5G -- Yes --> PCHost["Select PC as Primary 5GHz Hotspot Host"]
-    CheckPC5G -- No --> PhoneHost["Select Phone as Primary 5GHz Hotspot Host"]
-    CheckInternet -- No --> PhoneHost
-
-    subgraph PCHostFlow ["PC Hotspot Host Flow"]
-        PCHost --> PCStartAP["PC starts 5GHz SoftAP (Gateway: 192.168.137.1)"]
-        PCStartAP --> SendCredsDirect["Send SSID/Password to Phone via Zero-LAN / USB / P2P"]
-        SendCredsDirect --> PhoneCheckWifi["Phone verifies Wi-Fi is ON (auto-prompts if OFF)"]
-        PhoneCheckWifi --> PhoneConnect["Phone associates to PC Hotspot"]
-        PhoneConnect --> FastScan["PC fast-probes candidate IPs in parallel (< 500ms)"]
-    end
-
-    subgraph PhoneHostFlow ["Phone Hotspot Host Flow"]
-        PhoneHost --> ReqDirect["PC requests Phone to start 5GHz Hotspot over Direct P2P"]
-        ReqDirect --> FreeBand["Phone disconnects client Wi-Fi to free 5GHz/6GHz antenna"]
-        FreeBand --> PhoneStartAP["Phone brings up 5GHz SoftAP / LocalOnlyHotspot"]
-        PhoneStartAP --> RetCreds["Phone broadcasts SSID, Password, Gateway over Direct Wi-Fi"]
-        RetCreds --> PCEngage["PC Wi-Fi adapter auto-enabled"]
-        PCEngage --> PCConnectWPA3["PC creates WPA3-SAE / WPA2-PSK WLAN Profile & associates"]
-    end
-
-    FastScan --> Handshake["3-Way Cryptographic Handshake (SYN -> SYN-ACK -> ACK)"]
-    PCConnectWPA3 --> Handshake
-    Handshake --> Transfer["🚀 High-Throughput Pipelined Multipath Transfer Ready"]
+    GUI["Desktop views"] --> APP["ShareDashApp"]
+    APP --> ENGINE["GuiEngine"]
+    APP --> HW["Discovery and hotspot helpers"]
+    ENGINE --> HTTP["HTTP chunk workers"]
+    HTTP --> PEER["Peer HTTP receiver"]
+    PEER --> FILE["Offset writes to destination"]
+    PEER --> TELEM["Telemetry"]
+    TELEM --> APP
+    CLI["Terminal client"] --> API["Axum API"]
+    ENGINE --> API
 ```
 
-### Key Technical Innovations:
+| Component | Main source | Responsibility |
+| --- | --- | --- |
+| Desktop entry point | [src/bin/sharedash_gui.rs](src/bin/sharedash_gui.rs) | Parse options, create Tokio runtime, start the engine, open GPUI window |
+| Desktop controller | [src/gui/app.rs](src/gui/app.rs) | Navigation, background monitors, connection workflows, file dialogs, and progress updates |
+| Desktop presentation | [src/gui/](src/gui/) | Home, phone setup, PC setup, transfer, and device-detail views |
+| GUI engine | [src/gui/engine.rs](src/gui/engine.rs) | HTTP service startup, peer probes, pairing helpers, archives, chunk dispatch |
+| HTTP API | [src/server/api.rs](src/server/api.rs) | Device information, pairing, transfer reception, cancellation, and network actions |
+| Discovery | [src/discovery/](src/discovery/) | Local UDP beacons, BLE discovery, PIN/QR pairing helpers |
+| Network orchestration | [src/hotspot.rs](src/hotspot.rs) | Adapter inspection, ADB/tethering support, hotspot selection and connection helpers |
+| Protocol library | [src/protocol/](src/protocol/) | Binary framing, messages, AES-GCM and hash utilities |
+| Scheduler and storage | [src/scheduler/](src/scheduler/), [src/storage/](src/storage/) | Framed-transfer scheduling, manifests, sparse writes, integrity utilities |
 
-1. **Android Radio Band Freeing**: Before starting `LocalOnlyHotspot`, the Android app invokes `wifiManager.disconnect()`. This frees the 5GHz/6GHz radio hardware from client duties, dedicating the full antenna array to SoftAP broadcast for maximum PHY throughput.
-2. **Dynamic Gateway Detection**: Rather than hardcoding `192.168.43.1`, Android dynamically parses active network interfaces (`ap0`, `wlan1`, `swlan0`, `softap0`, `rndis0`) and delivers the actual gateway IP in the direct response payload.
-3. **Sub-500ms Instant Client Detection**: When the PC hosts the hotspot, [`fast_scan_hotspot_clients()`](file:///e:/ShareDash/src/hotspot.rs) queries the Windows ARP cache and concurrently probes candidate IPs (`.2` through `.25`) with a 300ms timeout using `futures::future::join_all`, identifying the phone in **under 500 milliseconds**.
-4. **WPA3-Personal (SAE) Compatibility**: Android 12+ defaults to WPA3-Personal for Local-Only Hotspots. ShareDash generates dual-mode Windows XML profiles supporting both `WPA3SAE` and `WPA2PSK`.
+## Startup and concurrency
 
----
+The GUI entry point starts a multi-threaded Tokio runtime and initializes `GuiEngine`. The engine creates the Axum service, pairing/discovery state, telemetry channel, and manifest database. GPUI owns the desktop window and view state.
 
-## 🔄 The Automated Connection & Handshake Wizard
+Background Tokio tasks perform networking and hardware inspection. Futures channels carry their results back to the GPUI application. UI updates call `cx.notify()` to render new state.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant PC as 💻 Windows PC (ShareDash)
-    participant UDP as 📡 Wi-Fi Direct / UDP Zero-LAN
-    participant Phone as 📱 Android Phone (ShareDash)
-    participant USB as ⚡ USB Subsystem
+The hardware monitor normally runs about every 1.5 seconds. The ADB monitor normally checks every 3 seconds. Both pause their recurring work while the GUI sender's transfer-active flag is set, reducing interference during transmission.
 
-    Note over PC,Phone: Phase 1: Direct Wi-Fi & USB Fast-Path Discovery
-    Phone->>UDP: Broadcast presence beacon (UDP port 54321)
-    PC->>UDP: Scan for nearby ShareDash UDP beacons on active interfaces
-    opt USB Cable Connected
-        PC->>USB: Detect ADB or RNDIS/NCM Tethering link (127.0.0.1:54325)
-    end
-    PC-->>PC: Auto-deduplicates device endpoints & activates best fast-path
+The terminal entry point initializes `Server`, which starts the HTTP service and interactive terminal loop. The GUI starts its own service without launching that loop.
 
-    Note over PC,Phone: Phase 2: Hardware & Hotspot Readiness Check
-    PC->>PC: Check PC Internet status (WinRT GetInternetConnectionProfile + DNS probe)
-    PC->>Phone: Query Wi-Fi capabilities via Direct HTTP / UDP probe
-    PC-->>PC: Determine optimal host (Phone AP if no internet; PC AP if internet present)
+## Discovery and connection setup
 
-    Note over PC,Phone: Phase 3: Hotspot Provisioning & Auto-Connect
-    alt Phone Chosen as Host
-        PC->>Phone: Request start 5GHz Hotspot via direct endpoint
-        Phone->>Phone: Free Wi-Fi radio & start 5GHz SoftAP
-        Phone-->>PC: Return {"status":"hotspot_started","ssid":"...","password":"...","gateway":"..."}
-        PC->>PC: Auto-enable PC Wi-Fi adapter & apply WPA3/WPA2 profile
-    else PC Chosen as Host
-        PC->>PC: Create 5GHz PC Hotspot (192.168.137.1)
-        PC->>Phone: Provision Wi-Fi credentials
-        Phone->>Phone: Ensure Wi-Fi is ON & bind via WifiNetworkSpecifier
-        PC->>Phone: Fast parallel candidate probe (< 500ms)
-    end
+### UDP and Bluetooth
 
-    Note over PC,Phone: Phase 4: Direct Wi-Fi 3-Way Handshake
-    PC->>Phone: POST /api/v1/pair/request (SYN + PIN)
-    Phone-->>PC: 200 OK (SYN-ACK + Session Key)
-    PC->>Phone: POST /api/v1/pair/confirm (ACK -> Session Established)
+Despite its filename, [src/discovery/mdns.rs](src/discovery/mdns.rs) implements custom UDP discovery, not a standard mDNS service. The discovery broadcast port is `54320`. BLE support lives in [src/discovery/bluetooth.rs](src/discovery/bluetooth.rs).
 
-    Note over PC,Phone: Phase 5: USB Fast-Path Detection & Handshake
-    opt USB Cable Connected
-        PC->>USB: adb forward tcp:54325 tcp:54321
-        PC->>Phone: Probe http://127.0.0.1:54325 (SYN / SYN-ACK / ACK)
-        PC-->>PC: 🚀 Both Channels ACTIVE (USB + 5GHz Wi-Fi)
-    end
+Discovery supplies candidates. Reachable HTTP endpoints are used for capability exchange and pairing; BLE is not the bulk file-data transport.
 
-    Note over PC,Phone: Phase 6: Pipelined Streaming Transfer
-    PC->>Phone: Stream 32MB chunks concurrently across 3 workers per transport
-```
+### Phone setup
 
----
+The desktop phone assistant displays five stages:
 
-## ⚡ High-Throughput Pipelined Multipath Streaming Engine
+| Stage | Work |
+| --- | --- |
+| USB | Detect tethering or an authorized ADB device |
+| Capabilities | Query local and remote Wi-Fi capabilities |
+| Host | Choose or report a hotspot host |
+| Wi-Fi | Request the phone hotspot and associate the PC; attempt fallback setup when applicable |
+| Ready | Verify reachable endpoints and carry connection settings into the transfer view |
 
-```
-                                  ┌─── Worker 1 (USB) ──> Chunk #0 (32MB) ─┐
-                                  ├─── Worker 2 (USB) ──> Chunk #1 (32MB) ─┤
-Source File (2800 MB)             ├─── Worker 3 (USB) ──> Chunk #2 (32MB) ─┤
-  │                                                                        ├───> Android FileChannel
-  └─> [Dynamic Work Dispatcher] ──┤                                        │     (Lock-free parallel seek
-      (88 Chunks @ 32 MB)         ├─── Worker 1 (Wi-Fi) ─> Chunk #3 (32MB) ┤      writes directly at offset)
-                                  ├─── Worker 2 (Wi-Fi) ─> Chunk #4 (32MB) ┤
-                                  └─── Worker 3 (Wi-Fi) ─> Chunk #5 (32MB) ┘
-```
+USB tethering exposes a network interface. ADB uses TCP forwarding: local `127.0.0.1:54325` reaches the phone's `54321` service. Reverse forwarding supports traffic in the other direction.
 
-### 1. 📦 Adaptive Chunk Sizing
+The current phone workflow prefers requesting a phone-hosted hotspot over the USB connection. It also contains Windows hotspot fallback logic. Hotspot creation and band selection are hardware- and OS-dependent.
 
-ShareDash scales chunk sizes to match file scale and prevent HTTP request overhead:
+The USB-skip control updates the assistant's state. It should not be read as evidence of a complete USB-free automatic pairing implementation.
 
-| File Size                                  |   Chunk Size   |       Total Chunks       |          Overhead Reduction          |
-| :----------------------------------------- | :-------------: | :-----------------------: | :-----------------------------------: |
-| **< 20 MB**                          | **2 MB** |         ~5 chunks         |            Minimal latency            |
-| **20 MB – 100 MB**                  | **4 MB** |        ~15 chunks        |             Fast ramp-up             |
-| **100 MB – 500 MB**                 | **8 MB** |        ~35 chunks        |             Low overhead             |
-| **500 MB – 2 GB**                   | **16 MB** |        ~60 chunks        |          Optimal throughput          |
-| **2 GB – 8 GB** (e.g. 2.8 GB movie) | **32 MB** | **Only ~87 chunks** | **98.4% less request overhead** |
-| **> 8 GB**                           | **64 MB** |        ~150 chunks        |          Maximum line speed          |
+### PC setup
 
-### 2. 🌊 3 Pipelined In-Flight Workers Per Transport
+The PC view starts discovery, lists candidates, and invokes the existing pairing helper for a selected peer. A separate action probes and pairs with the saved IP address. The latter updates the view on success; the discovered-peer callback currently invokes the handshake without the same explicit transfer-target update.
 
-Instead of a single sequential worker waiting for HTTP acknowledgements, ShareDash spawns **3 parallel in-flight streaming workers per transport channel**:
+The saved address defaults to `192.168.137.1:54321`. There is no editable address control in the current GUI.
 
-- **Continuous Saturation**: While Chunk $N$ is being acknowledged, Chunk $N+1$ is uploading over the wire, and Chunk $N+2$ is reading from disk into memory.
-- **Zero Idle Gaps**: The TCP congestion window remains wide open throughout the transfer.
+### Pairing is distinct from transfer authorization
 
-### 3. ⚡ Android Concurrent `FileChannel` Disk Writes
+The code contains both PIN/QR session helpers and a request/response/confirmation pairing flow. These manage session and peer state. The HTTP chunk receiver does not enforce those tokens as per-request authorization. Pairing must not be documented as end-to-end encryption.
 
-In [`AndroidHttpServer.kt`](file:///e:/ShareDash/android/app/src/main/java/com/sharedash/app/server/AndroidHttpServer.kt):
+## Desktop sending path
 
-- **Pre-Allocation**: The destination file is pre-allocated (`raf.setLength(fileSize)`) upon the first chunk arrival to avoid filesystem fragmentation and inode re-allocation stalls.
-- **Lock-Free Positional Writes**: Out-of-order chunks are written directly via `session.channel.write(ByteBuffer.wrap(chunkBytes), chunkOffset)` without blocking other threads, allowing concurrent writes to proceed at UFS flash line speed.
+### Content preparation
 
-### 4. 📈 Exact Per-Channel Bandwidth Accounting
+A file is memory-mapped for reading. For a directory, the GUI first creates a ZIP file in the system temporary directory under `sharedash_archives`. It uses ZIP's stored method, preserving relative file paths without compression. Empty directory entries are not explicitly added.
 
-Throughput metrics are computed from cumulative bytes transferred per channel divided by total elapsed seconds:
+The sender attempts to remove the temporary archive after workers finish. Errors or interruption can leave temporary files; a successful cleanup is not guaranteed.
 
-$$
-\text{Speed}_{\text{channel}} = \frac{\text{Bytes Sent on Channel}}{\text{Elapsed Time}}
-$$
+### Chunk sizing
 
-Real-time UI meters track instantaneous delta bytes over 100ms intervals.
+`GuiWorkDispatcher` computes chunks for the desktop HTTP sender:
 
----
+| File size | Base chunk size |
+| --- | --- |
+| Below 10 MiB | 1 MiB |
+| 10 MiB to below 50 MiB | 2 MiB |
+| 50 MiB and above | 4 MiB |
 
-## 📱 Android Companion App Architecture
+Near the end of a large file, chunks reduce to 2 MiB and then 1 MiB. The final chunk can be smaller. These values belong to the GUI dispatcher; they are not the same as every other chunker in the repository.
 
-```
-com.sharedash.app/
-├── MainActivity.kt                  # UI lifecycle, Wi-Fi auto-enablement, USB broadcast receiver
-├── ShareDashApplication.kt          # Application singleton
-├── server/
-│   └── AndroidHttpServer.kt         # Concurrent FileChannel chunk receiver (port 54321)
-├── discovery/
-│   ├── AndroidPairingCoordinator.kt # 3-way pairing state machine
-│   ├── HotspotManager.kt            # 5GHz SoftAP creation, band freeing & dynamic gateway detection
-│   └── UdpDiscoveryManager.kt       # UDP peer discovery broadcast listener
-├── storage/
-│   └── AndroidSparseWriter.kt       # Direct-offset multi-part writer & SHA-256 verifier
-├── service/
-│   └── TransferForegroundService.kt # Android Foreground Service for non-stop background transfers
-└── ui/
-    ├── RadarView.kt                 # Concentric pulsing radar for nearby device discovery
-    ├── SpeedometerView.kt           # Real-time multi-gauge throughput meters
-    ├── PieceGridView.kt             # Canvas-based real-time chunk block visualizer
-    └── BridgeCards.kt               # Dynamic USB/Wi-Fi connection status indicators
-```
+### Dispatch and retries
 
----
+The sender creates four asynchronous workers per selected target. Workers pull from a shared queue, allowing a faster connection to claim more work.
 
-## 💻 Windows Core Engine & Embedded Services
+The dispatcher tracks unassigned, in-flight, completed, and retried chunks. A worker can reclaim another transport's chunk after 2.5 seconds in flight. Failed chunks can return to the queue up to five times before the dispatcher marks a fatal error.
 
-```
-src/
-├── main.rs                          # CLI entry point, argument parser, persistent device ID
-├── lib.rs                           # Library exports for integration testing
-├── cli.rs                           # Connection wizard, speed calculations & streaming engine
-├── cli_widgets.rs                   # ANSI progress bars, animated spinners, speedometers, tables
-├── hotspot.rs                       # Smart hotspot engine, internet probe, fast parallel client scan
-├── discovery/
-│   ├── mdns.rs                      # UDP multicast discovery beacon (port 54321)
-│   ├── peer_discovery.rs            # UDP broadcast beacon (port 54321)
-│   └── pairing.rs                   # Cryptographic PIN generation & state machine
-├── protocol/
-│   ├── frame.rs                     # Binary framing header, CRC32, payload types
-│   ├── crypto.rs                    # AES-256-GCM authenticated encryption & key exchange
-│   └── message.rs                   # Control messages, transport descriptors, chunk requests
-├── storage/
-│   ├── chunker.rs                   # High-throughput adaptive chunker & TransferManifest generator
-│   ├── manifest_db.rs               # SQLite WAL database for transfer logs & resume state
-│   ├── sparse_writer.rs             # Direct-offset sparse file writer
-│   └── verifier.rs                  # SHA-256 / BLAKE3 integrity checking engine
-├── scheduler/
-│   ├── dynamic_scheduler.rs         # Dynamic work-stealing multipath scheduler
-│   ├── metrics.rs                   # Real-time telemetry structures & EWMA trackers
-│   └── mod.rs
-├── transport/
-│   ├── trait.rs                     # AsyncTransport abstraction trait
-│   ├── usb.rs                       # USB ADB / NDIS transport driver
-│   ├── wifi_direct.rs               # Wi-Fi Direct socket transport
-│   ├── lan.rs                       # Multi-stream LAN TCP transport
-│   └── quic_inet.rs                 # Internet QUIC transport
-└── server/
-    ├── http.rs                      # Axum HTTP server & embedded UI asset router
-    ├── api.rs                       # REST API endpoints (pairing, bridges, transfers)
-    └── ws_telemetry.rs              # Sub-10ms WebSocket telemetry feed
-```
-
----
-
-## 🔒 Cryptographic Security & Verification
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                      Security & Integrity Stack                        │
-├────────────────────────────────────────────────────────────────────────┤
-│ 1. 100% Offline & Private   Transfers stay on direct physical links    │
-│ 2. AES-256-GCM Session Keys Ephemeral keys derived per pairing session │
-│ 3. 32-Bit Frame CRC32       Per-chunk network bit-flip rejection       │
-│ 4. Cryptographic Hashing    SHA-256 full-file integrity validation     │
-│ 5. Directory Traversal Guard Strict path sanitization for disk writes   │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-1. **End-to-End Cryptographic Verification**: Every file is bit-verified with **SHA-256** upon complete reassembly.
-2. **Frame-Level CRC32**: Every chunk carries a 32-bit CRC in its header for instant corruption rejection.
-3. **Session Authentication**: Pairing uses an out-of-band 6-digit ephemeral PIN verified during the 3-way handshake.
-4. **Path Traversal Protection**: Both Windows and Android receivers sanitize file paths, preventing directory traversal attacks (`../`).
-
----
-
-## 🌐 Physical Network Interface Matrix
-
-| Interface                             | Subnet / Address     |       Nominal Speed       | Use Case in ShareDash                                           |
-| :------------------------------------ | :------------------- | :-----------------------: | :-------------------------------------------------------------- |
-| **USB 3.x Cable (ADB)**         | `127.0.0.1:54325`  |    **3.2 Gbps**    | Primary fast-path channel (lowest latency, highest reliability) |
-| **USB Tethering (NDIS)**        | `192.168.42.0/24`  |    **3.2 Gbps**    | Native OS network interface over USB-C                          |
-| **PC 5GHz Hotspot**             | `192.168.137.0/24` | **1.7 Gbps (5GHz)** | High-speed wireless direct link (PC as AP)                      |
-| **Phone 5GHz Hotspot**          | `192.168.43.0/24`  | **1.2 Gbps (5GHz)** | High-speed wireless direct link (Phone as AP)                   |
-| **Wi-Fi Direct P2P Group**      | `192.168.49.0/24`  | **1.4 Gbps (5GHz)** | Direct P2P connection without access point                      |
-| **Wi-Fi Direct / UDP Zero-LAN** | `Port 54321`       |   **Sub-second**   | Direct local beaconing, peer handshake & capability exchange    |
-
----
-
-## 🖥️ CLI & Web UI User Interfaces
-
-### 1. Wifite-Style Terminal Interface (Default)
-
-Runs in standard Windows PowerShell or Windows Terminal with zero GUI dependencies:
-
-- Real-time ANSI progress bars with per-channel speed breakdowns (USB vs. Wi-Fi).
-- Animated spinners, color-coded status badges, and transfer summary tables.
-- Interactive mode selection (`1: USB only`, `2: Wi-Fi only`, `3: Multipath Aggregation`).
+Each worker posts bytes to:
 
 ```text
-  Sending Marco.2024.1080p.SLIV.WEB-DL.D... (2799.08 MB) via USB+Wi-Fi...
-  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓  100.0%  ETA: 0.0s
-  ⚡ USB: 1480.2 MB sent · 80.4 MB/s (0.64 Gbps) · 46 chunks
-  📶 Wi-Fi: 1318.8 MB sent · 71.7 MB/s (0.57 Gbps) · 41 chunks
-
-  ✔ Transfer COMPLETED
-  ┌────────────────────────────────────────────────────────────┐
-  │ File        : Marco.2024.1080p.SLIV.WEB-DL.D...            │
-  │ Size        : 2799.08 MB                                   │
-  │ Time        : 18.40s                                       │
-  │ Avg Speed   : 152.1 MB/s (1.22 Gbps)                       │
-  │ USB Speed   : 80.4 MB/s · 52.9%                            │
-  │ Wi-Fi Speed : 71.7 MB/s · 47.1%                            │
-  │ Chunks      : 32 MB × 87 chunks                            │
-  │ Integrity   : SHA-256 ✔ VERIFIED                           │
-  └────────────────────────────────────────────────────────────┘
+POST /api/v1/transfers/chunk
 ```
 
-### 2. Fluent Mica Web Dashboard
+The request includes transfer ID, filename, total size, chunk ID, offset, length, total chunk count, transport metadata, and a CRC32 checksum. The HTTP client uses keep-alive, TCP_NODELAY, and a 60-second request timeout.
 
-Accessible at `http://127.0.0.1:54321` or launched via [`run_windows_app.bat`](file:///e:/ShareDash/run_windows_app.bat):
+Successful HTTP responses advance progress once per chunk ID. Responses `409` or `410` are treated as cancellation. Other errors are retried. Cancellation also uses the existing shared atomic flag.
 
-- **Quick Share Radar**: Concentric pulsing wave displaying nearby devices.
-- **Dynamic Speedometers**: Live dual-needle throughput gauges for USB and Wi-Fi.
-- **Piece Grid Visualizer**: Canvas grid displaying each chunk block as it is sent and acknowledged.
-- **Bridge Cards**: Real-time status cards for USB Cable and 5GHz Hotspot bridges.
+### Progress reporting
 
----
+The sender emits a snapshot roughly every 100 ms. Channel speed is calculated as bytes sent divided by elapsed transfer time, so the desktop labels it **average** speed. ETA derives from remaining bytes and that average.
 
-## 🏁 Summary
+Snapshots provide aggregate byte progress and acknowledged chunk counts. They do not contain a verified per-piece bitmap or exact in-flight count. The desktop's segmented activity view therefore represents byte progress only.
 
-ShareDash demonstrates that device-to-device file transfers do not require cloud middleboxes, local Wi-Fi routers, or active internet connections. By dynamically discovering capabilities over **direct Wi-Fi Direct and Zero-LAN UDP beaconing**, establishing high-speed **5 GHz Hotspot** and **USB 3.x Cable** connections, and orchestrating them via an **asynchronous pipelined multipath streaming engine**, ShareDash achieves **multi-gigabit throughput** with **100% cryptographic integrity**.
+The completion object's `integrity_ok` field is derived from worker outcomes and dispatcher errors. It is not a receiver-side whole-file hash certificate.
+
+## Windows receiving path
+
+The chunk receiver extracts the filename, takes its basename, and replaces reserved filename characters. It creates or opens the destination under `Downloads/ShareDash_Received`, preallocates the reported size, and writes chunks at their reported offsets.
+
+On Windows, it uses positional `seek_write` calls; on Unix, the implementation uses `write_all_at`. The receive session tracks acknowledged chunk IDs and channel bytes in memory.
+
+Checksum handling is conditional:
+
+1. If `x-chunk-crc32` is present, validate CRC32.
+2. Otherwise, if `x-chunk-sha256` is present, validate SHA-256.
+3. If neither is present, this handler does not perform those checksum checks.
+
+The GUI sender supplies CRC32. A mismatch returns an error so the sender can retry. CRC32 detects accidental corruption; it does not authenticate the sender.
+
+The receiver publishes progress through the telemetry channel. The GUI listens directly to that channel; `/ws/telemetry` exposes it to WebSocket clients. Chunk receive sessions use an in-memory registry rather than the manifest database, so the live GUI path does not provide restart-resume from SQLite.
+
+Files with the same destination name can reuse and overwrite existing data. There is no rename-on-conflict policy in this handler.
+
+## Binary-protocol library
+
+The reusable library has additional facilities:
+
+- `FrameCodec` encodes and decodes binary frames with CRC32.
+- `SessionCrypto` supports AES-256-GCM or an unencrypted mode, plus SHA-256 and BLAKE3 helpers.
+- `MultipathScheduler` and `ChunkPool` schedule framed transfers.
+- `ManifestDb`, `AdaptiveChunker`, and `SparseWriter` support manifests and file reconstruction.
+- Mock transports support corruption and failover tests.
+
+These facilities are tested independently. Their presence does not mean that the GUI's HTTP body is encrypted or that its complete output is hash-verified.
+
+The module named `QuicInetTransport` currently wraps TCP with `FrameCodec`. It is not a QUIC implementation.
+
+## HTTP surface
+
+The GUI engine and terminal server register largely the same routes:
+
+| Method | Route or group | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/info`, `/api/v1/peers` | Local identity and discovered peers |
+| GET | `/api/v1/bridges`, `/api/v1/transports/detect` | Connection inspection |
+| POST | `/api/v1/pair/create`, `/verify` | PIN session creation and verification |
+| POST | `/api/v1/pair/request`, `/respond`, `/confirm`, `/connect` | Peer pairing flow |
+| GET | `/api/v1/pair/incoming`, `/status` | Pairing state |
+| GET | `/api/v1/wifi_caps` | Wi-Fi capabilities |
+| POST | `/api/v1/wifi_connect`, `/api/v1/hotspot/start` | Network setup |
+| POST | `/api/v1/hotspot/open-settings`, `/api/v1/storage/open_folder` | Local system actions |
+| GET | `/api/v1/transfers` | Transfer listing |
+| POST | `/api/v1/transfers/prepare`, `/send`, `/chunk` | Transfer preparation and receive paths |
+| POST | `/api/v1/transfers/:id/cancel`, `/api/v1/transfers/cancel` | Cancellation |
+| POST | `/api/v1/benchmark/start` | Benchmark transfer |
+| GET / WebSocket | `/ws/telemetry` | Transfer telemetry |
+
+Short route suffixes in a row share the full prefix of that row's first route. Consult the router definitions for exact paths and [src/server/api.rs](src/server/api.rs) for request types. This table is an implementation map, not a versioned API stability promise.
+
+## Ports and local data
+
+| Resource | Default |
+| --- | --- |
+| HTTP and WebSocket service | TCP `54321`, bound to `0.0.0.0` |
+| UDP discovery | UDP `54320` |
+| ADB forwarding endpoint | TCP `54325` |
+| Manifest database | `./sharedash_data/manifest.db` |
+| Device identity | `./sharedash_data/device_id.txt` |
+| Windows received files | `%USERPROFILE%/Downloads/ShareDash_Received` |
+| Temporary folder archives | System temporary directory, `sharedash_archives` |
+
+The static [docs/](docs/) website is deployed separately. The service router does not mount it as a browser transfer dashboard.
+
+## Validation boundaries
+
+Protocol, corruption, and failover tests exercise the binary library and simulated transports. GUI compilation validates the desktop code, but neither check proves interoperability with a particular phone, hotspot driver, or cable.
+
+For a release, validate actual transfers in both directions, each connection mode, cancellation, retries, filename collisions, and independent destination hashes. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

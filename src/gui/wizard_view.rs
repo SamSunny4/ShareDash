@@ -2,9 +2,9 @@
 //!
 //! Visualizes Phases 1–5: USB check, capability exchange, hotspot setup, handshake, and ready state.
 
-use gpui::*;
 use super::theme;
 use super::widgets::*;
+use gpui::*;
 
 #[derive(Clone, Debug)]
 pub struct WizardViewState {
@@ -46,7 +46,7 @@ impl Default for WizardViewState {
             phone_wifi_standard: "Wi-Fi 6 (802.11ax)".into(),
             phone_wifi_phy: 1200,
             host_choice: "Phone".into(),
-            host_reason: "Phone 5GHz Wi-Fi Direct AP selected as Primary (High-speed ~50+ MB/s direct link)".into(),
+            host_reason: "Phone hotspot preferred when available".into(),
             hotspot_ssid: String::new(),
             hotspot_band: "5 GHz".into(),
             wifi_ip: None,
@@ -54,9 +54,7 @@ impl Default for WizardViewState {
             usb_port: 54325,
             wifi_ready: false,
             usb_ready: false,
-            logs: vec![
-                LogEntry::info("Initializing Auto-Connect Phone Wizard..."),
-            ],
+            logs: vec![LogEntry::info("Initializing Auto-Connect Phone Wizard...")],
         }
     }
 }
@@ -72,47 +70,27 @@ pub fn render_wizard_view(
     let mut root = div()
         .flex()
         .flex_col()
-        .size_full()
+        .w_full()
         .bg(theme::bg_base())
-        .gap_4()
+        .gap_5()
         .p_6();
 
-    // ── Header Bar ───────────────────────────────────────────
     root = root.child(
         div()
             .flex()
-            .flex_row()
             .items_center()
             .justify_between()
-            .child(back_button().on_click(on_back))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .child("📱 Auto-Connect Wizard (PC ↔ Phone)"),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .rounded(theme::corner_sm())
-                    .bg(if state.wifi_ready || state.usb_ready {
-                        theme::bg_active()
-                    } else {
-                        theme::bg_elevated()
-                    })
-                    .text_size(px(12.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(if state.wifi_ready || state.usb_ready {
-                        theme::accent_green()
-                    } else {
-                        theme::accent_cyan()
-                    })
-                    .child(format!("Phase {}/5", state.current_phase)),
-            ),
+            .gap_4()
+            .child(page_heading(
+                "Connect your phone",
+                "A guided setup for USB and wireless connections.",
+            ))
+            .child(back_button().on_click(on_back)),
     );
-
+    root = root.child(connection_steps(
+        state.current_phase,
+        ["USB", "Capabilities", "Host", "Wi-Fi", "Ready"],
+    ));
     // ── Phase 1: USB Connection Priority Card ─────────────────
     let mut p1_card = div()
         .w_full()
@@ -125,7 +103,7 @@ pub fn render_wizard_view(
         } else {
             theme::border_card()
         })
-        .child(phase_header(1, "USB Connection Check (Fast-Path Priority)"));
+        .child(phase_header(1, "Check the USB connection"));
 
     if state.usb_connected {
         p1_card = p1_card.child(status_ok(&format!(
@@ -146,7 +124,7 @@ pub fn render_wizard_view(
                     .py_2()
                     .text_size(px(12.0))
                     .text_color(theme::accent_cyan())
-                    .child("📱 Tip: On Android phone, turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering)"),
+                    .child("Tip: On Android phone, turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering)"),
             )
             .child(
                 div()
@@ -156,7 +134,7 @@ pub fn render_wizard_view(
                     .flex_row()
                     .gap_3()
                     .child(
-                        action_button("btn-skip-usb", "Continue in Wireless Mode (Wi-Fi Direct)", false)
+                        action_button("btn-skip-usb", "Use wireless connection", false)
                             .on_click(on_skip_usb),
                     ),
             );
@@ -178,7 +156,7 @@ pub fn render_wizard_view(
             } else {
                 theme::border_card()
             })
-            .child(phase_header(2, "Hardware Capability Exchange"));
+            .child(phase_header(2, "Compare device capabilities"));
 
         p2_card = p2_card
             .child(tree_item(
@@ -193,7 +171,10 @@ pub fn render_wizard_view(
             ))
             .child(tree_item(
                 "Phone Wi-Fi",
-                &format!("{} (PHY: {} Mbps)", state.phone_wifi_standard, state.phone_wifi_phy),
+                &format!(
+                    "{} (PHY: {} Mbps)",
+                    state.phone_wifi_standard, state.phone_wifi_phy
+                ),
                 true,
             ));
 
@@ -205,7 +186,7 @@ pub fn render_wizard_view(
                         .pt_2()
                         .text_size(px(12.0))
                         .text_color(theme::accent_yellow())
-                        .child("⚠ PC Wi-Fi is currently OFF. Enable it to activate 5GHz wireless aggregation (~150+ MB/s)."),
+                        .child("Wi-Fi is turned off. Enable it to add a wireless connection, or continue with USB."),
                 )
                 .child(
                     div()
@@ -215,11 +196,11 @@ pub fn render_wizard_view(
                         .flex_row()
                         .gap_3()
                         .child(
-                            action_button("btn-enable-wifi", "Turn ON Wi-Fi / Open Settings", true)
+                            action_button("btn-enable-wifi", "Open Wi-Fi settings", true)
                                 .on_click(on_enable_wifi),
                         )
                         .child(
-                            action_button("btn-usb-only", "Continue in USB-Only Mode", false)
+                            action_button("btn-usb-only", "Use USB only", false)
                                 .on_click(on_continue_usb_only),
                         ),
                 );
@@ -240,7 +221,7 @@ pub fn render_wizard_view(
             } else {
                 theme::border_card()
             })
-            .child(phase_header(3, "Optimal Hotspot Host & Auto-Connect"))
+            .child(phase_header(3, "Set up the wireless connection"))
             .child(status_ok(&format!(
                 "Optimal Host Decision: {} ({})",
                 state.host_choice, state.host_reason
@@ -269,39 +250,33 @@ pub fn render_wizard_view(
             } else {
                 theme::accent_cyan()
             })
-            .child(phase_header(5, "Multipath Handshake & Channel Ready"));
+            .child(phase_header(5, "Connection ready"));
 
         if state.usb_ready {
             p5_card = p5_card.child(status_ok(&format!(
-                "🔒 USB Channel READY (Line Speed 3.2 Gbps) → {}:{}",
+                "USB connection ready → {}:{}",
                 state.usb_ip, state.usb_port
             )));
         }
         if state.wifi_ready {
             p5_card = p5_card.child(status_ok(&format!(
-                "🔒 5GHz Wi-Fi Channel READY (AES-256-GCM) → {}",
+                "Wi-Fi connection ready → {}",
                 state.wifi_ip.as_deref().unwrap_or("Connected")
             )));
         }
 
         if state.usb_ready || state.wifi_ready {
-            p5_card = p5_card
-                .child(
-                    div()
-                        .pt_3()
-                        .flex()
-                        .flex_row()
-                        .gap_3()
-                        .child(
-                            action_button("btn-send-files", "🚀 Select Files / Folders to Send", true)
-                                .on_click(on_proceed_to_send),
-                        ),
-                );
+            p5_card = p5_card.child(
+                div().pt_3().flex().flex_row().gap_3().child(
+                    action_button("btn-send-files", "Choose files to send", true)
+                        .on_click(on_proceed_to_send),
+                ),
+            );
         }
         root = root.child(p5_card);
     }
 
-    // ── Activity Log Terminal ─────────────────────────────────
+    // ── Connection activity Terminal ─────────────────────────────────
     root = root.child(
         div()
             .flex()
@@ -318,11 +293,10 @@ pub fn render_wizard_view(
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme::text_secondary())
                     .pb_2()
-                    .child("Activity Log"),
+                    .child("Connection activity"),
             )
             .child(log_list(&state.logs)),
     );
 
     root
 }
-

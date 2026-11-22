@@ -1,8 +1,7 @@
-//! ShareDash Home View — Mode Selection & Status Overview
-
-use gpui::*;
+//! Desktop overview: connection status and entry points for the existing flows.
 use super::theme;
 use super::widgets::*;
+use gpui::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct HomeStatus {
@@ -16,7 +15,6 @@ pub struct HomeStatus {
     pub paired_peer: Option<String>,
     pub pending_pair: Option<PendingPairData>,
 }
-
 #[derive(Clone, Debug)]
 pub struct PendingPairData {
     pub initiator_name: String,
@@ -35,213 +33,133 @@ pub fn render_home_view(
     on_accept_pair: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_reject_pair: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
-    let mut root = div()
-        .flex()
-        .flex_col()
-        .size_full()
-        .bg(theme::bg_base())
-        .gap_4()
-        .p_6();
-
-    // ── Incoming Pairing Request Alert (if any) ───────────────
-    if let Some(ref req) = status.pending_pair {
+    let mut root = div().flex().flex_col().w_full().gap_6().p_6();
+    root = root.child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .child(page_heading(
+                "Overview",
+                "Connect a device and move files over USB, Wi-Fi, or both.",
+            ))
+            .child(
+                action_button("btn-top-downloads", "Received files", false)
+                    .on_click(on_open_downloads),
+            ),
+    );
+    if let Some(req) = &status.pending_pair {
         root = root.child(
-            div()
-                .w_full()
-                .p_4()
-                .rounded(theme::corner_md())
-                .bg(theme::bg_surface())
-                .border_2()
+            panel()
                 .border_color(theme::accent_yellow())
                 .child(
                     div()
                         .flex()
-                        .flex_col()
-                        .gap_2()
+                        .items_center()
+                        .justify_between()
+                        .child(section_title("Connection request"))
+                        .child(status_pill(
+                            &format!("PIN {}", req.pin_code),
+                            theme::accent_yellow(),
+                        )),
+                )
+                .child(div().text_size(px(14.0)).child(format!(
+                    "{} wants to connect to this PC.",
+                    req.initiator_name
+                )))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme::text_secondary())
+                        .child(format!(
+                            "{}:{} · Confirm that you recognize this device.",
+                            req.initiator_ip, req.initiator_port
+                        )),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
                         .child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .justify_between()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .text_size(px(16.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(theme::accent_yellow())
-                                        .child("🔔 Incoming Connection Request"),
-                                )
-                                .child(
-                                    div()
-                                        .px_3()
-                                        .py_1()
-                                        .rounded(theme::corner_sm())
-                                        .bg(theme::bg_elevated())
-                                        .text_size(px(14.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(theme::accent_green())
-                                        .child(format!("PIN: {}", req.pin_code)),
-                                ),
+                            action_button("btn-accept-pair", "Accept connection", true)
+                                .on_click(on_accept_pair),
                         )
                         .child(
-                            div()
-                                .text_size(px(13.0))
-                                .text_color(theme::text_primary())
-                                .child(format!(
-                                    "Device \"{}\" ({}:{}) wants to pair with this PC.",
-                                    req.initiator_name, req.initiator_ip, req.initiator_port
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .gap_3()
-                                .pt_2()
-                                .child(
-                                    action_button("btn-accept-pair", "✔ Accept Connection", true)
-                                        .on_click(on_accept_pair),
-                                )
-                                .child(
-                                    action_button("btn-reject-pair", "✖ Reject", false)
-                                        .on_click(on_reject_pair),
-                                ),
+                            action_button("btn-reject-pair", "Decline", false)
+                                .on_click(on_reject_pair),
                         ),
                 ),
         );
     }
-
-    // ── 1. Top Brand & Profile Bar (matching Android HomeScreen) ──
-    let (status_text, status_color) = if let Some(ref peer) = status.paired_peer {
-        (format!("Connected to {}", peer), theme::accent_green())
-    } else if status.usb_connected {
-        let name = status.usb_name.as_deref().unwrap_or("Fast-Path");
-        (format!("USB Cable Detected: {}", name), theme::accent_cyan())
+    let usb = if status.usb_connected {
+        status
+            .usb_name
+            .clone()
+            .unwrap_or_else(|| "Cable connected".into())
     } else {
-        ("Waiting for Connection".to_string(), theme::text_muted())
+        "No device connected".into()
     };
-
-    root = root.child(brand_top_bar(
-        &status.device_name,
-        &status_text,
-        status_color,
-        on_open_downloads,
-        on_select_info,
-    ));
-
-    let on_wizard = std::sync::Arc::new(on_select_wizard);
-    let on_pc2pc = std::sync::Arc::new(on_select_pc2pc);
-
-    let w1 = on_wizard.clone();
-    let w2 = on_wizard.clone();
-    let w3 = on_wizard.clone();
-
-    let p1 = on_pc2pc.clone();
-    let p2 = on_pc2pc.clone();
-    let p3 = on_pc2pc.clone();
-
-    // ── 2. Mode Selector Segmented Pill (Phone to PC vs PC to PC) ──
-    root = root.child(mode_pill_selector(
-        false,
-        move |e, w, a| w1(e, w, a),
-        move |e, w, a| p1(e, w, a),
-    ));
-
-    // ── 3. Hero Connection Hub (matching Android glowing central hub) ──
-    root = root.child(hero_connection_hub(
-        status.usb_connected,
-        status.usb_name.as_deref(),
-        status.wifi_enabled,
-        status.paired_peer.as_deref(),
-        move |e, w, a| w2(e, w, a),
-        move |e, w, a| p2(e, w, a),
-    ));
-
-    // ── 4. Hardware Channel Status Overview Chips ─────────────
-    let usb_label = if status.usb_connected {
+    let wifi = if status.wifi_enabled {
         format!(
-            "⚡ USB: Linked ({})",
-            status.usb_name.as_deref().unwrap_or("Fast-Path")
+            "{} · {} Mbps link",
+            status.wifi_standard, status.wifi_phy_rate
         )
     } else {
-        "⚡ USB: Disconnected".to_string()
+        "Wi-Fi is turned off".into()
     };
-
-    let wifi_label = format!(
-        "📶 Wi-Fi: {} ({} Mbps) [{}]",
-        status.wifi_standard,
-        status.wifi_phy_rate,
-        if status.wifi_enabled { "ON" } else { "OFF" }
-    );
-
-    let paired_label = if let Some(ref peer) = status.paired_peer {
-        format!("🔒 Paired: {}", peer)
-    } else {
-        "🔒 Not paired".to_string()
-    };
-
     root = root.child(
         div()
             .flex()
-            .flex_row()
             .gap_3()
-            .w_full()
             .child(channel_badge(
-                "⚡",
-                "USB Fast-Path",
-                &usb_label,
+                "",
+                "USB connection",
+                &usb,
                 status.usb_connected,
             ))
             .child(channel_badge(
-                "📶",
-                "Wi-Fi Radio",
-                &wifi_label,
+                "",
+                "Wi-Fi adapter",
+                &wifi,
                 status.wifi_enabled,
             ))
             .child(channel_badge(
-                "🔒",
-                "Peer Handshake",
-                &paired_label,
+                "",
+                "Paired device",
+                status.paired_peer.as_deref().unwrap_or("Ready to connect"),
                 status.paired_peer.is_some(),
             )),
     );
-
-    // ── 5. Quick Feature Mode Cards ───────────────────────────
-    root = root.child(
+    root = root.child(panel().p_6().gap_4()
+        .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme::accent_blue()).child("PHONE TO COMPUTER"))
+        .child(div().text_size(px(25.0)).font_weight(FontWeight::SEMIBOLD).child("Start with your phone."))
+        .child(div().max_w(px(620.0)).text_size(px(14.0)).text_color(theme::text_secondary())
+            .child("Open ShareDash on Android, then connect a USB cable or use a wireless connection. The setup assistant checks the available connections for you."))
+        .child(div().flex().items_center().gap_4()
+            .child(action_button("card-phone-wizard", "Connect phone  →", true).on_click(on_select_wizard))
+            .child(div().text_size(px(12.0)).text_color(theme::text_muted()).child("No cloud account required"))));
+    root = root.child(div().flex().gap_4()
+        .child(card_button("card-pc2pc-wizard", "COMPUTER TO COMPUTER", "Connect another PC",
+            "Discover a nearby ShareDash computer and establish a wireless connection.").on_click(on_select_pc2pc))
+        .child(card_button("card-transfer-direct", "FILE TRANSFER", "Send files or a folder",
+            "Use an available connection. Choose a file, or send a folder as a ZIP archive.").on_click(on_select_transfer)));
+    root.child(
         div()
             .flex()
-            .flex_col()
-            .gap_3()
-            .w_full()
+            .items_center()
+            .justify_between()
+            .gap_4()
             .child(
-                card_button(
-                    "card-phone-wizard",
-                    "📱",
-                    "Auto-Connect Phone Wizard (USB Fast-Path → 5GHz Wi-Fi Direct)",
-                    "Automatic multi-gigabit link setup. Auto-detects USB cable, exchanges specs, and connects to Phone 5GHz Wi-Fi Direct AP (~3+ Gbps combined line speed).",
-                )
-                .on_click(move |e, w, a| w3(e, w, a)),
+                div()
+                    .text_size(px(12.0))
+                    .text_color(theme::text_muted())
+                    .child("Keep ShareDash open on both devices while transferring."),
             )
             .child(
-                card_button(
-                    "card-pc2pc-wizard",
-                    "💻",
-                    "PC-to-PC Wireless Mode (Bluetooth LE Radar → Direct Hotspot)",
-                    "Direct peer-to-peer transmission between PCs without router or internet. Sweeps Bluetooth radar and handshakes to optimal 5GHz/6GHz hotspot.",
-                )
-                .on_click(move |e, w, a| p3(e, w, a)),
-            )
-            .child(
-                card_button(
-                    "card-transfer-direct",
-                    "🚀",
-                    "Direct File & Folder Sender (Multipath)",
-                    "Select files or entire folder directories to stream simultaneously across USB and Wi-Fi Direct with real-time speedometers.",
-                )
-                .on_click(on_select_transfer),
+                action_button("btn-top-info", "Device & network details", false)
+                    .on_click(on_select_info),
             ),
-    );
-
-    root
+    )
 }
-

@@ -1,50 +1,43 @@
-# 🛡️ Security Policy
+# Security
 
-## Supported Versions
+ShareDash is under active development. Its current desktop HTTP path is intended for trusted local connections and should not be treated as a hardened public file-transfer service.
 
-We actively provide security patches and integrity updates for the following versions:
+## Current implementation
 
-| Version | Supported          |
-| ------- | ------------------ |
-| `0.1.x` (Latest Release) | :white_check_mark: |
-| `main` Branch            | :white_check_mark: |
-| `< 0.1.0`                | :x:                |
+| Area | Behavior and boundary |
+| --- | --- |
+| Desktop file transport | Sends raw chunk bodies over HTTP. The GUI worker does not apply application-level AES-GCM encryption or TLS. |
+| Chunk integrity | The desktop sender supplies CRC32. The Windows receiver validates CRC32 when present, or SHA-256 when supplied without CRC32. These checks do not authenticate a peer. |
+| Pairing | PIN/QR and peer handshake helpers exist. The chunk receiver does not enforce their tokens as per-request authorization. |
+| Binary protocol | `SessionCrypto` implements AES-256-GCM and hashing helpers, with an explicit unencrypted mode. These library capabilities are separate from the GUI HTTP path. |
+| Listening interface | The HTTP server binds to `0.0.0.0`, allowing access through reachable interfaces. |
+| API exposure | The router allows any CORS origin and disables the default request-body limit. Network setup and local folder actions are also registered as API routes. |
+| Destination names | The chunk handler reduces filenames to a basename and replaces reserved characters. Other upload paths must be reviewed separately; this is not a blanket traversal-safety guarantee. |
+| File collisions | A received filename can reuse an existing destination file. There is no general rename-on-conflict guarantee. |
+| Completion | GUI success reflects sender worker outcomes, not an independent whole-file hash comparison. |
 
----
+Implementation references: [GUI sender](src/gui/engine.rs), [HTTP handlers](src/server/api.rs), [server router](src/server/http.rs), [cryptographic utilities](src/protocol/crypto.rs).
 
-## 🔒 Security & Cryptographic Architecture
+## Operating guidance
 
-ShareDash is engineered from the ground up with a zero-trust, zero-cloud offline threat model:
+Use a trusted local network or a direct connection, and keep the service off public interfaces and Internet port forwards. Accept pairing requests only from devices you recognize. Keep separate copies of important files and independently compare hashes where integrity is critical.
 
-1. **End-to-End Encryption**:
-   - Every file chunk payload is encrypted using authenticated **AES-256-GCM** or **ChaCha20-Poly1305**.
-   - Session keys are derived per transfer session using high-entropy ephemeral tokens exchanged during the direct Wi-Fi Direct / PIN verification handshake.
+Hotspot or Wi-Fi link encryption is separate from application-level end-to-end encryption. A direct cable or an offline network does not by itself make every HTTP endpoint authenticated.
 
-2. **Zero-Corruption Bit Integrity**:
-   - Each individual frame is checked with **CRC32-Castagnoli** prior to deserialization to reject noisy physical link interference.
-   - Chunks and complete files are verified via cryptographic **SHA-256** and **BLAKE3** digests.
+## Reporting a vulnerability
 
-3. **Path Traversal Mitigation**:
-   - All inbound filenames are strictly sanitized against directory traversal attacks (`../`, absolute path overrides, control characters).
-   - Files are written strictly within designated download directories.
+Do not post exploit details, pairing credentials, or sensitive logs in a public issue. Use the repository's [private vulnerability reporting page](https://github.com/SamSunny4/ShareDash/security/advisories/new).
 
-4. **100% Offline & Private**:
-   - ShareDash initiates **zero external network calls**, carries zero telemetry, and performs zero telemetry pings to third-party analytics servers.
+Include:
 
----
+- The affected commit or binary version.
+- The affected entry point and connection method.
+- Minimal reproduction steps using non-sensitive test data.
+- Expected and observed behavior.
+- The potential impact and any suggested mitigation.
 
-## 🚨 Reporting a Vulnerability
+The repository does not define a formal security support lifetime or guaranteed response time. Reports should identify the exact revision tested. Coordinate disclosure through the private report.
 
-If you discover a security vulnerability in ShareDash, please do **NOT** open a public issue.
+## Security work still required
 
-Instead, please report it via one of the following methods:
-1. **GitHub Security Advisory**: Open a private advisory under [Security > Advisories](https://github.com/SamSunny4/ShareDash/security/advisories/new).
-2. **Email**: Contact the maintainer directly at **samsunny4@github.com**.
-
-### What to Include:
-- Description of the vulnerability.
-- Proof of Concept (PoC) or reproducible steps.
-- Affected component(s) (e.g. Rust Core, Android App, Windows App, Transfer Protocol).
-- Potential impact.
-
-We will acknowledge receipt within **48 hours** and provide a timeline for resolution. Once resolved, we will publish a security advisory crediting you.
+Authentication for transfer and control requests, an authenticated encrypted desktop transport, bounded receive resources, and consistent receive-path validation require further work. See [ROADMAP.md](ROADMAP.md). This document describes current behavior; it is not a security audit or certification.

@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-use std::sync::Arc;
 use clap::Parser;
 use gpui::*;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use sharedash::gui::{GuiEngine, ShareDashApp};
@@ -29,7 +29,11 @@ fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "sharedash=warn,tower_http=warn".into()),
         )
-        .with(tracing_subscriber::fmt::layer().with_target(false).without_time())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .without_time(),
+        )
         .init();
 
     let args = Args::parse();
@@ -39,9 +43,8 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()?;
 
-    let engine: GuiEngine = rt.block_on(async {
-        GuiEngine::start(args.port, args.name, args.db_path).await
-    })?;
+    let engine: GuiEngine =
+        rt.block_on(async { GuiEngine::start(args.port, args.name, args.db_path).await })?;
 
     let engine_arc = Arc::new(engine);
 
@@ -53,11 +56,12 @@ fn main() -> anyhow::Result<()> {
     Application::new().run(move |cx: &mut App| {
         let engine_clone = engine_arc.clone();
 
-        let bounds = Bounds::centered(None, size(px(1020.0), px(720.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1100.0), px(820.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(840.0), px(600.0))),
             titlebar: Some(TitlebarOptions {
-                title: Some("ShareDash — Multipath File Transfer Engine".into()),
+                title: Some("ShareDash".into()),
                 ..Default::default()
             }),
             ..Default::default()

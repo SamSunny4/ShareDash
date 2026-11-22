@@ -1,46 +1,44 @@
-# 🗺️ ShareDash Product & Engineering Roadmap
+# Roadmap
 
-This document outlines the architectural vision, upcoming milestones, and planned features for **ShareDash**.
+This roadmap separates implemented capabilities from proposed work. It does not promise release dates or imply that planned features are already available.
 
----
+## Implemented foundations
 
-## 🎯 Current Status (v0.1.0)
-- [x] **Zero-LAN / Zero-Internet Physical Engine**: Fully offline P2P bridging.
-- [x] **Smart 5 GHz Hotspot Orchestration**: Automatic band-freeing, SoftAP creation, and direct Wi-Fi Direct credential exchange.
-- [x] **Multipath Physical Aggregation**: Simultaneous USB 3.x Cable Fast-Path + 5 GHz Wi-Fi link streaming (78+ MB/s real-world throughput).
-- [x] **Adaptive Chunker & Sparse Writer**: 2MB–64MB adaptive chunks with concurrent `FileChannel` reassembly.
-- [x] **Zero-Corruption Verification**: CRC32 frame checksums, SHA-256 / BLAKE3 hash checks, AES-256-GCM encryption.
-- [x] **Native Android Companion**: Jetpack Compose UI, Zero-LAN UDP discovery, Android Share Sheet target.
-- [x] **Native Windows GPU Desktop App**: GPU-accelerated Rust GPUI desktop application with real-time HUD, AirDrop-style radar scan, 5-phase interactive auto-connect wizard, piece grid, and one-click transfers.
-- [x] **Windows CLI Wizard**: Interactive terminal UI with real-time gauges, hardware inspect, and pin handshakes.
+- Native Windows GPUI interface and separate terminal client.
+- Android companion built with Jetpack Compose.
+- UDP/BLE discovery helpers and USB tethering/ADB connection paths.
+- Phone hotspot and Windows hotspot orchestration helpers.
+- Desktop HTTP chunk sending with concurrent workers across available connections.
+- File and ZIP-packaged folder sending, progress, cancellation, and receive status.
+- Binary framing, cryptographic helpers, manifest storage, and simulation tests.
 
----
+See [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for the boundaries of each path.
 
-## 🚀 Near-Term Milestones (v0.2.0 - v0.3.0)
+## Reliability and security priorities
 
-### 🖥️ Native Cross-Platform PC Clients
-- [ ] **Linux Support**: CLI engine support for Linux network interfaces via `NetworkManager` / `wpa_supplicant` and Wi-Fi Direct.
-- [ ] **macOS Support**: Core engine support for macOS via native Wi-Fi Direct bridging and USB Fast-Path.
-- [ ] **Tray Minimization & Auto-Start**: Background tray daemon with instant pop-up notifications on file arrival.
+- Enforce authenticated sessions on transfer and control endpoints.
+- Add authenticated encryption to the desktop transfer path.
+- Verify whole-file integrity at completion and report it explicitly.
+- Complete PC discovery-to-transfer state propagation and editable destination handling.
+- Replace optimistic initial connection defaults with explicit unknown/detected states.
+- Strengthen cancellation cleanup, receive validation, resource limits, and filename conflict handling.
+- Validate empty files, interrupted transfers, and large directory archives across real devices.
+- Add end-to-end HTTP transfer tests alongside the existing binary-protocol tests.
 
-### 📱 Android Enhancements
-- [ ] **NFC Quick Tap-to-Pair**: Tap PC NFC reader or phone-to-phone for instant Wi-Fi Direct session bonding.
-- [ ] **Folder & Batch Directory Tree Transfers**: Recursive directory preservation with streaming archive packing.
-- [ ] **Multi-File Queue Management**: Pause, resume, re-order, and background batch processing.
+## Desktop usability
 
----
+- Persistent transfer history and a managed multi-file queue.
+- Resume support integrated with the active desktop transfer path.
+- Accessible status announcements and broader keyboard-navigation coverage.
+- Optional tray/background operation and incoming-transfer notifications.
+- Reproducible GUI packaging and release checks.
 
-## 🔮 Future Vision (v1.0.0+)
+## Longer-term exploration
 
-### 🌐 Universal Fallbacks
-- [ ] **WebRTC Browser Receiver (Zero-Install)**: Instant temporary web-portal receiver for devices without native apps installed.
-- [ ] **Local LAN Multi-Stream Bridge**: Aggregating gigabit Ethernet + Wi-Fi 6 on local office / home networks.
+- Native Linux and macOS network orchestration.
+- A browser-based receiver.
+- A real QUIC transport implementation.
+- Additional simultaneous network paths and multi-device sending.
+- Further Android batch and background workflow improvements.
 
-### ⚡ Protocol & Transfer Optimizations
-- [ ] **QUIC Transport Layer Option**: Multi-stream multiplexing with native congestion control over UDP.
-- [ ] **Multi-Device Mesh Broadcast**: Simultaneously stream a single file to 3+ phones / laptops over coordinated Wi-Fi Direct groups.
-
----
-
-## 💡 Have an idea?
-We'd love to hear your feedback! Open a [Feature Request](https://github.com/SamSunny4/ShareDash/issues/new?template=feature_request.yml) or start a conversation in [Discussions](https://github.com/SamSunny4/ShareDash/discussions).
+Prioritize these features only after the current transfer and trust boundaries are well tested. Proposals should describe a concrete use case, implementation impact, and validation approach through [GitHub Issues](https://github.com/SamSunny4/ShareDash/issues/new/choose).

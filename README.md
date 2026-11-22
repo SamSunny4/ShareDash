@@ -1,337 +1,154 @@
-# ⚡ ShareDash
+# ShareDash
 
-<div align="center">
+Local file transfer between Windows computers and Android devices, with USB, Wi-Fi, and combined connections.
 
----
+ShareDash includes a native Windows desktop application built with Rust and GPUI, an interactive terminal client, and a Jetpack Compose Android companion. Devices exchange files directly over reachable local connections; no cloud account is required.
 
-## 💡 Why ShareDash? (Comparison vs Alternatives)
+**Status:** early development. The Rust package is version `0.1.0`. Hardware support and throughput depend on the device, cable, network adapter, and operating system.
 
-Most existing file transfer tools rely on a single wireless channel or an existing local Wi-Fi router. **ShareDash** is built for extreme performance, aggregating multiple physical hardware interfaces concurrently without requiring any internet connection, router, or cloud account.
+[Desktop guide](DESKTOP_GUIDE.md) · [Architecture](HOW_IT_WORKS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-| Feature / Capability                              |    ⚡ **ShareDash**    |   🍏 AirDrop   |  📲 Quick Share  |    📦 LocalSend    |    🔄 Syncthing    |
-| :------------------------------------------------ | :---------------------------: | :------------: | :---------------: | :----------------: | :----------------: |
-| **Simultaneous Multipath (USB + Wi-Fi)**    | ✅ **YES (Aggregated)** |     ❌ No     |       ❌ No       |       ❌ No       |       ❌ No       |
-| **100% Offline / Routerless (Zero LAN)**    | ✅ **YES (Direct P2P)** |     ✅ Yes     |      ✅ Yes      | ❌ Requires Router | ❌ Requires Router |
-| **PC <-> Android Direct Hardware Bridge**   |       ✅ **YES**       | ❌ Apple Only |   ⚠️ Limited   | ✅ Yes (LAN only) |       ✅ Yes       |
-| **Real-World Speed on Multi-GB Files**      |  🚀 **78–100+ MB/s**  |  ~30–45 MB/s  |   ~35–50 MB/s   |    ~25–40 MB/s    |    ~15–30 MB/s    |
-| **USB 3.x Fast-Path Prioritization**        | ✅ **YES (Line Speed)** |     ❌ No     |       ❌ No       |       ❌ No       |       ❌ No       |
-| **Automatic 5GHz SoftAP Orchestration**     | ✅ **YES (Direct P2P)** |     ❌ No     | ⚠️ Proprietary |       ❌ No       |       ❌ No       |
-| **Zero Cloud / Zero Account / No Tracking** |   ✅ **100% Private**   |  ❌ iCloud ID  | ❌ Google/Samsung |       ✅ Yes       |       ✅ Yes       |
-| **Open Source (MIT)**                       |       ✅ **YES**       | ❌ Proprietary |  ❌ Proprietary  |     ✅ GPL-3.0     |     ✅ MPL-2.0     |
+## Capabilities
 
----
+| Area | Current implementation |
+| --- | --- |
+| Desktop interface | Connection assistants, device details, native file and folder selection, transfer progress, and incoming-transfer status |
+| USB connections | Android USB tethering or ADB port forwarding |
+| Wireless connections | Local discovery, hotspot setup helpers, and HTTP peer connections |
+| Multipath sending | Concurrent chunk workers across available USB and Wi-Fi targets |
+| Folder transfer | Packages the selected folder into a ZIP archive before sending |
+| Progress | Bytes transferred, average send speed, estimated time remaining, and per-channel statistics |
+| Integrity | CRC32 checks on the desktop HTTP chunk path; separate binary-protocol modules provide encryption and cryptographic hash utilities |
 
-## 🚀 Key Highlights
+Multipath can use both connections, but it is not guaranteed to outperform the faster single connection. ShareDash's desktop HTTP transfer path does **not** provide application-level end-to-end encryption. See [Security](SECURITY.md) for the current trust boundary.
 
-| Feature                                                             | Description                                                                                                                                                                                                                                                              |
-| :------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔌 **True Offline Direct P2P (Zero LAN / Zero Internet)**     | **100% routerless & internet-free.** No local Wi-Fi router, cloud servers, or active internet connection required. Connects directly over physical hardware bridges.                                                                                               |
-| 📡 **Smart 5GHz Hotspot Auto-Orchestration**                  | Dynamically checks PC internet & Wi-Fi readiness. If PC lacks an internet connection (or cannot host 5GHz AP), the Phone automatically turns off client Wi-Fi to free antenna bands, starts a 5GHz SoftAP, and auto-associates via direct Wi-Fi Direct / Local Zero-LAN. |
-| ⚡ **USB 3.x Cable Fast-Path Priority**                       | Instant line-speed connection over USB-C (3+ Gbps) via direct ADB port forwarding or USB Tethering (RNDIS/NCM).                                                                                                                                                          |
-| 🚀 **High-Throughput Pipelined Multipath (2MB–64MB Chunks)** | Adaptive chunking with **3 parallel in-flight streaming workers per transport**, delivering line speeds on multi-gigabyte files (2GB, 3GB, 10GB+) with zero idle gaps.                                                                                             |
-| 🛡️ **Zero-Corruption Verification**                         | CRC32 frame checksums, SHA-256 / BLAKE3 chunk hashing, AES-256-GCM authenticated encryption, and concurrent direct-offset `FileChannel` disk writes.                                                                                                                   |
-| 📱 **Native Android Companion App**                           | Modern Jetpack Compose UI with Android System Share Sheet target (`ACTION_SEND`), background foreground service, and local high-speed UDP / Wi-Fi Direct discovery.                                                                                                    |
-| 🖥️ **Native Windows GPU GUI (Rust + GPUI)**                 | Sleek dark-mode desktop app powered by Zed's GPUI framework. Features real-time hardware status HUD, AirDrop-style radar scan, 5-phase interactive auto-connect wizard, multipath telemetry visualizer, chunk piece grid, and native file/folder picking.             |
-| 📟 **Wifite-Style ANSI Terminal Wizard**                      | Interactive CLI wizard that handles discovery, hardware inspection, hotspot provisioning, 3-way handshakes, and live multi-gauge progress meters.                                                                                                                        |
+## Build and run the desktop app
 
----
+### Requirements
 
-## 🏗️ System Architecture
+- Windows with a supported graphics driver for GPUI.
+- Rust and Cargo, using the MSVC toolchain.
+- Visual Studio Build Tools with the C++ build tools and Windows SDK.
+- The Android companion app for phone transfers.
+- ADB available on `PATH` when using the debugging-based USB connection. USB tethering is a separate connection method.
 
-```mermaid
-graph TD
-    subgraph UI ["User Interfaces"]
-        WinUI["Native Windows GPU GUI (Rust + GPUI)"]
-        CLI["Terminal CLI Wizard (cli.rs)"]
-        AndUI["ShareDash Android App (Jetpack Compose)"]
-        WebPortal["Fluent Mica Web Dashboard"]
-    end
+The repository does not currently declare a minimum supported Rust version. Use a toolchain compatible with the checked-in `Cargo.lock`.
 
-    subgraph Core ["ShareDash Multipath Core Engine"]
-        Sched["Dynamic Multipath Work Dispatcher"]
-        Chunker["High-Throughput Adaptive Chunker (2MB - 64MB)"]
-        Writer["Concurrent FileChannel Sparse Disk Writer"]
-        Verif["SHA-256 / BLAKE3 Integrity Verifier"]
-        HotspotMgr["Smart Hotspot Engine (WinRT / Netsh / Wi-Fi Direct)"]
-    end
+From the repository root:
 
-    subgraph Transports ["Direct Physical P2P Channels (Zero LAN / Zero Cloud)"]
-        USB["⚡ USB 3.x Cable Fast-Path (ADB tcp:54325 / RNDIS)"]
-        HOTSPOT["📶 Dedicated 5 GHz / 6 GHz Mobile Hotspot (PC or Phone AP)"]
-        P2P["📡 Wi-Fi Direct / Zero-LAN P2P Group (UDP Beaconing)"]
-    end
-
-    WinUI <--> Core
-    CLI <--> Core
-    AndUI <--> Core
-    WebPortal <--> Core
-  
-    Core <==> USB
-    Core <==> HOTSPOT
-    Core <==> P2P
+```powershell
+cargo run --locked --release --features gui --bin sharedash-gui
 ```
 
----
+For development:
 
-## 📶 Smart Offline Hotspot Orchestration (Phone-Primary Direct P2P)
+```powershell
+cargo run --locked --features gui --bin sharedash-gui
+```
 
-ShareDash defaults to **Phone 5GHz Wi-Fi Direct Group Owner** as the primary wireless channel to avoid Windows Virtual Adapter / ICS packet filtering bottlenecks:
+The existing `run_windows_app.bat` launcher runs the development GUI command.
+
+To produce an executable:
+
+```powershell
+cargo build --locked --release --features gui --bin sharedash-gui
+```
+
+Output: `target/release/sharedash-gui.exe`.
+
+### First transfer
+
+1. Open ShareDash on both devices.
+2. Select **Connect phone** or **Connect PC** in the desktop navigation.
+3. Follow the connection steps and confirm the intended peer.
+4. Open **Transfer**, choose a file or folder, and select the connection mode.
+5. Select **Start transfer** and keep both devices connected until completion.
+
+On Windows, received files are stored in:
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                 ShareDash Hotspot Architecture (Phone Primary)              │
-├──────────────────────────────────────┬──────────────────────────────────────┤
-│ 📱 Phone 5GHz Wi-Fi Direct (PRIMARY) │ 💻 PC Windows Hotspot (FALLBACK ONLY)│
-├──────────────────────────────────────┼──────────────────────────────────────┤
-│ • Phone creates 5GHz Direct Group    │ • Used only if phone SoftAP fails    │
-│ • Gateway IP: 192.168.49.1           │ • PC creates SoftAP (192.168.137.1)  │
-│ • Uncapped Wi-Fi throughput (48+MB/s)│ • Wi-Fi subject to Windows ICS limits│
-│ • PC auto-binds in < 1.5s via WPA2   │ • Direct local pairing handshake    │
-├──────────────────────────────────────┴──────────────────────────────────────┤
-│ 🚀 Both links active (USB + 5GHz Wi-Fi) -> 78+ MB/s Multipath Transfer      │
-└─────────────────────────────────────────────────────────────────────────────┘
+%USERPROFILE%\Downloads\ShareDash_Received
 ```
 
----
+Use **Received files** on the overview or device-details page to open this folder. For connection-specific instructions and limitations, see the [desktop guide](DESKTOP_GUIDE.md).
 
-## 📊 Live Benchmark Performance
+## Terminal client
 
-Transfer metrics for a **2.80 GB (2800 MB)** movie file (`Marco.2024.1080p.SLIV.WEB-DL.D...`) across physical hardware:
-
-| Transfer Mode                                      | Channels Used                        |       Time       |     Average Speed     | Channel Distribution                                              |      Integrity      |
-| :------------------------------------------------- | :----------------------------------- | :---------------: | :-------------------: | :---------------------------------------------------------------- | :------------------: |
-| 🚀 **Multipath Aggregation (Phone 5GHz AP)** | **⚡ USB 3.x + 📶 5GHz Wi-Fi** | **35.55 s** |  **78.7 MB/s**  | **⚡ USB: 31.0 MB/s (39.4%) + 📶 Wi-Fi: 47.7 MB/s (60.6%)** | **SHA-256 ✔** |
-| ⚡ **USB Fast-Path Only**                    | ⚡ USB 3.x Cable                     | **~26.1 s** | **~107.2 MB/s** | ⚡ USB: 100.0%                                                    | **SHA-256 ✔** |
-| ⚠️ **Multipath Aggregation (PC Hotspot)**  | ⚡ USB + 📶 PC Hotspot (ICS)         | **73.83 s** |  **37.9 MB/s**  | ⚡ USB: 28.2 MB/s (74.3%) + 📶 Wi-Fi: 9.7 MB/s (25.7%)            | **SHA-256 ✔** |
-
-> 📖 **Deep Dive Technical Guide**: For an exhaustive, step-by-step breakdown of how the connection wizard, direct Wi-Fi Direct / UDP beaconing, PC/Phone hotspot provisioning, pipelined work-stealing, and zero-corruption sparse reassembly work, see [**HOW_IT_WORKS.md**](HOW_IT_WORKS.md).
-
----
-
-## 📦 Pre-Built Binaries & Packages
-
-Pre-built binaries are available in [`dist/`](dist) and the [GitHub Releases](https://github.com/SamSunny4/ShareDash/releases) page:
-
-- **Windows Native GUI Application**: [`dist/sharedash-gui.exe`](dist/) (GPU-accelerated native Rust + GPUI)
-- **Windows CLI Application & Daemon**: [`dist/sharedash.exe`](dist/sharedash.exe) (Interactive terminal wizard & Axum HTTP/WS engine)
-- **Android Companion App**: [`dist/ShareDash-debug.apk`](dist/ShareDash-debug.apk) (and `dist/sharedash.apk`)
-
----
-
-## 💻 Quick Start: Windows Desktop
-
-### Option A: Launch Native Windows GPUI Desktop App (Recommended)
-
-ShareDash features a high-performance native Windows GUI powered by the GPUI framework (built by the authors of Zed) with Direct3D/Vulkan GPU acceleration:
+The terminal client remains a separate entry point:
 
 ```powershell
-# Run Native Rust GPUI Desktop Application
-cargo run --release --bin sharedash-gui --features gui
+cargo run --locked --release --bin sharedash
 ```
 
-Features included in the GUI:
-- **Radar Dashboard**: Live USB Fast-Path and 5GHz Wi-Fi hardware capability indicators.
-- **Auto-Connect Wizard**: 5-phase guided connection automating USB handshake and Wi-Fi Direct provisioning.
-- **PC-to-PC Mode**: Bluetooth LE advertisement, nearby PC discovery, and direct Wi-Fi hotspot pairing.
-- **Multipath Visualizer**: Real-time dual-speedometer, in-flight piece grid, and chunk completion integrity tracker.
-- **Integrated File & Folder Picker**: Native Windows dialog support with automatic ZIP packaging for directory transfers.
+Both executable entry points accept these options:
 
-### Option B: Launch Interactive Terminal CLI Wizard
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--port`, `-p` | `54321` | HTTP and WebSocket listening port |
+| `--name` | `ShareDash Desktop` | Device name shown to peers |
+| `--db-path` | `./sharedash_data/manifest.db` | SQLite manifest database path |
+
+Example:
 
 ```powershell
-# Run Interactive ANSI Terminal CLI Wizard
-cargo run --release --bin sharedash
+cargo run --locked --features gui --bin sharedash-gui -- --name "Sam's PC" --port 54322
 ```
 
-Select Option `[1]` (**Auto-Connect Wizard**):
+Changing the listening port does not rewrite every discovery or ADB default. Use the default port for ordinary device-to-device setup. The terminal executable starts its interactive menu alongside the server; `--port` is not a headless-mode switch.
 
-1. **USB Detection**: Checks for connected USB-C cable (ADB port forwarding / RNDIS tethering).
-2. **Wi-Fi Direct / UDP Radar Scan**: Discovers nearby ShareDash devices via fast local UDP broadcast and Zero-LAN.
-3. **Hotspot Provisioning**: Inspects PC internet & Wi-Fi capabilities, triggers dedicated 5GHz hotspot (PC or Phone AP), and auto-associates credentials.
-4. **3-Way Cryptographic Handshake**: Performs ephemeral PIN verification and establishes AES-256-GCM encrypted session.
-5. **Streaming Transfer**: Prompts for file path and streams chunks over USB + Wi-Fi simultaneously at line speed.
+## Android companion
 
-### Option C: Standalone Background Receiver
+The Android source is in [android/](android/). Its build configuration specifies minimum API 26, compile/target API 35, and Java 17.
 
-```powershell
-cargo run --release --bin sharedash -- --port 54321
-```
-
----
-
-## 📱 Quick Start: Android App
-
-The Android companion app is located in [`android/`](android).
-
-### Direct Installation via ADB:
-
-```powershell
-adb install -r dist/ShareDash-debug.apk
-```
-
-### Build from Source via Gradle:
+Build with the checked-in Windows Gradle wrapper:
 
 ```powershell
 cd android
-.\gradlew assembleDebug
+.\gradlew.bat assembleDebug
 ```
 
-The output APK will be placed at `android/app/build/outputs/apk/debug/app-debug.apk`.
-
----
-
-## 🧪 Automated Test Suite
-
-ShareDash includes a comprehensive test suite verifying protocol framing, cryptographic hash recovery, network adapter isolation, and multipath chunking:
+The output is `android/app/build/outputs/apk/debug/app-debug.apk`. Install a built APK with:
 
 ```powershell
-# Run library unit tests in release mode
-cargo test --lib --release
-
-# Run integration tests
-cargo test --test protocol_test
-cargo test --test test_tether_detection
-cargo test --test corruption_test
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
----
+Run that installation command from the repository root. Existing packaged artifacts are listed in [dist/README.md](dist/README.md); they may predate the current source.
 
-## 📁 Repository Structure
+## Development checks
 
-```text
-ShareDash/
-  ├── Cargo.toml                    # Rust workspace dependencies, axum, btleplug, ring, rusqlite
-  ├── LICENSE                       # MIT Open Source License
-  ├── CONTRIBUTING.md               # Contributor guide & development workflow
-  ├── CODE_OF_CONDUCT.md            # Contributor Covenant Code of Conduct
-  ├── SECURITY.md                   # Security vulnerability reporting policy
-  ├── ROADMAP.md                    # Product & engineering roadmap
-  ├── HOW_IT_WORKS.md               # Exhaustive architectural & operational guide
-  ├── README.md                     # Project overview and quick start guide
-  │
-  ├── .github/                      # GitHub CI/CD workflows & issue forms
-  │   ├── workflows/ci.yml          # Automated multi-platform build & test CI
-  │   ├── workflows/release.yml     # Automated binary release packaging
-  │   ├── workflows/pages.yml       # GitHub Pages deployment for official website
-  │   ├── ISSUE_TEMPLATE/           # Bug report & feature request forms
-  │   ├── PULL_REQUEST_TEMPLATE.md  # Standard PR checklist
-  │   └── dependabot.yml            # Dependency maintenance automation
-  │
-  ├── docs/                         # Official GitHub Pages Website & Live Simulator
-  │   ├── index.html                # Responsive landing page, speed calculator, architecture tabs
-  │   ├── style.css                 # Cyber-dark design system, glassmorphism, responsive styles
-  │   ├── app.js                    # Canvas visualizer, theme switcher, benchmark calculator
-  │   ├── sitemap.xml               # Search engine index sitemap
-  │   └── robots.txt                # Crawler directives
-  │
-  ├── dist/                         # Distribution binaries
-  │   ├── sharedash.exe             # Compiled Windows release CLI binary (CLI + Axum HTTP API)
-  │   ├── sharedash-gui.exe         # Compiled Windows release GUI binary (GPUI Native App)
-  │   ├── ShareDash-debug.apk       # Android companion APK
-  │   └── sharedash.apk             # Android companion APK mirror
-  │
-  ├── src/                          # Windows Rust Core Engine & Native Desktop App
-  │   ├── bin/
-  │   │   └── sharedash_gui.rs      # Native GPUI GUI entry point & window bootstrapping
-  │   ├── main.rs                   # CLI entry point, CLI flags, persistent UUID
-  │   ├── lib.rs                    # Library interface & shared module exports
-  │   ├── cli.rs                    # TerminalCli wizard, multipath streaming loop, speed calculation
-  │   ├── cli_widgets.rs            # ANSI progress bars, animated spinners, speedometers, tables
-  │   ├── gui/                      # Native Rust GPUI Desktop Application (Zero C# / 100% Rust)
-  │   │   ├── app.rs                # Root GPUI app, active view router, background telemetry
-  │   │   ├── engine.rs             # GUI backend engine, Axum server, discovery & work dispatcher
-  │   │   ├── home_view.rs          # Home dashboard, radar scan, hardware status HUD, action cards
-  │   │   ├── wizard_view.rs        # 5-Phase interactive auto-connect wizard (USB + Wi-Fi Direct)
-  │   │   ├── pc2pc_view.rs         # PC-to-PC Bluetooth discovery & direct hotspot pairing
-  │   │   ├── transfer_view.rs      # Live speedometer, dual-channel progress, chunk piece grid
-  │   │   ├── info_view.rs          # Network adapters, interface IP inspector, hardware specs
-  │   │   ├── theme.rs              # Cyber-dark design tokens, neon accents, fonts & layout
-  │   │   └── widgets.rs            # Custom GPUI components: status pills, cards, progress bars
-  │   ├── hotspot.rs                # Windows Netsh/WinRT Wi-Fi manager, fast client scanner, host choice
-  │   ├── discovery/                # Peer discovery subsystems (UDP mDNS, BLE, Pairing)
-  │   │   ├── mdns.rs               # Local network UDP multicast discovery
-  │   │   ├── bluetooth.rs          # BLE advertiser & scanner for phone/PC discovery
-  │   │   └── pairing.rs            # 3-Way handshake manager & session state
-  │   ├── protocol/                 # Wire protocol & cryptography
-  │   │   ├── frame.rs              # Binary packet frames, CRC32 checksums
-  │   │   ├── message.rs            # Typed control messages (ChunkReq, ChunkAck, Capabilities)
-  │   │   └── crypto.rs             # AES-256-GCM AEAD encryption & SHA-256 integrity verification
-  │   ├── scheduler/                # Dynamic work-stealing multipath scheduler
-  │   │   ├── dynamic_scheduler.rs  # Asynchronous channel multiplexer & in-flight retry tracker
-  │   │   └── metrics.rs            # Per-channel throughput metrics & telemetry broadcast
-  │   ├── server/                   # Axum HTTP API & WebSocket server
-  │   │   ├── http.rs               # REST route registry, CORS, and ADB auto-reverse loop
-  │   │   ├── api.rs                # REST handlers: /info, /peers, /transfers, /pair, /wifi_caps
-  │   │   └── ws_telemetry.rs       # Real-time WebSocket streaming telemetry
-  │   ├── storage/                  # Disk storage & chunking engine
-  │   │   ├── chunker.rs            # Adaptive file chunker (2MB to 64MB)
-  │   │   ├── sparse_writer.rs      # Direct-offset sparse file disk writer
-  │   │   └── manifest_db.rs        # SQLite WAL transfer history & session persistence
-  │   └── transport/                # Transport abstraction & drivers
-  │       ├── trait.rs              # AsyncTransport trait definition
-  │       ├── tcp.rs                # TCP stream transport wrapper
-  │       └── mock_sim.rs           # Deterministic transport simulator for corruption & failover tests
-  │
-  ├── android/                      # Native Android Companion Project
-  │   ├── app/src/main/
-  │   │   ├── AndroidManifest.xml   # Permissions, Wi-Fi, Share Sheet filters
-  │   │   └── java/com/sharedash/app/
-  │   │       ├── MainActivity.kt   # App lifecycle, Compose navigation, Wi-Fi coordinator
-  │   │       ├── DeviceIdentity.kt # Hardware-backed persistent device UUID
-  │   │       ├── discovery/        # Direct network discovery
-  │   │       │   └── UdpDiscoveryManager.kt   # Local UDP beacon manager
-  │   │       ├── hotspot/          # Wi-Fi Hotspot & P2P management
-  │   │       │   └── HotspotManager.kt        # 5GHz SoftAP & Wi-Fi Direct Group Owner
-  │   │       ├── server/           # Embedded Android HTTP Server
-  │   │       │   └── AndroidHttpServer.kt     # High-throughput FileChannel chunk receiver
-  │   │       ├── service/          # Foreground transfer service
-  │   │       │   └── TransferForegroundService.kt # Lock-holding background transfer service
-  │   │       ├── storage/          # Local Android file storage & verification
-  │   │       │   ├── AndroidSparseWriter.kt   # Direct random-access sparse file writer
-  │   │       │   ├── IntegrityVerifier.kt     # Streaming SHA-256 / CRC32 bit checker
-  │   │       │   └── SettingsManager.kt       # EncryptedSharedPreferences wrapper
-  │   │       └── ui/               # Jetpack Compose UI
-  │   │           ├── theme/        # Neomorphic Cyber-Dark design tokens & colors
-  │   │           ├── screens/      # HomeScreen, PairingScreen, TransferScreen, SettingsScreen
-  │   │           └── components/   # RadarView, Speedometer, PieceGrid, BridgeCards, Dialogs
-  │   └── build.gradle.kts          # Android Gradle build script
-  │
-  └── tests/                        # Automated Rust Test Suite
-      ├── protocol_test.rs          # Frame serialization & CRC32 checks
-      ├── multipath_benchmark.rs    # Concurrent channel aggregation tests
-      ├── failover_test.rs          # Mid-transfer cable disconnect failovers
-      ├── corruption_test.rs        # Bit-flip detection & re-fetch verification
-      ├── test_pc_to_pc.rs          # PC-to-PC optimal host selection tests
-      └── test_tether_detection.rs  # Strict USB/RNDIS network adapter isolation tests
+```powershell
+cargo check --locked --features gui --bin sharedash-gui
+cargo test --locked --lib
+cargo test --locked --test protocol_test --test corruption_test --test failover_test
 ```
 
----
+The GUI is behind an optional feature. A default `cargo check` does not validate the desktop views. Protocol and simulation tests do not replace a physical USB/Wi-Fi interoperability test.
 
-## 🔒 Security & Privacy
+See [CONTRIBUTING.md](CONTRIBUTING.md) for validation scope and review expectations.
 
-- **100% Routerless & Offline**: All transfers occur strictly over direct physical hardware links. No telemetry, no external DNS lookups, and no cloud relays.
-- **End-to-End Encryption**: Every chunk is encrypted with **AES-256-GCM** using session keys established during pairing.
-- **Path Sanitization**: Direct directory-traversal protection prevents writing outside designated download folders.
-- **Cryptographic Verification**: Every file is bit-verified with SHA-256 / CRC32 upon arrival.
+## Repository map
 
-See [**SECURITY.md**](SECURITY.md) for vulnerability reporting guidelines.
+| Path | Responsibility |
+| --- | --- |
+| [src/gui/](src/gui/) | Desktop state, views, widgets, and GUI transfer orchestration |
+| [src/bin/sharedash_gui.rs](src/bin/sharedash_gui.rs) | GPUI application entry point |
+| [src/main.rs](src/main.rs), [src/cli.rs](src/cli.rs) | Terminal entry point and interactive workflows |
+| [src/server/](src/server/) | Axum HTTP endpoints, receive handlers, and WebSocket telemetry |
+| [src/discovery/](src/discovery/) | UDP and Bluetooth discovery, pairing helpers |
+| [src/hotspot.rs](src/hotspot.rs) | Windows network inspection and hotspot orchestration |
+| [src/protocol/](src/protocol/), [src/scheduler/](src/scheduler/), [src/storage/](src/storage/) | Binary protocol, scheduling, manifests, and storage utilities |
+| [src/transport/](src/transport/) | Transport implementations and simulation support |
+| [android/](android/) | Android companion application |
+| [docs/](docs/) | Static project website; not a dashboard served by the transfer API |
+| [tests/](tests/), [scripts/](scripts/) | Integration tests and benchmark utilities |
 
----
+## Performance
 
-## 📈 Star History
+Measure USB-only, Wi-Fi-only, and combined transfers on the same hardware and file before comparing results. Record the file size, direction, elapsed time, adapter and cable details, and destination hash.
 
-<div align="center">
+The desktop displays binary units: MiB and MiB/s use 1,048,576 bytes. A Wi-Fi adapter's advertised Mbps link rate is not the file-transfer rate. Historical benchmark claims are not a guarantee for other systems. See [scripts/README.md](scripts/README.md) for the available tools.
 
----
+## License and support
 
-## 🤝 Contributing
-
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-Please see [**CONTRIBUTING.md**](CONTRIBUTING.md) for details on setting up your environment, coding standards, and submitting pull requests.
-
----
-
-## 📜 License
-
-Distributed under the **MIT License**. See [**LICENSE**](LICENSE) for more information.
+ShareDash is distributed under the [MIT License](LICENSE). Use [GitHub Issues](https://github.com/SamSunny4/ShareDash/issues/new/choose) for reproducible bugs and feature requests. Report vulnerabilities privately using the process in [SECURITY.md](SECURITY.md).

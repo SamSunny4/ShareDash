@@ -3,9 +3,9 @@
 //! Visualizes Bluetooth LE discovery, hardware compatibility check,
 //! hotspot creation, and high-speed Wi-Fi channel establishment.
 
-use gpui::*;
 use super::theme;
 use super::widgets::*;
+use gpui::*;
 
 #[derive(Clone, Debug)]
 pub struct PcToPcViewState {
@@ -43,9 +43,7 @@ impl Default for PcToPcViewState {
             host_decision: String::new(),
             wifi_ready: false,
             manual_ip_input: "192.168.137.1:54321".into(),
-            logs: vec![
-                LogEntry::info("Starting PC-to-PC Pure Wireless Mode..."),
-            ],
+            logs: vec![LogEntry::info("Starting PC-to-PC Pure Wireless Mode...")],
         }
     }
 }
@@ -61,47 +59,27 @@ pub fn render_pc2pc_view(
     let mut root = div()
         .flex()
         .flex_col()
-        .size_full()
+        .w_full()
         .bg(theme::bg_base())
-        .gap_4()
+        .gap_5()
         .p_6();
 
-    // ── Header Bar ───────────────────────────────────────────
     root = root.child(
         div()
             .flex()
-            .flex_row()
             .items_center()
             .justify_between()
-            .child(back_button().on_click(on_back))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .child("💻 ShareDash PC-to-PC Wireless Mode"),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .rounded(theme::corner_sm())
-                    .bg(if state.wifi_ready {
-                        theme::bg_active()
-                    } else {
-                        theme::bg_elevated()
-                    })
-                    .text_size(px(12.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(if state.wifi_ready {
-                        theme::accent_green()
-                    } else {
-                        theme::accent_cyan()
-                    })
-                    .child(format!("Phase {}/5", state.current_phase)),
-            ),
+            .gap_4()
+            .child(page_heading(
+                "Connect another PC",
+                "Find a nearby computer running ShareDash.",
+            ))
+            .child(back_button().on_click(on_back)),
     );
-
+    root = root.child(connection_steps(
+        state.current_phase,
+        ["Radios", "Discovery", "Host", "Wi-Fi", "Ready"],
+    ));
     // ── Phase 1: Local Radios Verification ─────────────────────
     let p1_card = div()
         .w_full()
@@ -114,20 +92,28 @@ pub fn render_pc2pc_view(
         } else {
             theme::border_card()
         })
-        .child(phase_header(1, "Local Wi-Fi & Bluetooth Radio Verification"))
+        .child(phase_header(1, "Check wireless adapters"))
         .child(tree_item(
             "Local Wi-Fi",
             &format!(
                 "{} (PHY: {} Mbps) [{}]",
                 state.pc_wifi_standard,
                 state.pc_wifi_phy,
-                if state.pc_wifi_enabled { "ACTIVE" } else { "OFF" }
+                if state.pc_wifi_enabled {
+                    "ACTIVE"
+                } else {
+                    "OFF"
+                }
             ),
             false,
         ))
         .child(tree_item(
             "Bluetooth Radio",
-            if state.bt_available { "Ready (BLE 4.0+ Active)" } else { "Unavailable / Limited" },
+            if state.bt_available {
+                "Ready (BLE 4.0+ Active)"
+            } else {
+                "Unavailable / Limited"
+            },
             true,
         ));
     root = root.child(p1_card);
@@ -146,7 +132,7 @@ pub fn render_pc2pc_view(
             } else {
                 theme::border_card()
             })
-            .child(phase_header(2, "Bluetooth LE Discovery & Radar Scan"));
+            .child(phase_header(2, "Nearby computers"));
 
         p2_card = p2_card.child(
             div()
@@ -159,11 +145,23 @@ pub fn render_pc2pc_view(
                     div()
                         .text_size(px(13.0))
                         .text_color(theme::text_secondary())
-                        .child("Scanning for nearby ShareDash PCs over Bluetooth & Wi-Fi..."),
+                        .child(if state.is_scanning {
+                            "Looking for nearby computers…"
+                        } else {
+                            "Discovery results"
+                        }),
                 )
                 .child(
-                    action_button("btn-refresh-scan", if state.is_scanning { "Scanning..." } else { "🔄 Scan Again" }, false)
-                        .on_click(on_start_scan),
+                    action_button(
+                        "btn-refresh-scan",
+                        if state.is_scanning {
+                            "Scanning..."
+                        } else {
+                            "Scan Again"
+                        },
+                        false,
+                    )
+                    .on_click(on_start_scan),
                 ),
         );
 
@@ -181,54 +179,57 @@ pub fn render_pc2pc_view(
                     ),
             );
         } else {
-            p2_card = p2_card.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .children(state.discovered_pcs.iter().map(|dev| {
-                        let dev_name = dev.name.clone();
-                        let dev_addr = dev.address.clone();
-                        let connect_cb = on_connect_arc.clone();
-                        let dev_name_click = dev_name.clone();
-                        let dev_addr_click = dev_addr.clone();
+            p2_card = p2_card.child(div().flex().flex_col().gap_2().children(
+                state.discovered_pcs.iter().map(|dev| {
+                    let dev_name = dev.name.clone();
+                    let dev_addr = dev.address.clone();
+                    let connect_cb = on_connect_arc.clone();
+                    let dev_name_click = dev_name.clone();
+                    let dev_addr_click = dev_addr.clone();
 
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .items_center()
-                            .p_3()
-                            .rounded(theme::corner_sm())
-                            .bg(theme::bg_elevated())
-                            .border_1()
-                            .border_color(theme::border_default())
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .child(
-                                        div()
-                                            .text_size(px(14.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme::text_primary())
-                                            .child(format!("💻 {}", dev_name)),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.0))
-                                            .text_color(theme::text_secondary())
-                                            .child(format!("{} · RSSI: {} dBm · IP: {}", dev.transport, dev.rssi, dev_addr)),
-                                    ),
-                            )
-                            .child(
-                                action_button(&format!("btn-connect-{}", dev_name), "Connect", true)
-                                    .on_click(move |_, _, _| {
-                                        connect_cb(dev_name_click.clone(), dev_addr_click.clone(), 54321);
-                                    }),
-                            )
-                    })),
-            );
+                    div()
+                        .flex()
+                        .flex_row()
+                        .justify_between()
+                        .items_center()
+                        .p_3()
+                        .rounded(theme::corner_sm())
+                        .bg(theme::bg_elevated())
+                        .border_1()
+                        .border_color(theme::border_default())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .text_size(px(14.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(theme::text_primary())
+                                        .child(format!("{}", dev_name)),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(theme::text_secondary())
+                                        .child(format!(
+                                            "{} · RSSI: {} dBm · IP: {}",
+                                            dev.transport, dev.rssi, dev_addr
+                                        )),
+                                ),
+                        )
+                        .child(
+                            action_button(&format!("btn-connect-{}", dev_name), "Connect", true)
+                                .on_click(move |_, _, _| {
+                                    connect_cb(
+                                        dev_name_click.clone(),
+                                        dev_addr_click.clone(),
+                                        54321,
+                                    );
+                                }),
+                        )
+                }),
+            ));
         }
 
         // Direct IP Connect Bar
@@ -243,10 +244,10 @@ pub fn render_pc2pc_view(
                     div()
                         .text_size(px(12.0))
                         .text_color(theme::text_secondary())
-                        .child("Or connect by IP:"),
+                        .child(format!("Saved address: {}", state.manual_ip_input)),
                 )
                 .child(
-                    action_button("btn-manual-ip", "Connect Direct IP", false)
+                    action_button("btn-manual-ip", "Connect to saved address", false)
                         .on_click(on_manual_connect),
                 ),
         );
@@ -267,7 +268,7 @@ pub fn render_pc2pc_view(
             } else {
                 theme::border_card()
             })
-            .child(phase_header(3, "Optimal Band Selection & Hotspot Provisioning"))
+            .child(phase_header(3, "Set up the wireless connection"))
             .child(status_ok(&format!(
                 "Connected to Remote PC: {}",
                 state.selected_pc_name
@@ -288,21 +289,22 @@ pub fn render_pc2pc_view(
             .bg(theme::bg_surface())
             .border_1()
             .border_color(theme::accent_green())
-            .child(phase_header(5, &format!("Ultra-Fast {} Wi-Fi Transfer Channel Ready", state.selected_band)));
+            .child(phase_header(
+                5,
+                &format!("{} Wi-Fi connection", state.selected_band),
+            ));
 
         if state.wifi_ready {
             p5_card = p5_card
                 .child(status_ok(&format!(
-                    "🔒 Direct Wi-Fi Channel READY (AES-256-GCM Line Speed) → {}:{}",
+                    "Wi-Fi connection ready → {}:{}",
                     state.target_ip, state.target_port
                 )))
                 .child(
-                    div()
-                        .pt_3()
-                        .child(
-                            action_button("btn-pc2pc-send", "🚀 Select Files / Folders to Send", true)
-                                .on_click(on_proceed_to_send),
-                        ),
+                    div().pt_3().child(
+                        action_button("btn-pc2pc-send", "Choose files to send", true)
+                            .on_click(on_proceed_to_send),
+                    ),
                 );
         } else {
             p5_card = p5_card.child(status_spin("Completing 3-way pairing handshake..."));
@@ -310,7 +312,7 @@ pub fn render_pc2pc_view(
         root = root.child(p5_card);
     }
 
-    // ── Activity Log Terminal ─────────────────────────────────
+    // ── Connection activity Terminal ─────────────────────────────────
     root = root.child(
         div()
             .flex()
@@ -327,11 +329,10 @@ pub fn render_pc2pc_view(
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme::text_secondary())
                     .pb_2()
-                    .child("Activity Log"),
+                    .child("Connection activity"),
             )
             .child(log_list(&state.logs)),
     );
 
     root
 }
-

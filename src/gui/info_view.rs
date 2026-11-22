@@ -1,8 +1,8 @@
 //! ShareDash Info View — Network Interfaces, Radios & Hardware Inspection
 
-use gpui::*;
 use super::theme;
 use super::widgets::*;
+use gpui::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct InterfaceEntry {
@@ -34,38 +34,23 @@ pub fn render_info_view(
     let mut root = div()
         .flex()
         .flex_col()
-        .size_full()
+        .w_full()
         .bg(theme::bg_base())
-        .gap_4()
+        .gap_5()
         .p_6();
 
-    // ── Header Bar ───────────────────────────────────────────
     root = root.child(
         div()
             .flex()
-            .flex_row()
             .items_center()
             .justify_between()
-            .child(back_button().on_click(on_back))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .child("🔧 Network Interfaces & Hardware"),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .rounded(theme::corner_sm())
-                    .bg(theme::bg_elevated())
-                    .text_size(px(12.0))
-                    .text_color(theme::accent_cyan())
-                    .child(format!("Port :{}", state.server_port)),
-            ),
+            .gap_4()
+            .child(page_heading(
+                "Device & network details",
+                "Check this computer and manage its connections.",
+            ))
+            .child(back_button().on_click(on_back)),
     );
-
     // ── Quick Action Shortcuts ────────────────────────────────
     root = root.child(
         div()
@@ -73,15 +58,15 @@ pub fn render_info_view(
             .flex_row()
             .gap_3()
             .child(
-                action_button("btn-open-wifi", "📶 Open Windows Wi-Fi Settings", false)
+                action_button("btn-open-wifi", "Wi-Fi settings", false)
                     .on_click(on_open_wifi_settings),
             )
             .child(
-                action_button("btn-open-hotspot", "💻 Open Hotspot Settings", false)
+                action_button("btn-open-hotspot", "Hotspot settings", false)
                     .on_click(on_open_hotspot_settings),
             )
             .child(
-                action_button("btn-open-folder", "📁 Open Received Folder", true)
+                action_button("btn-open-folder", "Received files", true)
                     .on_click(on_open_downloads),
             ),
     );
@@ -100,7 +85,7 @@ pub fn render_info_view(
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme::text_primary())
                 .pb_2()
-                .child("Local Hardware Radios"),
+                .child("Hardware"),
         )
         .child(tree_item(
             "Wi-Fi Generation",
@@ -138,7 +123,7 @@ pub fn render_info_view(
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme::text_primary())
                 .pb_2()
-                .child("Network Interfaces & Subnets"),
+                .child("Network interfaces"),
         );
 
     if state.interfaces.is_empty() {
@@ -149,54 +134,58 @@ pub fn render_info_view(
                 .child("Scanning interfaces..."),
         );
     } else {
-        iface_card = iface_card.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .children(state.interfaces.iter().map(|iface| {
-                    div()
-                        .flex()
-                        .flex_row()
-                        .justify_between()
-                        .items_center()
-                        .p_2()
-                        .rounded(theme::corner_sm())
-                        .bg(theme::bg_elevated())
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .text_size(px(13.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(theme::text_primary())
-                                        .child(iface.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(12.0))
-                                        .text_color(theme::accent_cyan())
-                                        .child(format!("IP: {}", iface.ip)),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(if iface.is_usb {
-                                    theme::accent_green()
-                                } else {
-                                    theme::text_secondary()
-                                })
-                                .child(iface.label.clone()),
-                        )
-                })),
-        );
+        iface_card = iface_card.child(div().flex().flex_col().gap_2().children(
+            state.interfaces.iter().map(|iface| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .items_center()
+                    .p_2()
+                    .rounded(theme::corner_sm())
+                    .bg(theme::bg_elevated())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(theme::text_primary())
+                                    .child(iface.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(theme::accent_cyan())
+                                    .child(format!("IP: {}", iface.ip)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if iface.is_usb {
+                                theme::accent_green()
+                            } else {
+                                theme::text_secondary()
+                            })
+                            .child(iface.label.clone()),
+                    )
+            }),
+        ));
     }
     root = root.child(iface_card);
 
-    root
+    root.child(
+        panel()
+            .child(section_title("Storage & service"))
+            .child(tree_item("Received files", &state.download_dir, false))
+            .child(tree_item(
+                "Listening port",
+                &state.server_port.to_string(),
+                true,
+            )),
+    )
 }
-

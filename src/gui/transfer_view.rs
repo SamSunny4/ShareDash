@@ -3,10 +3,10 @@
 //! Visualizes real-time aggregate speed, ETA, channel progress (USB + Wi-Fi),
 //! and completion verification statistics.
 
-use std::path::PathBuf;
-use gpui::*;
 use super::theme;
 use super::widgets::*;
+use gpui::*;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendModeChoice {
@@ -70,91 +70,59 @@ pub fn render_transfer_view(
     on_cancel_transfer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_reset: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Div {
-    let mut root = div()
-        .flex()
-        .flex_col()
-        .size_full()
-        .bg(theme::bg_base())
-        .gap_4()
-        .p_6();
-
-    // ── Header Bar ───────────────────────────────────────────
-    root = root.child(
+    let mut root = div().flex().flex_col().w_full().gap_5().p_6().child(
         div()
             .flex()
-            .flex_row()
             .items_center()
             .justify_between()
-            .child(back_button().on_click(on_back))
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .child("🚀 Multipath File & Folder Transfer"),
-            )
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .rounded(theme::corner_sm())
-                    .bg(theme::bg_elevated())
-                    .text_size(px(12.0))
-                    .text_color(theme::accent_green())
-                    .child(format!("Target: {}", state.target_name)),
-            ),
+            .gap_4()
+            .child(page_heading(
+                "File transfer",
+                &format!("Send to {}", state.target_name),
+            ))
+            .child(back_button().on_click(on_back)),
     );
-
-    // ── Active Channels Summary ───────────────────────────────
-    let usb_label = if state.usb_ready {
-        format!("⚡ USB: Ready ({}:{})", state.usb_target_ip, state.usb_target_port)
+    let usb = if state.usb_ready {
+        format!("{}:{}", state.usb_target_ip, state.usb_target_port)
     } else {
-        "⚡ USB: Offline".to_string()
+        "Not connected".into()
     };
-    let wifi_label = if state.wifi_ready {
-        format!("📶 Wi-Fi: Ready ({}:{})", state.wifi_target_ip, state.wifi_target_port)
+    let wifi = if state.wifi_ready {
+        format!("{}:{}", state.wifi_target_ip, state.wifi_target_port)
     } else {
-        "📶 Wi-Fi: Offline".to_string()
+        "Not connected".into()
     };
-
     root = root.child(
         div()
             .flex()
-            .flex_row()
             .gap_3()
-            .child(channel_badge("⚡", "USB Channel", &usb_label, state.usb_ready))
-            .child(channel_badge("📶", "Wi-Fi Channel", &wifi_label, state.wifi_ready))
+            .child(channel_badge("", "USB connection", &usb, state.usb_ready))
             .child(channel_badge(
-                "🚀",
-                "Multipath",
-                if state.usb_ready && state.wifi_ready {
-                    "Aggregation Active"
-                } else {
-                    "Single Channel"
-                },
-                state.usb_ready && state.wifi_ready,
+                "",
+                "Wi-Fi connection",
+                &wifi,
+                state.wifi_ready,
             )),
     );
 
-    // ── Completed Result View ─────────────────────────────────
-    if let Some(ref result) = state.completed_result {
+    if let Some(result) = &state.completed_result {
         return root
             .child(transfer_result_box(result))
-            .child(
-                div()
-                    .pt_3()
-                    .child(action_button("btn-send-another", "Send Another File", true).on_click(on_reset)),
-            );
+            .child(div().flex().child(
+                action_button("btn-send-another", "Send another file", true).on_click(on_reset),
+            ));
     }
-
-    // ── Live Transfer Progress View (Speedometer & Piece Map) ─
     if state.is_transferring {
-        if let Some(ref telem) = state.live_progress {
-            let total_chunks = telem.channels.iter().map(|c| c.chunks_sent).sum::<usize>() + 16;
+        if let Some(telem) = &state.live_progress {
             let completed_chunks = telem.channels.iter().map(|c| c.chunks_sent).sum::<usize>();
-            let in_flight = 4;
-
-            return root
+            root = root
+                .child(
+                    div()
+                        .text_size(px(16.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(telem.file_name.clone()),
+                )
                 .child(speedometer_panel(
                     telem.speed_mb_s,
                     telem.speed_gbps,
@@ -164,160 +132,151 @@ pub fn render_transfer_view(
                     telem.eta_seconds,
                     &telem.channels,
                 ))
-                .child(piece_map_visualizer(
-                    completed_chunks,
-                    total_chunks.max(completed_chunks),
-                    in_flight,
-                ))
-                .child(
-                    div()
-                        .pt_2()
-                        .child(
-                            action_button("btn-cancel-transfer", "✖ Cancel Transfer", false)
-                                .on_click(on_cancel_transfer),
-                        ),
-                );
+                .child(piece_map_visualizer(telem.progress_pct, completed_chunks));
+        } else {
+            root = root.child(panel()
+                .child(section_title("Preparing your transfer"))
+                .child(status_spin("Preparing the file and opening connections. Folders are packaged as ZIP archives.")));
         }
+        return root.child(
+            div().flex().child(
+                action_button("btn-cancel-transfer", "Cancel transfer", false)
+                    .on_click(on_cancel_transfer),
+            ),
+        );
     }
 
-    // ── File Selection Card ───────────────────────────────────
-    let mut file_card = div()
-        .w_full()
-        .p_4()
-        .rounded(theme::corner_md())
-        .bg(theme::bg_surface())
-        .border_1()
-        .border_color(theme::border_default())
-        .child(
-            div()
-                .text_size(px(14.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(theme::text_primary())
-                .pb_2()
-                .child("1. Select Content to Send"),
-        )
+    let mut file_card = panel()
+        .gap_4()
+        .child(phase_header(1, "Choose what to send"))
         .child(
             div()
                 .flex()
-                .flex_row()
                 .gap_3()
                 .child(
-                    action_button("btn-browse-file", "📄 Browse File...", true)
-                        .on_click(on_browse_file),
+                    action_button("btn-browse-file", "Choose file", true).on_click(on_browse_file),
                 )
                 .child(
-                    action_button("btn-browse-folder", "📦 Browse Folder (Auto-Zip)...", false)
+                    action_button("btn-browse-folder", "Choose folder", false)
                         .on_click(on_browse_folder),
                 ),
         );
-
-    if let Some(ref path) = state.selected_path {
-        let size_mb = state.selected_file_size as f64 / (1024.0 * 1024.0);
+    if let Some(path) = &state.selected_path {
         file_card = file_card.child(
             div()
-                .pt_3()
-                .p_3()
-                .rounded(theme::corner_sm())
-                .bg(theme::bg_elevated())
-                .border_1()
-                .border_color(theme::accent_green())
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_4()
+                .rounded(theme::corner_md())
+                .bg(theme::bg_inset())
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(theme::accent_green())
-                                .child(format!(
-                                    "Selected {}: {}",
-                                    if state.is_directory { "Folder" } else { "File" },
-                                    state.selected_file_name
-                                )),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .text_color(theme::text_secondary())
-                                .child(format!("Path: {}", path.to_string_lossy())),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(theme::text_primary())
-                                .child(format!("Size: {:.2} MB", size_mb)),
-                        ),
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(state.selected_file_name.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme::text_secondary())
+                        .truncate()
+                        .child(path.to_string_lossy().to_string()),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme::accent_cyan())
+                        .child(format!(
+                            "{} · {}",
+                            format_bytes(state.selected_file_size),
+                            if state.is_directory {
+                                "Folder · sent as a ZIP archive"
+                            } else {
+                                "File"
+                            }
+                        )),
                 ),
+        );
+    } else {
+        file_card = file_card.child(
+            div()
+                .text_size(px(13.0))
+                .text_color(theme::text_secondary())
+                .child("Choose a file from this computer, or send a folder as a ZIP archive."),
         );
     }
     root = root.child(file_card);
-
-    // ── Send Mode Selection Card ──────────────────────────────
     if state.selected_path.is_some() {
-        let mode_card = div()
-            .w_full()
-            .p_4()
-            .rounded(theme::corner_md())
-            .bg(theme::bg_surface())
-            .border_1()
-            .border_color(theme::border_default())
-            .child(
-                div()
-                    .text_size(px(14.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme::text_primary())
-                    .pb_2()
-                    .child("2. Select Transport Mode"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap_3()
-                    .child(
-                        action_button(
-                            "btn-mode-usb",
-                            "⚡ USB Only",
-                            state.send_mode == SendModeChoice::UsbOnly,
+        let description = match state.send_mode {
+            SendModeChoice::UsbOnly => "Send through the USB connection.",
+            SendModeChoice::WifiOnly => "Send through the wireless connection.",
+            SendModeChoice::Multipath => "Use available USB and Wi-Fi connections together.",
+        };
+        root = root.child(
+            panel()
+                .child(phase_header(2, "Choose a connection"))
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .child(
+                            action_button(
+                                "btn-mode-usb",
+                                "USB only",
+                                state.send_mode == SendModeChoice::UsbOnly,
+                            )
+                            .on_click(on_set_mode_usb),
                         )
-                        .on_click(on_set_mode_usb),
-                    )
-                    .child(
-                        action_button(
-                            "btn-mode-wifi",
-                            "📶 Wi-Fi Only",
-                            state.send_mode == SendModeChoice::WifiOnly,
+                        .child(
+                            action_button(
+                                "btn-mode-wifi",
+                                "Wi-Fi only",
+                                state.send_mode == SendModeChoice::WifiOnly,
+                            )
+                            .on_click(on_set_mode_wifi),
                         )
-                        .on_click(on_set_mode_wifi),
-                    )
-                    .child(
-                        action_button(
-                            "btn-mode-both",
-                            "🚀 Both (Multipath Aggregation)",
-                            state.send_mode == SendModeChoice::Multipath,
-                        )
-                        .on_click(on_set_mode_multipath),
-                    ),
-            );
-        root = root.child(mode_card);
-
-        // ── Action: Start Transfer ────────────────────────────────
+                        .child(
+                            action_button(
+                                "btn-mode-both",
+                                "USB + Wi-Fi",
+                                state.send_mode == SendModeChoice::Multipath,
+                            )
+                            .on_click(on_set_mode_multipath),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(theme::text_secondary())
+                        .child(description),
+                ),
+        );
         root = root.child(
             div()
-                .pt_2()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
                 .child(
-                    action_button("btn-start-transfer", "🚀 Send Content Now", true)
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(theme::text_muted())
+                        .child("Keep the receiving device connected until the transfer finishes."),
+                )
+                .child(
+                    action_button("btn-start-transfer", "Start transfer  →", true)
                         .on_click(on_start_transfer),
                 ),
         );
     }
-
-    if let Some(ref err) = state.error_message {
-        root = root.child(status_fail(err));
+    if let Some(err) = &state.error_message {
+        root = root.child(
+            panel()
+                .border_color(theme::accent_red())
+                .child(status_fail(err)),
+        );
     }
-
     root
 }
-

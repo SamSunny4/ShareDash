@@ -111,7 +111,8 @@ impl ShareDashApp {
 
         // 1. Telemetry Subscriber for Incoming Transfers
         let mut telemetry_rx = engine.state.telemetry_tx.subscribe();
-        let (tx_telem, mut rx_telem) = futures::channel::mpsc::unbounded::<Option<TransferProgressSnapshot>>();
+        let (tx_telem, mut rx_telem) =
+            futures::channel::mpsc::unbounded::<Option<TransferProgressSnapshot>>();
 
         engine.tokio_handle.spawn(async move {
             while let Ok(telem) = telemetry_rx.recv().await {
@@ -122,21 +123,23 @@ impl ShareDashApp {
                     let channels = if telem.transports.is_empty() {
                         vec![crate::gui::engine::ChannelStats {
                             name: "Fast-Path Multipath".to_string(),
-                            icon: "⚡".to_string(),
+                            icon: "".to_string(),
                             bytes_sent: telem.aggregate.total_bytes_transferred,
                             speed_mb_s: telem.aggregate.aggregate_mbps,
                             speed_gbps: (telem.aggregate.aggregate_mbps * 8.0) / 1000.0,
                             chunks_sent: telem.chunk_states.len(),
                         }]
                     } else {
-                        telem.transports
+                        telem
+                            .transports
                             .iter()
                             .map(|t| {
-                                let icon = if t.transport_kind == crate::protocol::TransportKind::Usb {
-                                    "⚡"
-                                } else {
-                                    "📶"
-                                };
+                                let icon =
+                                    if t.transport_kind == crate::protocol::TransportKind::Usb {
+                                        ""
+                                    } else {
+                                        ""
+                                    };
                                 crate::gui::engine::ChannelStats {
                                     name: t.transport_id.clone(),
                                     icon: icon.to_string(),
@@ -178,7 +181,8 @@ impl ShareDashApp {
                     cx.notify();
                 });
             }
-        }).detach();
+        })
+        .detach();
 
         // 2. Periodic Hardware Status Monitor (every 1.5 seconds)
         let engine_clone = self.engine.clone();
@@ -187,7 +191,10 @@ impl ShareDashApp {
         self.engine.tokio_handle.spawn(async move {
             loop {
                 // If a transfer is actively taking place, pause hardware polling to give 100% USB bandwidth
-                if engine_clone.is_transfer_active.load(std::sync::atomic::Ordering::Relaxed) {
+                if engine_clone
+                    .is_transfer_active
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     continue;
                 }
@@ -205,15 +212,18 @@ impl ShareDashApp {
                     pin_code: p.pin_code,
                 });
 
-                if tx_hw.unbounded_send(HardwareMonitorData {
-                    usb_ok,
-                    usb_name,
-                    rndis_ip,
-                    pc_caps,
-                    wifi_on,
-                    paired,
-                    pending_data,
-                }).is_err() {
+                if tx_hw
+                    .unbounded_send(HardwareMonitorData {
+                        usb_ok,
+                        usb_name,
+                        rndis_ip,
+                        pc_caps,
+                        wifi_on,
+                        paired,
+                        pending_data,
+                    })
+                    .is_err()
+                {
                     break;
                 }
 
@@ -259,7 +269,8 @@ impl ShareDashApp {
                     cx.notify();
                 });
             }
-        }).detach();
+        })
+        .detach();
     }
 
     // ── Navigation Transitions ────────────────────────────────
@@ -278,7 +289,9 @@ impl ShareDashApp {
     fn start_wizard_flow(&mut self, cx: &mut Context<Self>) {
         self.wizard_state.current_phase = 1;
         self.wizard_state.logs.clear();
-        self.wizard_state.logs.push(LogEntry::info("Step 1: Checking USB Fast-Path link..."));
+        self.wizard_state
+            .logs
+            .push(LogEntry::info("Step 1: Checking USB Fast-Path link..."));
 
         let engine = self.engine.clone();
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<WizardEvent>();
@@ -372,7 +385,7 @@ impl ShareDashApp {
                             let verified = engine.verify_and_pair_wifi_with_retries(&target_ip, 54321, 15).await;
                             if verified {
                                 let _ = tx.unbounded_send(WizardEvent::WifiConnected { ip: target_ip.clone() });
-                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("✔ 5GHz Wi-Fi Direct link verified & paired: {}:54321", target_ip))));
+                                let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok(format!("5GHz Wi-Fi Direct link verified & paired: {}:54321", target_ip))));
                                 wifi_connected = true;
                             } else {
                                 let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn(format!("Could not verify link to phone via Wi-Fi ({}:54321).", target_ip))));
@@ -431,9 +444,9 @@ impl ShareDashApp {
                         let _ = tx.unbounded_send(WizardEvent::Phase5UsbConfirmed);
                         let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("USB channel handshake confirmed (Fast-Path Line Speed).")));
                         if wifi_connected {
-                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("🚀 Dual-Channel Multipath (Fast USB + 5GHz Wi-Fi Direct) READY!")));
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Dual-Channel Multipath (Fast USB + 5GHz Wi-Fi Direct) READY!")));
                         } else {
-                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("✔ USB Fast-Path Channel READY to transfer!")));
+                            let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("USB Fast-Path Channel READY to transfer!")));
                         }
                     }
                 }
@@ -454,7 +467,11 @@ impl ShareDashApp {
                         WizardEvent::Log(entry) => {
                             view.wizard_state.logs.push(entry);
                         }
-                        WizardEvent::UsbStatus { connected, name, is_rndis } => {
+                        WizardEvent::UsbStatus {
+                            connected,
+                            name,
+                            is_rndis,
+                        } => {
                             view.wizard_state.usb_connected = connected;
                             view.wizard_state.usb_name = name;
                             view.wizard_state.is_rndis = is_rndis;
@@ -466,7 +483,11 @@ impl ShareDashApp {
                             view.wizard_state.usb_port = port;
                             view.wizard_state.waiting_for_usb = false;
                         }
-                        WizardEvent::CapsSynchronized { phone_wifi_standard, phone_wifi_phy, pc_wifi_on } => {
+                        WizardEvent::CapsSynchronized {
+                            phone_wifi_standard,
+                            phone_wifi_phy,
+                            pc_wifi_on,
+                        } => {
                             view.wizard_state.phone_wifi_standard = phone_wifi_standard;
                             view.wizard_state.phone_wifi_phy = phone_wifi_phy;
                             view.wizard_state.pc_wifi_enabled = pc_wifi_on;
@@ -494,7 +515,8 @@ impl ShareDashApp {
                     cx.notify();
                 });
             }
-        }).detach();
+        })
+        .detach();
     }
 
     // ── PC-to-PC Workflow Automation ──────────────────────────
@@ -502,7 +524,9 @@ impl ShareDashApp {
         self.pc2pc_state.current_phase = 2;
         self.pc2pc_state.is_scanning = true;
         self.pc2pc_state.logs.clear();
-        self.pc2pc_state.logs.push(LogEntry::info("Broadcasting Bluetooth LE beacon & scanning for nearby PCs..."));
+        self.pc2pc_state.logs.push(LogEntry::info(
+            "Broadcasting Bluetooth LE beacon & scanning for nearby PCs...",
+        ));
 
         let engine = self.engine.clone();
         let (tx, rx) = futures::channel::oneshot::channel::<Vec<DiscoveredDevice>>();
@@ -518,11 +542,15 @@ impl ShareDashApp {
                 let _ = this.update(cx, |view, cx| {
                     view.pc2pc_state.is_scanning = false;
                     view.pc2pc_state.discovered_pcs = devices.clone();
-                    view.pc2pc_state.logs.push(LogEntry::ok(format!("Found {} nearby device(s).", devices.len())));
+                    view.pc2pc_state.logs.push(LogEntry::ok(format!(
+                        "Found {} nearby device(s).",
+                        devices.len()
+                    )));
                     cx.notify();
                 });
             }
-        }).detach();
+        })
+        .detach();
     }
 
     // ── Load Network Info View ────────────────────────────────
@@ -546,13 +574,14 @@ impl ShareDashApp {
                         || ip_str.starts_with("192.168.42.");
 
                     let label = if is_usb {
-                        "🔌 USB Tethering".to_string()
+                        "USB Tethering".to_string()
                     } else if ip_str.starts_with("192.168.137.") {
-                        "💻 PC Hotspot Gateway".to_string()
-                    } else if ip_str.starts_with("192.168.43.") || ip_str.starts_with("192.168.49.") {
-                        "📱 Phone Hotspot".to_string()
+                        "PC Hotspot Gateway".to_string()
+                    } else if ip_str.starts_with("192.168.43.") || ip_str.starts_with("192.168.49.")
+                    {
+                        "Phone Hotspot".to_string()
                     } else {
-                        "🏠 LAN".to_string()
+                        "LAN".to_string()
                     };
 
                     ifaces.push(InterfaceEntry {
@@ -591,7 +620,8 @@ impl ShareDashApp {
                     cx.notify();
                 });
             }
-        }).detach();
+        })
+        .detach();
     }
 
     // ── Execute Transfer Action ───────────────────────────────
@@ -646,7 +676,8 @@ impl ShareDashApp {
             }
 
             let (tx, mut rx) = futures::channel::mpsc::unbounded::<TransferProgressSnapshot>();
-            let (result_tx, mut result_rx) = futures::channel::oneshot::channel::<anyhow::Result<TransferResultData>>();
+            let (result_tx, mut result_rx) =
+                futures::channel::oneshot::channel::<anyhow::Result<TransferResultData>>();
 
             let engine_transfer = engine.clone();
             self.engine.tokio_handle.spawn(async move {
@@ -701,15 +732,50 @@ impl Render for ShareDashApp {
             .flex_col()
             .size_full()
             .bg(theme::bg_base())
-            .text_color(theme::text_primary());
+            .text_color(theme::text_primary())
+            .font_family("Segoe UI");
 
         // ── Top Header Banner ─────────────────────────────────
-        root = root.child(banner(&self.home_status.device_name, self.home_status.server_port));
+        root = root.child(banner(
+            &self.home_status.device_name,
+            self.home_status.server_port,
+        ));
+        root = root.child(
+            div()
+                .flex()
+                .flex_shrink_0()
+                .gap_2()
+                .px_6()
+                .pb_3()
+                .bg(theme::bg_surface())
+                .border_b_1()
+                .border_color(theme::border_default())
+                .children(
+                    [
+                        (ActiveView::Home, "nav-home", "Overview"),
+                        (ActiveView::Wizard, "nav-phone", "Connect phone"),
+                        (ActiveView::PcToPc, "nav-pc", "Connect PC"),
+                        (ActiveView::Transfer, "nav-transfer", "Transfer"),
+                        (ActiveView::Info, "nav-info", "Device details"),
+                    ]
+                    .into_iter()
+                    .map(|(view, id, label)| {
+                        nav_button(id, label, self.active_view == view).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                if this.active_view != view {
+                                    this.navigate_to(view, cx);
+                                }
+                            },
+                        ))
+                    }),
+                ),
+        );
 
         // ── Global Incoming Transfer Banner (if active) ───────
         if let Some(ref telem) = self.incoming_transfer {
             root = root.child(
                 div()
+                    .flex_shrink_0()
                     .w_full()
                     .px_4()
                     .py_2()
@@ -733,13 +799,15 @@ impl Render for ShareDashApp {
                                             .text_size(px(14.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(theme::accent_green())
-                                            .child("📥 Receiving:"),
+                                            .child("Receiving:"),
                                     )
                                     .child(
                                         div()
                                             .text_size(px(13.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(theme::text_primary())
+                                            .max_w(px(360.0))
+                                            .truncate()
                                             .child(telem.file_name.clone()),
                                     ),
                             )
@@ -755,7 +823,7 @@ impl Render for ShareDashApp {
                                             .text_size(px(13.0))
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(theme::accent_cyan())
-                                            .child(format!("{:.1} MB/s", telem.speed_mb_s)),
+                                            .child(format!("{:.1} MiB/s", telem.speed_mb_s)),
                                     ),
                             ),
                     ),
@@ -773,10 +841,16 @@ impl Render for ShareDashApp {
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Info, cx)),
                     cx.listener(|_, _, _, _| {
                         let download_dir = std::env::var("USERPROFILE")
-                            .map(|p| PathBuf::from(p).join("Downloads").join("ShareDash_Received"))
+                            .map(|p| {
+                                PathBuf::from(p)
+                                    .join("Downloads")
+                                    .join("ShareDash_Received")
+                            })
                             .unwrap_or_else(|_| PathBuf::from("downloads"));
                         let _ = std::fs::create_dir_all(&download_dir);
-                        let _ = std::process::Command::new("explorer").arg(&download_dir).spawn();
+                        let _ = std::process::Command::new("explorer")
+                            .arg(&download_dir)
+                            .spawn();
                     }),
                     cx.listener(|this, _, _, cx| {
                         // Accept pair
@@ -803,7 +877,9 @@ impl Render for ShareDashApp {
                         // Skip USB to Wireless mode
                         this.wizard_state.waiting_for_usb = false;
                         this.wizard_state.current_phase = 2;
-                        this.wizard_state.logs.push(LogEntry::warn("Switched to Wireless Mode (Wi-Fi Direct)."));
+                        this.wizard_state
+                            .logs
+                            .push(LogEntry::warn("Switched to Wireless Mode (Wi-Fi Direct)."));
                         cx.notify();
                     }),
                     cx.listener(|_, _, _, _| {
@@ -812,7 +888,9 @@ impl Render for ShareDashApp {
                     cx.listener(|this, _, _, cx| {
                         this.wizard_state.current_phase = 5;
                         this.wizard_state.usb_ready = true;
-                        this.wizard_state.logs.push(LogEntry::info("Continuing in High-Speed USB-Only Mode."));
+                        this.wizard_state
+                            .logs
+                            .push(LogEntry::info("Continuing in High-Speed USB-Only Mode."));
                         cx.notify();
                     }),
                     cx.listener(|this, _, _, cx| {
@@ -855,10 +933,12 @@ impl Render for ShareDashApp {
                         this.engine.tokio_handle.spawn(async move {
                             let parts: Vec<&str> = ip_for_tokio.split(':').collect();
                             let target_ip = parts[0].to_string();
-                            let target_port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
+                            let target_port: u16 =
+                                parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
 
                             if engine.http_probe(&target_ip, target_port).await {
-                                let ok = engine.pair_handshake_target(&target_ip, target_port).await;
+                                let ok =
+                                    engine.pair_handshake_target(&target_ip, target_port).await;
                                 let _ = tx.send(ok);
                             } else {
                                 let _ = tx.send(false);
@@ -870,19 +950,26 @@ impl Render for ShareDashApp {
                             let _ = this.update(cx, |view, cx| {
                                 let parts: Vec<&str> = ip_for_ui.split(':').collect();
                                 let target_ip = parts[0].to_string();
-                                let target_port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
+                                let target_port: u16 =
+                                    parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(54321);
                                 if ok {
                                     view.pc2pc_state.current_phase = 5;
                                     view.pc2pc_state.wifi_ready = true;
                                     view.pc2pc_state.target_ip = target_ip.clone();
                                     view.pc2pc_state.target_port = target_port;
-                                    view.pc2pc_state.logs.push(LogEntry::ok(format!("Connected to PC at {}:{}", target_ip, target_port)));
+                                    view.pc2pc_state.logs.push(LogEntry::ok(format!(
+                                        "Connected to PC at {}:{}",
+                                        target_ip, target_port
+                                    )));
                                 } else {
-                                    view.pc2pc_state.logs.push(LogEntry::fail("Pairing handshake rejected or host unreachable."));
+                                    view.pc2pc_state.logs.push(LogEntry::fail(
+                                        "Pairing handshake rejected or host unreachable.",
+                                    ));
                                 }
                                 cx.notify();
                             });
-                        }).detach();
+                        })
+                        .detach();
                     }),
                     cx.listener(|this, _, _, cx| {
                         this.transfer_state.wifi_ready = true;
@@ -909,7 +996,11 @@ impl Render for ShareDashApp {
                         cx.spawn(async move |this, cx| {
                             if let Ok(Some(file)) = rx.await {
                                 let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-                                let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+                                let name = file
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("file")
+                                    .to_string();
                                 let _ = this.update(cx, |view, cx| {
                                     view.transfer_state.selected_path = Some(file);
                                     view.transfer_state.selected_file_name = name;
@@ -919,7 +1010,8 @@ impl Render for ShareDashApp {
                                     cx.notify();
                                 });
                             }
-                        }).detach();
+                        })
+                        .detach();
                     }),
                     cx.listener(|_this, _, _, cx| {
                         // Browse folder via native Windows dialog on a dedicated thread to avoid COM conflicts
@@ -932,7 +1024,11 @@ impl Render for ShareDashApp {
                         cx.spawn(async move |this, cx| {
                             if let Ok(Some(folder)) = rx.await {
                                 let size = crate::gui::engine::get_directory_size(&folder);
-                                let name = folder.file_name().and_then(|n| n.to_str()).unwrap_or("folder").to_string();
+                                let name = folder
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("folder")
+                                    .to_string();
                                 let _ = this.update(cx, |view, cx| {
                                     view.transfer_state.selected_path = Some(folder);
                                     view.transfer_state.selected_file_name = name;
@@ -942,7 +1038,8 @@ impl Render for ShareDashApp {
                                     cx.notify();
                                 });
                             }
-                        }).detach();
+                        })
+                        .detach();
                     }),
                     cx.listener(|this, _, _, cx| {
                         this.transfer_state.send_mode = SendModeChoice::UsbOnly;
@@ -960,7 +1057,10 @@ impl Render for ShareDashApp {
                         this.trigger_start_transfer(cx);
                     }),
                     cx.listener(|this, _, _, cx| {
-                        this.engine.state.active_sender_cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        this.engine
+                            .state
+                            .active_sender_cancel_flag
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
                         this.transfer_state.is_transferring = false;
                         cx.notify();
                     }),
@@ -971,29 +1071,48 @@ impl Render for ShareDashApp {
                     }),
                 )
             }
-            ActiveView::Info => {
-                render_info_view(
-                    &self.info_state,
-                    cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Home, cx)),
-                    cx.listener(|_, _, _, _| {
-                        crate::hotspot::open_windows_wifi_settings();
-                    }),
-                    cx.listener(|_, _, _, _| {
-                        let _ = std::process::Command::new("powershell")
-                            .args(["-NoProfile", "-Command", "Start-Process 'ms-settings:network-mobilehotspot'"])
-                            .spawn();
-                    }),
-                    cx.listener(|_, _, _, _| {
-                        let download_dir = std::env::var("USERPROFILE")
-                            .map(|p| PathBuf::from(p).join("Downloads").join("ShareDash_Received"))
-                            .unwrap_or_else(|_| PathBuf::from("downloads"));
-                        let _ = std::fs::create_dir_all(&download_dir);
-                        let _ = std::process::Command::new("explorer").arg(&download_dir).spawn();
-                    }),
-                )
-            }
+            ActiveView::Info => render_info_view(
+                &self.info_state,
+                cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Home, cx)),
+                cx.listener(|_, _, _, _| {
+                    crate::hotspot::open_windows_wifi_settings();
+                }),
+                cx.listener(|_, _, _, _| {
+                    let _ = std::process::Command::new("powershell")
+                        .args([
+                            "-NoProfile",
+                            "-Command",
+                            "Start-Process 'ms-settings:network-mobilehotspot'",
+                        ])
+                        .spawn();
+                }),
+                cx.listener(|_, _, _, _| {
+                    let download_dir = std::env::var("USERPROFILE")
+                        .map(|p| {
+                            PathBuf::from(p)
+                                .join("Downloads")
+                                .join("ShareDash_Received")
+                        })
+                        .unwrap_or_else(|_| PathBuf::from("downloads"));
+                    let _ = std::fs::create_dir_all(&download_dir);
+                    let _ = std::process::Command::new("explorer")
+                        .arg(&download_dir)
+                        .spawn();
+                }),
+            ),
         };
 
-        root.child(content)
+        root.child(
+            div()
+                .id(SharedString::from(format!(
+                    "view-scroll-{:?}",
+                    self.active_view
+                )))
+                .flex_1()
+                .min_h(px(0.0))
+                .w_full()
+                .overflow_y_scroll()
+                .child(div().w_full().max_w(px(1160.0)).mx_auto().child(content)),
+        )
     }
 }
