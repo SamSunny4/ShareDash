@@ -11,6 +11,8 @@ use super::engine::{DiscoveredDevice, GuiEngine, TransferProgressSnapshot};
 use super::home_view::*;
 use super::info_view::*;
 use super::pc2pc_view::*;
+use super::receive::{download_directory, ReceiveActivity};
+use super::receive_view::render_receive_view;
 use super::theme;
 use super::transfer_view::*;
 use super::widgets::*;
@@ -22,6 +24,7 @@ pub enum ActiveView {
     Wizard,
     PcToPc,
     Transfer,
+    Receive,
     Info,
 }
 
@@ -74,7 +77,7 @@ pub struct ShareDashApp {
     pub pc2pc_state: PcToPcViewState,
     pub transfer_state: TransferViewState,
     pub info_state: InfoViewState,
-    pub incoming_transfer: Option<TransferProgressSnapshot>,
+    receive_activity: ReceiveActivity,
 }
 
 impl ShareDashApp {
@@ -97,7 +100,7 @@ impl ShareDashApp {
             pc2pc_state: PcToPcViewState::default(),
             transfer_state: TransferViewState::default(),
             info_state: InfoViewState::default(),
-            incoming_transfer: None,
+            receive_activity: ReceiveActivity::default(),
         };
 
         // Start background polling and event listeners
@@ -107,84 +110,24 @@ impl ShareDashApp {
     }
 
     fn start_background_monitors(&mut self, cx: &mut Context<Self>) {
-        let engine = self.engine.clone();
-
-        // 1. Telemetry Subscriber for Incoming Transfers
-        let mut telemetry_rx = engine.state.telemetry_tx.subscribe();
-        let (tx_telem, mut rx_telem) =
-            futures::channel::mpsc::unbounded::<Option<TransferProgressSnapshot>>();
-
-        engine.tokio_handle.spawn(async move {
-            while let Ok(telem) = telemetry_rx.recv().await {
-                let is_active = telem.status == "ACTIVE" || telem.status == "VERIFYING";
-                let is_completed = telem.status == "COMPLETED";
-
-                let snapshot = if is_active || is_completed {
-                    let channels = if telem.transports.is_empty() {
-                        vec![crate::gui::engine::ChannelStats {
-                            name: "Fast-Path Multipath".to_string(),
-                            icon: "".to_string(),
-                            bytes_sent: telem.aggregate.total_bytes_transferred,
-                            speed_mb_s: telem.aggregate.aggregate_mbps,
-                            speed_gbps: (telem.aggregate.aggregate_mbps * 8.0) / 1000.0,
-                            chunks_sent: telem.chunk_states.len(),
-                        }]
-                    } else {
-                        telem
-                            .transports
-                            .iter()
-                            .map(|t| {
-                                let icon =
-                                    if t.transport_kind == crate::protocol::TransportKind::Usb {
-                                        ""
-                                    } else {
-                                        ""
-                                    };
-                                crate::gui::engine::ChannelStats {
-                                    name: t.transport_id.clone(),
-                                    icon: icon.to_string(),
-                                    bytes_sent: telem.aggregate.total_bytes_transferred,
-                                    speed_mb_s: t.current_mbps,
-                                    speed_gbps: (t.current_mbps * 8.0) / 1000.0,
-                                    chunks_sent: telem.chunk_states.len(),
-                                }
-                            })
-                            .collect()
-                    };
-
-                    Some(TransferProgressSnapshot {
-                        file_name: telem.title.clone(),
-                        total_bytes: telem.aggregate.total_bytes_expected,
-                        bytes_transferred: telem.aggregate.total_bytes_transferred,
-                        progress_pct: (telem.aggregate.progress_pct / 100.0).clamp(0.0, 1.0),
-                        speed_mb_s: telem.aggregate.aggregate_mbps,
-                        speed_gbps: (telem.aggregate.aggregate_mbps * 8.0) / 1000.0,
-                        eta_seconds: telem.aggregate.eta_seconds as f64,
-                        channels,
-                        status: telem.status.clone(),
-                    })
-                } else {
-                    None
-                };
-
-                let to_send = if is_completed { None } else { snapshot };
-                if tx_telem.unbounded_send(to_send).is_err() {
-                    break;
+        let mut incoming = self.engine.receive_activity.clone();
+        cx.spawn(async move |this, cx| loop {
+            let activity = incoming.borrow_and_update().clone();
+            let updated = this.update(cx, |view, cx| {
+                if activity.files.first().map(|file| file.id)
+                    != view.receive_activity.files.first().map(|file| file.id)
+                {
+                    view.active_view = ActiveView::Receive;
                 }
-            }
-        });
-
-        cx.spawn(async move |this, cx| {
-            while let Some(snap) = rx_telem.next().await {
-                let _ = this.update(cx, |view, cx| {
-                    view.incoming_transfer = snap;
-                    cx.notify();
-                });
+                view.receive_activity = activity;
+                cx.notify();
+            });
+            if updated.is_err() || incoming.changed().await.is_err() {
+                break;
             }
         })
         .detach();
 
-        // 2. Periodic Hardware Status Monitor (every 1.5 seconds)
         let engine_clone = self.engine.clone();
         let (tx_hw, mut rx_hw) = futures::channel::mpsc::unbounded::<HardwareMonitorData>();
 
@@ -205,12 +148,14 @@ impl ShareDashApp {
                 let paired = engine_clone.state.active_paired_peer.lock().clone();
                 let pending = engine_clone.state.pending_pair.lock().clone();
 
-                let pending_data = pending.map(|p| PendingPairData {
-                    initiator_name: p.initiator_name,
-                    initiator_ip: p.initiator_ip,
-                    initiator_port: p.initiator_port,
-                    pin_code: p.pin_code,
-                });
+                let pending_data = pending
+                    .filter(|request| request.status == "PENDING")
+                    .map(|request| PendingPairData {
+                        initiator_name: request.initiator_name,
+                        initiator_ip: request.initiator_ip,
+                        initiator_port: request.initiator_port,
+                        pin_code: request.pin_code,
+                    });
 
                 if tx_hw
                     .unbounded_send(HardwareMonitorData {
@@ -271,6 +216,23 @@ impl ShareDashApp {
             }
         })
         .detach();
+    }
+
+    fn respond_to_pair(&mut self, action: &str, cx: &mut Context<Self>) {
+        use crate::server::api::{respond_to_pair_request, PairRespondRequest};
+
+        let state = self.engine.state.clone();
+        let request = PairRespondRequest {
+            action: action.to_owned(),
+            target_name: None,
+            step: None,
+            target_device_id: None,
+        };
+        self.engine.tokio_handle.spawn(async move {
+            respond_to_pair_request(axum::extract::State(state), axum::Json(request)).await;
+        });
+        self.home_status.pending_pair = None;
+        cx.notify();
     }
 
     // ── Navigation Transitions ────────────────────────────────
@@ -597,9 +559,7 @@ impl ShareDashApp {
             let (adb_ok, model) = engine.check_adb().await;
             let pc_caps = crate::hotspot::detect_pc_wifi_caps().await;
 
-            let download_dir = std::env::var("USERPROFILE")
-                .map(|p| format!("{}\\Downloads\\ShareDash_Received", p))
-                .unwrap_or_else(|_| "downloads".to_string());
+            let download_dir = download_directory().to_string_lossy().into_owned();
 
             let _ = tx.send(InfoViewState {
                 interfaces: ifaces,
@@ -756,6 +716,7 @@ impl Render for ShareDashApp {
                         (ActiveView::Wizard, "nav-phone", "Connect phone"),
                         (ActiveView::PcToPc, "nav-pc", "Connect PC"),
                         (ActiveView::Transfer, "nav-transfer", "Transfer"),
+                        (ActiveView::Receive, "nav-receive", "Receive"),
                         (ActiveView::Info, "nav-info", "Device details"),
                     ]
                     .into_iter()
@@ -771,65 +732,6 @@ impl Render for ShareDashApp {
                 ),
         );
 
-        // ── Global Incoming Transfer Banner (if active) ───────
-        if let Some(ref telem) = self.incoming_transfer {
-            root = root.child(
-                div()
-                    .flex_shrink_0()
-                    .w_full()
-                    .px_4()
-                    .py_2()
-                    .bg(theme::bg_surface())
-                    .border_b_1()
-                    .border_color(theme::accent_green())
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_between()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .text_size(px(14.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme::accent_green())
-                                            .child("Receiving:"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(13.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme::text_primary())
-                                            .max_w(px(360.0))
-                                            .truncate()
-                                            .child(telem.file_name.clone()),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .gap_3()
-                                    .items_center()
-                                    .child(progress_bar(telem.progress_pct, 200.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(13.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme::accent_cyan())
-                                            .child(format!("{:.1} MiB/s", telem.speed_mb_s)),
-                                    ),
-                            ),
-                    ),
-            );
-        }
-
         // ── Active View Dispatcher ────────────────────────────
         let content = match self.active_view {
             ActiveView::Home => {
@@ -839,34 +741,9 @@ impl Render for ShareDashApp {
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::PcToPc, cx)),
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Transfer, cx)),
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Info, cx)),
-                    cx.listener(|_, _, _, _| {
-                        let download_dir = std::env::var("USERPROFILE")
-                            .map(|p| {
-                                PathBuf::from(p)
-                                    .join("Downloads")
-                                    .join("ShareDash_Received")
-                            })
-                            .unwrap_or_else(|_| PathBuf::from("downloads"));
-                        let _ = std::fs::create_dir_all(&download_dir);
-                        let _ = std::process::Command::new("explorer")
-                            .arg(&download_dir)
-                            .spawn();
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        // Accept pair
-                        if let Some(req) = this.engine.state.pending_pair.lock().clone() {
-                            *this.engine.state.active_paired_peer.lock() = Some(req.initiator_name);
-                            *this.engine.state.pending_pair.lock() = None;
-                        }
-                        this.home_status.pending_pair = None;
-                        cx.notify();
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        // Reject pair
-                        *this.engine.state.pending_pair.lock() = None;
-                        this.home_status.pending_pair = None;
-                        cx.notify();
-                    }),
+                    cx.listener(|_, _, _, _| open_download_directory()),
+                    cx.listener(|this, _, _, cx| this.respond_to_pair("ACCEPT", cx)),
+                    cx.listener(|this, _, _, cx| this.respond_to_pair("REJECT", cx)),
                 )
             }
             ActiveView::Wizard => {
@@ -1071,6 +948,11 @@ impl Render for ShareDashApp {
                     }),
                 )
             }
+            ActiveView::Receive => render_receive_view(
+                &self.receive_activity,
+                self.home_status.server_port,
+                cx.listener(|_, _, _, _| open_download_directory()),
+            ),
             ActiveView::Info => render_info_view(
                 &self.info_state,
                 cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Home, cx)),
@@ -1087,17 +969,7 @@ impl Render for ShareDashApp {
                         .spawn();
                 }),
                 cx.listener(|_, _, _, _| {
-                    let download_dir = std::env::var("USERPROFILE")
-                        .map(|p| {
-                            PathBuf::from(p)
-                                .join("Downloads")
-                                .join("ShareDash_Received")
-                        })
-                        .unwrap_or_else(|_| PathBuf::from("downloads"));
-                    let _ = std::fs::create_dir_all(&download_dir);
-                    let _ = std::process::Command::new("explorer")
-                        .arg(&download_dir)
-                        .spawn();
+                    open_download_directory();
                 }),
             ),
         };
@@ -1114,5 +986,14 @@ impl Render for ShareDashApp {
                 .overflow_y_scroll()
                 .child(div().w_full().max_w(px(1160.0)).mx_auto().child(content)),
         )
+    }
+}
+
+fn open_download_directory() {
+    let path = download_directory();
+    if let Err(error) = std::fs::create_dir_all(&path)
+        .and_then(|()| std::process::Command::new("explorer").arg(path).spawn())
+    {
+        tracing::warn!("Could not open the received files folder: {error}");
     }
 }

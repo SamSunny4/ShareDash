@@ -7,6 +7,9 @@ pub mod pc2pc_view;
 pub mod transfer_view;
 pub mod info_view;
 pub mod app;
+mod adb;
+mod receive;
+mod receive_view;
 
 pub use app::ShareDashApp;
 pub use engine::GuiEngine;

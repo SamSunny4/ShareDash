@@ -4,18 +4,21 @@
 //! and provides all transfer & wizard capabilities for the GUI without touching CLI code.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::{
+    extract::{ConnectInfo, State},
+    response::IntoResponse,
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use parking_lot::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
+use super::{adb, receive};
 use crate::discovery::{BleDiscovery, PairingManager, PeerDiscovery, WifiCapsInfo};
 use crate::hotspot;
 use crate::scheduler::metrics::SchedulerTelemetry;
@@ -24,9 +27,9 @@ use crate::server::api::{
     create_pair_session, detect_transports, get_connection_bridges, get_device_info,
     get_discovered_peers, get_pairing_status, get_pending_pair_request, get_wifi_caps_handler,
     handle_incoming_pair_request, handle_start_hotspot, handle_wifi_connect, list_transfers,
-    open_received_folder, open_windows_hotspot_settings, prepare_transfer, receive_transfer_chunk,
+    open_received_folder, open_windows_hotspot_settings, prepare_transfer,
     respond_to_pair_request, start_benchmark_transfer, upload_and_transfer_files, verify_pair_pin,
-    AppState,
+    AppState, IncomingPairRequest,
 };
 use crate::server::ws_telemetry::ws_telemetry_handler;
 use crate::storage::manifest_db::ManifestDb;
@@ -70,12 +73,16 @@ pub struct GuiEngine {
     pub state: AppState,
     pub tokio_handle: tokio::runtime::Handle,
     pub is_transfer_active: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) receive_activity: tokio::sync::watch::Receiver<receive::ReceiveActivity>,
     adb_model_cache: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl GuiEngine {
     /// Initialize the background engine (HTTP server, discovery, telemetry)
     pub async fn start(port: u16, name: String, db_path: PathBuf) -> anyhow::Result<Self> {
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let port = listener.local_addr()?.port();
         let (telemetry_tx, _) = tokio::sync::broadcast::channel::<SchedulerTelemetry>(512);
         let is_transfer_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let adb_model_cache = Arc::new(Mutex::new(HashMap::new()));
@@ -119,49 +126,6 @@ impl GuiEngine {
             tracing::warn!("Could not start BLE discovery: {}", e);
         }
 
-        // Maintain ADB reverse port 54325 for connected USB Android devices
-        let adb_server_port = port;
-        let is_transfer_active_bg = is_transfer_active.clone();
-        tokio::spawn(async move {
-            let mut last_configured_serial = String::new();
-            loop {
-                // If a transfer is actively taking place, pause ADB background commands to avoid USB bus contention
-                if is_transfer_active_bg.load(std::sync::atomic::Ordering::Relaxed) {
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
-                    continue;
-                }
-
-                if let Ok(output) = tokio::process::Command::new("adb").arg("devices").output().await {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    let mut current_serial = None;
-                    for line in text.lines().skip(1) {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() && trimmed.ends_with("device") {
-                            current_serial = trimmed.split_whitespace().next().map(|s| s.to_string());
-                            break;
-                        }
-                    }
-
-                    if let Some(serial) = current_serial {
-                        if last_configured_serial != serial {
-                            let _ = tokio::process::Command::new("adb")
-                                .args(["reverse", "tcp:54325", &format!("tcp:{}", adb_server_port)])
-                                .output()
-                                .await;
-                            let _ = tokio::process::Command::new("adb")
-                                .args(["forward", "tcp:54325", "tcp:54321"])
-                                .output()
-                                .await;
-                            last_configured_serial = serial;
-                        }
-                    } else {
-                        last_configured_serial.clear();
-                    }
-                }
-                tokio::time::sleep(Duration::from_secs(3)).await;
-            }
-        });
-
         let state = AppState {
             device_id,
             device_name: name,
@@ -183,6 +147,16 @@ impl GuiEngine {
             .allow_methods(Any)
             .allow_headers(Any);
 
+        let (incoming_tx, incoming_rx) = tokio::sync::broadcast::channel(512);
+        let (activity_tx, receive_activity) =
+            tokio::sync::watch::channel(receive::ReceiveActivity::default());
+        tokio::spawn(receive::monitor(incoming_rx, activity_tx, telemetry_tx.clone()));
+        let receive_state = AppState {
+            telemetry_tx: incoming_tx,
+            ..state.clone()
+        };
+        let chunk_state = receive_state.clone();
+        let chunk_receiver = Arc::new(receive::ChunkReceiver::default());
         let ws_telemetry_tx = telemetry_tx.clone();
         let app = Router::new()
             .route("/api/v1/info", get(get_device_info))
@@ -191,7 +165,7 @@ impl GuiEngine {
             .route("/api/v1/transports/detect", get(detect_transports))
             .route("/api/v1/pair/create", post(create_pair_session))
             .route("/api/v1/pair/verify", post(verify_pair_pin))
-            .route("/api/v1/pair/request", post(handle_incoming_pair_request))
+            .route("/api/v1/pair/request", post(incoming_pair_request))
             .route("/api/v1/pair/incoming", get(get_pending_pair_request))
             .route("/api/v1/pair/respond", post(respond_to_pair_request))
             .route("/api/v1/pair/confirm", post(confirm_pair_session))
@@ -203,8 +177,16 @@ impl GuiEngine {
             .route("/api/v1/hotspot/start", post(handle_start_hotspot))
             .route("/api/v1/hotspot/open-settings", post(open_windows_hotspot_settings))
             .route("/api/v1/transfers", get(list_transfers))
-            .route("/api/v1/transfers/chunk", post(receive_transfer_chunk))
-            .route("/api/v1/transfers/send", post(upload_and_transfer_files))
+            .route(
+                "/api/v1/transfers/chunk",
+                post(move |headers, body| async move {
+                    chunk_receiver.receive(chunk_state, headers, body).await
+                }),
+            )
+            .route(
+                "/api/v1/transfers/send",
+                post(upload_and_transfer_files).with_state(receive_state),
+            )
             .route("/api/v1/transfers/prepare", post(prepare_transfer))
             .route("/api/v1/transfers/:id/cancel", post(cancel_transfer))
             .route("/api/v1/transfers/cancel", post(cancel_all_active_transfers))
@@ -217,11 +199,36 @@ impl GuiEngine {
             .layer(axum::extract::DefaultBodyLimit::disable())
             .with_state(state.clone());
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-
         tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
+            let service = app.into_make_service_with_connect_info::<SocketAddr>();
+            if let Err(error) = axum::serve(listener, service).await {
+                tracing::error!("GUI HTTP listener stopped: {error}");
+            }
+        });
+
+        let transfer_active = is_transfer_active.clone();
+        tokio::spawn(async move {
+            let mut adb_path = None;
+            let mut interval = tokio::time::interval(Duration::from_secs(3));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                if transfer_active.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
+                if adb_path.is_none() {
+                    adb_path = adb::find().await;
+                }
+                if let Some(path) = &adb_path {
+                    let devices = adb::devices(path).await;
+                    for serial in &devices {
+                        adb::ensure_reverse(path, serial, port).await;
+                    }
+                    if let Some(serial) = devices.first() {
+                        adb::ensure_forward(path, serial).await;
+                    }
+                }
+            }
         });
 
         // Clean up any stale temporary Wi-Fi profiles
@@ -231,6 +238,7 @@ impl GuiEngine {
             state,
             tokio_handle: tokio::runtime::Handle::current(),
             is_transfer_active,
+            receive_activity,
             adb_model_cache,
         })
     }
@@ -279,94 +287,47 @@ impl GuiEngine {
     }
 
     pub async fn check_adb(&self) -> (bool, Option<String>) {
-        if let Some(adb_path) = self.find_adb() {
-            if let Ok(output) = tokio::process::Command::new(&adb_path)
-                .arg("devices")
-                .output()
+        let Some(path) = adb::find().await else {
+            return (false, None);
+        };
+        let devices = adb::devices(&path).await;
+        let Some(serial) = devices.first() else {
+            return (false, None);
+        };
+
+        let cached_model = self.adb_model_cache.lock().get(serial).cloned();
+        let model = if let Some(model) = cached_model {
+            model
+        } else {
+            let model = adb::run_on_device(&path, serial, &["shell", "getprop", "ro.product.model"])
                 .await
-            {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines().skip(1) {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() && trimmed.ends_with("device") {
-                        let serial = trimmed.split_whitespace().next().unwrap_or("Android");
-
-                        // Check model cache first to avoid running `adb shell getprop` every 1.5s
-                        let cached_model = {
-                            let cache = self.adb_model_cache.lock();
-                            cache.get(serial).cloned()
-                        };
-
-                        let model = if let Some(m) = cached_model {
-                            Some(m)
-                        } else {
-                            let m = tokio::process::Command::new(&adb_path)
-                                .args(["shell", "getprop", "ro.product.model"])
-                                .output()
-                                .await
-                                .ok()
-                                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                                .filter(|s| !s.is_empty());
-                            if let Some(ref m_val) = m {
-                                self.adb_model_cache.lock().insert(serial.to_string(), m_val.clone());
-                            }
-                            m
-                        };
-
-                        let display_name = model
-                            .map(|m| format!("{} ({})", m, serial))
-                            .unwrap_or_else(|| format!("Android Device ({})", serial));
-
-                        return (true, Some(display_name));
-                    }
-                }
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                .filter(|model| !model.is_empty());
+            if let Some(model) = &model {
+                self.adb_model_cache.lock().insert(serial.clone(), model.clone());
             }
-        }
-        (false, None)
-    }
-
-    pub fn find_adb(&self) -> Option<String> {
-        let candidates = [
-            format!(
-                "{}\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
-                std::env::var("USERPROFILE").unwrap_or_default()
-            ),
-            "adb.exe".to_string(),
-            "adb".to_string(),
-        ];
-
-        for candidate in &candidates {
-            if let Ok(output) = std::process::Command::new(candidate).arg("version").output() {
-                if output.status.success() {
-                    return Some(candidate.clone());
-                }
-            }
-        }
-        None
+            model.unwrap_or_else(|| "Android Device".into())
+        };
+        (true, Some(format!("{model} ({serial})")))
     }
 
     pub async fn setup_adb_forward(&self) -> bool {
-        if let Some(adb_path) = self.find_adb() {
-            let fwd = tokio::process::Command::new(&adb_path)
-                .args(["forward", "tcp:54325", "tcp:54321"])
-                .output()
-                .await;
-            let _ = tokio::process::Command::new(&adb_path)
-                .args(["reverse", "tcp:54321", "tcp:54321"])
-                .output()
-                .await;
-            let _ = tokio::process::Command::new(&adb_path)
-                .args(["reverse", "tcp:54325", "tcp:54321"])
-                .output()
-                .await;
-            let _ = tokio::process::Command::new(&adb_path)
-                .args(["shell", "am", "start", "-n", "com.sharedash.app/.MainActivity"])
-                .output()
-                .await;
-            fwd.is_ok()
-        } else {
-            false
-        }
+        let Some(path) = adb::find().await else {
+            return false;
+        };
+        let devices = adb::devices(&path).await;
+        let Some(serial) = devices.first() else {
+            return false;
+        };
+        adb::ensure_reverse(&path, serial, self.state.server_port).await;
+        let forwarded = adb::ensure_forward(&path, serial).await;
+        adb::run_on_device(
+            &path,
+            serial,
+            &["shell", "am", "start", "-n", "com.sharedash.app/.MainActivity"],
+        )
+        .await;
+        forwarded
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -420,18 +381,14 @@ impl GuiEngine {
         }
 
         // ADB broadcast intent fallback
-        if let Some(adb_path) = self.find_adb() {
-            let res = tokio::process::Command::new(&adb_path)
-                .args([
+        if let Some(path) = adb::find().await {
+            if let Some(serial) = adb::devices(&path).await.first() {
+                return adb::run_on_device(&path, serial, &[
                     "shell", "am", "broadcast",
                     "-a", "com.sharedash.app.WIFI_CONNECT",
                     "--es", "ssid", ssid,
                     "--es", "password", password,
-                ])
-                .output()
-                .await;
-            if res.is_ok() {
-                return true;
+                ]).await.is_some();
             }
         }
 
@@ -853,6 +810,23 @@ impl GuiEngine {
             integrity_ok: all_ok,
         })
     }
+}
+
+async fn incoming_pair_request(
+    State(state): State<AppState>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+    Json(mut request): Json<IncomingPairRequest>,
+) -> impl IntoResponse {
+    if !remote.ip().is_loopback() {
+        request.initiator_ip = remote.ip().to_string();
+    } else if matches!(request.initiator_port, 0 | adb::PHONE_PORT)
+        && state.server_port != adb::BRIDGE_PORT
+    {
+        // A request through ADB reverse arrives from localhost. Its reply uses ADB forward.
+        request.initiator_ip = Ipv4Addr::LOCALHOST.to_string();
+        request.initiator_port = adb::BRIDGE_PORT;
+    }
+    handle_incoming_pair_request(State(state), Json(request)).await
 }
 
 // ═══════════════════════════════════════════════════════════
