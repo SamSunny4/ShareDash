@@ -481,13 +481,13 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Prioritize USB Fast-Path",
+                            text = "Prefer USB",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Auto-connects to USB cable tethering when available",
+                            text = "Auto-connect to a PC over USB tethering and prefer USB for single-link transfers",
                             fontSize = 11.sp,
                             color = TextMuted
                         )
@@ -522,7 +522,7 @@ fun SettingsScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Forces high-bandwidth 5GHz direct hotspots for wireless speed",
+                            text = "Try 5 GHz first when creating a hotspot. Other bands are available as a fallback.",
                             fontSize = 11.sp,
                             color = TextMuted
                         )
@@ -773,7 +773,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Multipath USB 3.x + 5GHz Wi-Fi High-Throughput Transfer Engine.\nZero cloud telemetry, peer-to-peer authenticated.",
+                    text = "Send and receive files over local USB and Wi-Fi connections.",
                     fontSize = 11.sp,
                     color = TextMuted,
                     textAlign = TextAlign.Center,

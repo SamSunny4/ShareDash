@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
@@ -52,8 +53,6 @@ import androidx.lifecycle.lifecycleScope
 import com.sharedash.app.discovery.HotspotManager
 import com.sharedash.app.discovery.HotspotState
 import com.sharedash.app.discovery.UdpDiscoveryManager
-import com.sharedash.app.model.ChunkState
-import com.sharedash.app.model.ChunkVisualItem
 import com.sharedash.app.model.DiscoveredPeer
 import com.sharedash.app.model.Protocol
 import com.sharedash.app.model.SchedulerTelemetry
@@ -63,18 +62,13 @@ import com.sharedash.app.service.TransferForegroundService
 import com.sharedash.app.transport.AndroidTransportManager
 import com.sharedash.app.ui.components.BottomPillBar
 import com.sharedash.app.ui.components.NavTab
-import com.sharedash.app.ui.components.WirelessWarningDialog
-import com.sharedash.app.ui.components.WifiDisconnectPromptDialog
-import com.sharedash.app.ui.screens.ConnectedScreen
-import com.sharedash.app.ui.screens.DiscoveryScreen
 import com.sharedash.app.ui.screens.HomeScreen
-import com.sharedash.app.ui.screens.PairingScreen
 import com.sharedash.app.ui.screens.SettingsScreen
 import com.sharedash.app.ui.screens.TransferHistoryScreen
 import com.sharedash.app.ui.screens.TransferScreen
-import com.sharedash.app.ui.screens.UsbFirstScreen
 import com.sharedash.app.storage.SettingsManager
 import com.sharedash.app.storage.TransferHistoryManager
+import com.sharedash.app.model.formatTransferSpeed
 import com.sharedash.app.model.TransferRecord
 import com.sharedash.app.model.TransferDirection
 import com.sharedash.app.model.TransferStatus
@@ -102,7 +96,10 @@ data class TransportEndpoint(
     val ip: String,
     val port: Int,
     val name: String,
-    val kind: TransportKind
+    val kind: TransportKind,
+    val deviceId: String,
+    val deviceName: String,
+    val osName: String
 )
 
 private enum class PostResult {
@@ -131,50 +128,7 @@ class MainActivity : ComponentActivity() {
     private val _isUsbTetheringActive = MutableStateFlow(false)
     val isUsbTetheringActive: StateFlow<Boolean> = _isUsbTetheringActive
 
-    private val _isExternalWifiConnected = MutableStateFlow(false)
-    val isExternalWifiConnected: StateFlow<Boolean> = _isExternalWifiConnected
-
-    private val _connectedWifiSsid = MutableStateFlow<String?>(null)
-    val connectedWifiSsid: StateFlow<String?> = _connectedWifiSsid
-
-    fun checkExternalWifiState() {
-        try {
-            val connected = hotspotManager.isConnectedToExternalWifi()
-            _isExternalWifiConnected.value = connected
-            _connectedWifiSsid.value = if (connected) hotspotManager.getConnectedWifiSsid() else null
-        } catch (_: Exception) {}
-    }
-
-    fun openWifiDisconnectPanel() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                try {
-                    val panelIntent = Intent(android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    startActivity(panelIntent)
-                    return
-                } catch (_: Exception) {
-                    val panelWifiIntent = Intent(android.provider.Settings.Panel.ACTION_WIFI).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    startActivity(panelWifiIntent)
-                    return
-                }
-            }
-        } catch (_: Exception) {}
-
-        try {
-            val settingsIntent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivity(settingsIntent)
-        } catch (_: Exception) {
-            Toast.makeText(this, "Please open Wi-Fi settings to disconnect", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val selectedUris = mutableListOf<Uri>()
+    private var pendingFiles by mutableStateOf(emptyList<Uri>())
 
     fun openDownloadsFolder() {
         try {
@@ -198,19 +152,11 @@ class MainActivity : ComponentActivity() {
 
             val hasUsbNet = hasUsbNetworkInterface()
             val isPlugged = plugged == android.os.BatteryManager.BATTERY_PLUGGED_USB || 
-                            plugged == android.os.BatteryManager.BATTERY_PLUGGED_AC ||
                             hasUsbDev ||
                             hasUsbNet
             _isUsbCablePlugged.value = isPlugged
 
-            val ips = udpManager.getLocalIpAddresses()
-            val (usbPrefixes, wifiPrefixes) = udpManager.getInterfaceSubnetPrefixes()
-            val isTether = hasUsbNet || ips.any { ip ->
-                usbPrefixes.any { ip.startsWith("$it.") } ||
-                ip.startsWith("192.168.42.") || ip.startsWith("192.168.44.") ||
-                (ip.startsWith("10.") && !wifiPrefixes.any { ip.startsWith("$it.") })
-            }
-            _isUsbTetheringActive.value = isTether
+            _isUsbTetheringActive.value = hasUsbNet
         } catch (_: Exception) {}
     }
 
@@ -250,10 +196,12 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            selectedUris.clear()
-            selectedUris.addAll(uris)
             onFilesPickedCallback?.invoke(uris)
         }
+    }
+
+    private val filteredPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) onFilesPickedCallback?.invoke(uris)
     }
 
     private val folderPickerLauncher = registerForActivityResult(
@@ -271,8 +219,6 @@ class MainActivity : ComponentActivity() {
                 val uris = collectFilesFromTree(treeUri)
                 withContext(Dispatchers.Main) {
                     if (uris.isNotEmpty()) {
-                        selectedUris.clear()
-                        selectedUris.addAll(uris)
                         onFilesPickedCallback?.invoke(uris)
                     } else {
                         Toast.makeText(this@MainActivity, "No files found in selected folder", Toast.LENGTH_SHORT).show()
@@ -333,8 +279,7 @@ class MainActivity : ComponentActivity() {
         settingsManager = SettingsManager.getInstance(this)
         historyManager = TransferHistoryManager.getInstance(this)
 
-        val myFriendlyName = settingsManager.deviceName
-        udpManager = UdpDiscoveryManager(this, myFriendlyName)
+        udpManager = UdpDiscoveryManager(this)
         hotspotManager = HotspotManager(this)
 
         // Eagerly start Android HTTP Server on port 54321 for symmetric discovery and pairing
@@ -344,13 +289,7 @@ class MainActivity : ComponentActivity() {
             onIncomingPairRequest = { id, name, ip, pin, ver -> onIncomingPairCallback?.invoke(id, name, ip, pin, ver) },
             onPairAccepted = { id, name -> onPairAcceptedCallback?.invoke(id, name) },
             onPairConfirmed = { onPairConfirmedCallback?.invoke() },
-            onFileReceived = { fileName, bytes ->
-                com.sharedash.app.service.TransferForegroundService.complete(this@MainActivity, fileName)
-                lifecycleScope.launch(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Received $fileName ($bytes bytes) in Downloads/ShareDash", Toast.LENGTH_LONG).show()
-                }
-                onFileReceivedCallback?.invoke(fileName, bytes)
-            }
+            onFileReceived = { fileName, bytes -> onFileReceivedCallback?.invoke(fileName, bytes) }
         )
         var lastNotificationTimeMs = 0L
         httpServer?.onTransferProgress = { fileName, bytesRecv, totalBytes, speedMbps ->
@@ -358,9 +297,7 @@ class MainActivity : ComponentActivity() {
             if (now - lastNotificationTimeMs >= 300L || (totalBytes > 0 && bytesRecv >= totalBytes)) {
                 lastNotificationTimeMs = now
                 val pct = if (totalBytes > 0) ((bytesRecv * 100) / totalBytes).toInt() else 0
-                val speedText = "%.1f MB/s · %d%% (%d MB / %d MB)".format(
-                    speedMbps, pct, bytesRecv / (1024 * 1024), totalBytes / (1024 * 1024)
-                )
+                val speedText = "${formatTransferSpeed(speedMbps)} · $pct%"
                 com.sharedash.app.service.TransferForegroundService.updateProgress(
                     this@MainActivity, fileName, pct, speedText
                 )
@@ -387,8 +324,6 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         checkAndRequestPermissions()
         checkUsbState()
-        ensureWifiEnabled()
-        checkExternalWifiState()
 
         val usbFilter = android.content.IntentFilter().apply {
             addAction("android.hardware.usb.action.USB_DEVICE_ATTACHED")
@@ -418,7 +353,6 @@ class MainActivity : ComponentActivity() {
                 var currentNavTab by remember { mutableStateOf(NavTab.HOME) }
                 var activeTarget by remember { mutableStateOf<DiscoveredPeer?>(null) }
                 var activeTelemetry by remember { mutableStateOf<SchedulerTelemetry?>(null) }
-                var isWirelessWarningDialogOpen by remember { mutableStateOf(false) }
 
                 val hasActiveTransfer = activeTelemetry != null &&
                     activeTelemetry?.status != "COMPLETED" &&
@@ -427,15 +361,16 @@ class MainActivity : ComponentActivity() {
 
                 val isUsbCablePluggedState by isUsbCablePlugged.collectAsState()
                 val isUsbTetheringActiveState by isUsbTetheringActive.collectAsState()
-                val isExternalWifiConnectedState by isExternalWifiConnected.collectAsState()
-                val connectedWifiSsidState by connectedWifiSsid.collectAsState()
-                var hasDismissedWifiPromptThisSession by remember { mutableStateOf(false) }
                 val deviceNameState by settingsManager.deviceNameFlow.collectAsState()
                 val connectionModeState by settingsManager.connectionModeFlow.collectAsState()
                 val preferUsbState by settingsManager.preferUsbFlow.collectAsState()
                 val prefer5GHzState by settingsManager.prefer5GHzFlow.collectAsState()
                 val serverPortState by settingsManager.serverPortFlow.collectAsState()
                 val historyRecordsState by historyManager.historyFlow.collectAsState()
+
+                androidx.activity.compose.BackHandler(enabled = currentNavTab != NavTab.HOME && pendingFiles.isEmpty()) {
+                    currentNavTab = NavTab.HOME
+                }
 
                 val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator() }
 
@@ -445,36 +380,16 @@ class MainActivity : ComponentActivity() {
                 // Auto-enter connected state when USB is detected
                 onUsbConnectedCallback = {
                     lifecycleScope.launch(Dispatchers.Main) {
-                        if (activeTarget == null) {
-                            val isPhoneMode = connectionModeState == SettingsManager.MODE_PHONE_TO_PHONE
-                            val verifiedEndpoint = withContext(Dispatchers.IO) {
-                                delay(350)
-                                resolveBestTargetEndpoint(
-                                    DiscoveredPeer(
-                                        deviceId = if (isPhoneMode) "usb-phone" else "usb-pc",
-                                        friendlyName = if (isPhoneMode) "Android Phone" else "ShareDash PC",
-                                        osName = if (isPhoneMode) "Android" else "Windows",
-                                        ipAddress = "192.168.42.1",
-                                        port = 54321
-                                    )
-                                )
-                            }
-                            if (verifiedEndpoint != null) {
-                                delay(400)
-                                delay(700)
-
-                                val detectedName = if (isPhoneMode) "Nearby Android Phone" else "ShareDash PC"
-                                activeTarget = DiscoveredPeer(
-                                    deviceId = if (isPhoneMode) "usb-phone" else "usb-pc",
-                                    friendlyName = detectedName,
-                                    osName = if (isPhoneMode) "Android" else "Windows",
-                                    ipAddress = verifiedEndpoint.first,
-                                    port = verifiedEndpoint.second,
-                                    supportedBridges = listOf("USB Fast-Path", "Wi-Fi Direct", "LAN"),
-                                    isCompatible = true
-                                )
-                                isWirelessWarningDialogOpen = false
-                                Toast.makeText(this@MainActivity, "Connected to $detectedName via USB!", Toast.LENGTH_SHORT).show()
+                        if (activeTarget == null && settingsManager.preferUsb &&
+                            connectionModeState == SettingsManager.MODE_PHONE_TO_PC) {
+                            val endpoint = resolveMultipathEndpoints(DiscoveredPeer(
+                                deviceId = "usb-pc", friendlyName = "PC", osName = "Windows",
+                                ipAddress = "192.168.42.1", port = 54321
+                            )).firstOrNull { it.kind == TransportKind.USB }
+                            if (endpoint != null && activeTarget == null && settingsManager.preferUsb &&
+                                settingsManager.connectionMode == SettingsManager.MODE_PHONE_TO_PC) {
+                                activeTarget = DiscoveredPeer(endpoint.deviceId, endpoint.deviceName, endpoint.osName,
+                                    ipAddress = endpoint.ip, port = endpoint.port)
                             }
                         }
                     }
@@ -482,12 +397,15 @@ class MainActivity : ComponentActivity() {
 
                 onIncomingPairCallback = { initiatorId, initiatorName, initiatorIp, pin, appVer ->
                     lifecycleScope.launch(Dispatchers.Main) {
-                        delay(350)
+                        if (hasActiveTransfer && activeTarget?.deviceId != initiatorId) {
+                            pairingCoordinator.respondToPairRequest(initiatorIp, 54321, false)
+                            return@launch
+                        }
+                        httpServer?.activePairedPeerName = initiatorName
+                        httpServer?.pendingPairRequest = null
                         pairingCoordinator.respondToPairRequest(initiatorIp, 54321, true)
-                        delay(400)
-                        delay(700)
 
-                        val isInitiatorPc = initiatorName.contains("PC", ignoreCase = true) || initiatorName.contains("Windows", ignoreCase = true)
+                        val isInitiatorPc = !initiatorId.startsWith("android-")
                         activeTarget = DiscoveredPeer(
                             deviceId = initiatorId,
                             friendlyName = initiatorName,
@@ -502,134 +420,64 @@ class MainActivity : ComponentActivity() {
 
                 onPairAcceptedCallback = { targetId, targetName ->
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Securely Connected to $targetName (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "Connected to $targetName", Toast.LENGTH_SHORT).show()
                     }
                 }
 
                 onPairConfirmedCallback = {
                     lifecycleScope.launch(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Securely Connected (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "Device connected", Toast.LENGTH_SHORT).show()
                     }
                 }
 
-                var lastRxUiMs = 0L
+                val receiving = remember { mutableMapOf<String, SchedulerTelemetry>() }
                 onTransferProgressCallback = { fileName, bytesRecv, totalBytes, speedMbps ->
-                    val now = System.currentTimeMillis()
-                    val isDone = bytesRecv >= totalBytes && totalBytes > 0
-                    if (now - lastRxUiMs >= 30L || isDone) {
-                        lastRxUiMs = now
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            val pct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f
-                            val completedChunks = (pct * 64).toInt()
-
-                            val isUsb = isUsbCablePluggedState || isUsbTetheringActiveState
-                            val chunkList = (0 until 64).map { idx ->
-                                val state = when {
-                                    idx < completedChunks -> com.sharedash.app.model.ChunkState.COMPLETED
-                                    idx == completedChunks -> com.sharedash.app.model.ChunkState.IN_FLIGHT
-                                    else -> com.sharedash.app.model.ChunkState.PENDING
-                                }
-                                val transportBadge = if (isUsb) {
-                                    if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
-                                } else {
-                                    "5GHz Wi-Fi"
-                                }
-                                com.sharedash.app.model.ChunkVisualItem(chunkId = idx, state = state, transportName = transportBadge)
-                            }
-
-                            val transportsList = listOf(
-                                com.sharedash.app.model.TransportStats(
-                                    name = "USB Fast-Path",
-                                    kind = com.sharedash.app.model.TransportKind.USB,
-                                    currentMbps = if (isUsb) speedMbps * 0.7 else 0.0,
-                                    rttMs = 0.4,
-                                    completedChunks = (completedChunks * 0.7).toLong(),
-                                    isActive = isUsb
-                                ),
-                                com.sharedash.app.model.TransportStats(
-                                    name = "5GHz Wi-Fi",
-                                    kind = com.sharedash.app.model.TransportKind.WIFI_DIRECT,
-                                    currentMbps = if (isUsb) speedMbps * 0.3 else speedMbps,
-                                    rttMs = 2.0,
-                                    completedChunks = (completedChunks * 0.3).toLong(),
-                                    isActive = true
-                                )
-                            )
-
-                            val eta = if (speedMbps > 0 && totalBytes > bytesRecv) {
-                                (((totalBytes - bytesRecv) * 8.0 / 1_000_000.0) / speedMbps).toLong()
-                            } else {
-                                0L
-                            }
-
-                            val existingTransferId = activeTelemetry?.transferId ?: UUID.randomUUID()
-
-                            activeTelemetry = SchedulerTelemetry(
-                                transferId = existingTransferId,
-                                title = fileName,
-                                status = if (isDone) "VERIFYING" else "IN_PROGRESS",
-                                aggregateMbps = speedMbps,
-                                totalBytes = totalBytes,
-                                completedBytes = bytesRecv,
-                                progressPct = pct,
-                                etaSeconds = eta,
-                                transports = transportsList,
-                                chunkStates = chunkList
-                            )
-                        }
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        val previous = receiving[fileName]
+                        val peerName = activeTarget?.friendlyName.orEmpty()
+                        val telem = SchedulerTelemetry(
+                            transferId = previous?.transferId ?: UUID.randomUUID(), title = fileName,
+                            status = if (totalBytes > 0 && bytesRecv >= totalBytes) "VERIFYING" else "ACTIVE",
+                            aggregateMbps = speedMbps, totalBytes = totalBytes, completedBytes = bytesRecv,
+                            progressPct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f,
+                            etaSeconds = if (speedMbps > 0) ((totalBytes - bytesRecv).coerceAtLeast(0) * 8 / (speedMbps * 1_000_000)).toLong() else 0,
+                            transports = emptyList(), chunkStates = emptyList(),
+                            direction = TransferDirection.RECEIVED, peerName = peerName
+                        )
+                        receiving[fileName] = telem
+                        if (activeSendJob?.isActive != true) activeTelemetry = telem
                     }
                 }
 
                 onFileReceivedCallback = { fileName, bytes ->
                     lifecycleScope.launch(Dispatchers.Main) {
-                        val curTelem = activeTelemetry
-                        val isUsb = isUsbCablePluggedState || isUsbTetheringActiveState
-                        val finalChunks = (0 until 64).map { idx ->
-                            val transportBadge = if (isUsb) {
-                                if (idx % 3 == 0) "Wi-Fi Direct" else "USB Cable"
-                            } else {
-                                "5GHz Wi-Fi"
-                            }
-                            com.sharedash.app.model.ChunkVisualItem(
-                                chunkId = idx,
-                                state = com.sharedash.app.model.ChunkState.COMPLETED,
-                                transportName = transportBadge
-                            )
+                        val last = receiving.remove(fileName)
+                        val peerName = last?.peerName?.ifBlank { null } ?: activeTarget?.friendlyName ?: "Nearby device"
+                        val completed = SchedulerTelemetry(
+                            transferId = last?.transferId ?: UUID.randomUUID(), title = fileName,
+                            status = "COMPLETED", aggregateMbps = last?.aggregateMbps ?: 0.0,
+                            totalBytes = bytes, completedBytes = bytes, progressPct = 1f, etaSeconds = 0,
+                            transports = emptyList(), chunkStates = emptyList(),
+                            direction = TransferDirection.RECEIVED, peerName = peerName
+                        )
+                        if (activeSendJob?.isActive != true) {
+                            activeTelemetry = receiving.values.lastOrNull() ?: completed
+                            if (receiving.isEmpty()) TransferForegroundService.complete(this@MainActivity, fileName)
                         }
-                        val estimatedSpeed = curTelem?.aggregateMbps?.takeIf { it > 0.0 } ?: 35.0
-                        activeTelemetry = SchedulerTelemetry(
-                            transferId = curTelem?.transferId ?: UUID.randomUUID(),
-                            title = fileName,
-                            status = "COMPLETED",
-                            aggregateMbps = estimatedSpeed,
-                            totalBytes = bytes,
-                            completedBytes = bytes,
-                            progressPct = 1.0f,
-                            etaSeconds = 0L,
-                            transports = listOf(
-                                com.sharedash.app.model.TransportStats("USB Fast-Path", com.sharedash.app.model.TransportKind.USB, if (isUsb) estimatedSpeed * 0.7 else 0.0, 0.4, 45, isUsb),
-                                com.sharedash.app.model.TransportStats("5GHz Wi-Fi", com.sharedash.app.model.TransportKind.WIFI_DIRECT, if (isUsb) estimatedSpeed * 0.3 else estimatedSpeed, 2.1, 19, true)
-                            ),
-                            chunkStates = finalChunks
-                        )
-
-                        historyManager.addRecord(
-                            TransferRecord(
-                                fileName = fileName,
-                                fileSize = bytes,
-                                direction = TransferDirection.RECEIVED,
-                                status = TransferStatus.COMPLETED,
-                                peerName = activeTarget?.friendlyName ?: (if (connectionModeState == SettingsManager.MODE_PHONE_TO_PHONE) "Android Phone" else "ShareDash PC"),
-                                transportUsed = if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi",
-                                speedMbps = estimatedSpeed,
-                                filePath = "/storage/emulated/0/Download/ShareDash/$fileName"
-                            )
-                        )
+                        historyManager.addRecord(TransferRecord(
+                            fileName = fileName, fileSize = bytes, direction = TransferDirection.RECEIVED,
+                            status = TransferStatus.COMPLETED, peerName = peerName, transportUsed = "",
+                            speedMbps = completed.aggregateMbps, filePath = java.io.File(
+                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                "ShareDash/$fileName"
+                            ).absolutePath
+                        ))
                     }
                 }
 
                 // Discovery peers from UDP (Wi-Fi Direct / Zero-LAN / Hotspot / USB)
-                val combinedPeers = udpPeers
+                val phoneMode = connectionModeState == SettingsManager.MODE_PHONE_TO_PHONE
+                val combinedPeers = udpPeers.filter { it.osName.startsWith("Android", true) == phoneMode }
 
                 // Cleanup poller on dispose
                 androidx.compose.runtime.DisposableEffect(Unit) {
@@ -638,53 +486,39 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                onFilesPickedCallback = { uris ->
-                    if (uris.isNotEmpty()) {
-                        val isPhoneMode = connectionModeState == SettingsManager.MODE_PHONE_TO_PHONE
-                        val defaultPeerName = if (isPhoneMode) "Nearby Android Phone" else "ShareDash PC"
-                        val defaultOs = if (isPhoneMode) "Android" else "Windows"
-                        val defaultDeviceId = if (isPhoneMode) "peer-phone" else "peer-pc"
-                        val peer = activeTarget ?: combinedPeers.firstOrNull() ?: DiscoveredPeer(
-                            deviceId = defaultDeviceId,
-                            friendlyName = defaultPeerName,
-                            osName = defaultOs,
-                            ipAddress = if (isPhoneMode) "192.168.42.1" else "192.168.137.1",
-                            port = 54321,
-                            supportedBridges = listOf("USB Fast-Path", "5GHz Wi-Fi"),
-                            isCompatible = true
-                        )
-                        activeTarget = peer
-                        val firstFileName = queryFileName(uris[0]) ?: "file.bin"
-                        val totalFiles = uris.size
-                        val initialTelem = SchedulerTelemetry(
-                            transferId = UUID.randomUUID(),
-                            title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
-                            status = "ACTIVE",
-                            aggregateMbps = 0.0,
-                            totalBytes = 0L,
-                            completedBytes = 0L,
-                            progressPct = 0f,
-                            etaSeconds = 0L,
-                            transports = listOf(
-                                TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 2.0, 0, true),
-                                TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, 0, true)
-                            ),
-                            chunkStates = (0 until 64).map { idx ->
-                                ChunkVisualItem(chunkId = idx, state = ChunkState.PENDING, transportName = "5GHz Wi-Fi")
-                            }
-                        )
-                        activeTelemetry = initialTelem
-                        currentNavTab = NavTab.TRANSFER
-                        executeRealTransfer(peer, uris) { telem ->
-                            activeTelemetry = telem
-                        }
+                fun startSending(peer: DiscoveredPeer, uris: List<Uri>) {
+                    if (uris.isEmpty() || activeSendJob?.isActive == true) return
+                    pendingFiles = emptyList()
+                    val firstFileName = queryFileName(uris[0]) ?: "file.bin"
+                    val totalFiles = uris.size
+                    val initialTelem = SchedulerTelemetry(
+                        transferId = UUID.randomUUID(),
+                        title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
+                        status = "ACTIVE",
+                        aggregateMbps = 0.0,
+                        totalBytes = 0L,
+                        completedBytes = 0L,
+                        progressPct = 0f,
+                        etaSeconds = 0L,
+                        transports = emptyList(), chunkStates = emptyList(), peerName = peer.friendlyName
+                    )
+                    activeTelemetry = initialTelem
+                    currentNavTab = NavTab.TRANSFER
+                    executeRealTransfer(peer, uris) { telem ->
+                        activeTelemetry = telem.copy(peerName = peer.friendlyName)
                     }
                 }
 
-                val isWifiOn = try {
-                    (applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager)?.isWifiEnabled == true
-                } catch (_: Exception) {
-                    true
+                onFilesPickedCallback = { uris ->
+                    val peer = activeTarget
+                    if (hasActiveTransfer) {
+                        Toast.makeText(this, "Finish the current transfer first", Toast.LENGTH_SHORT).show()
+                    } else if (peer != null) {
+                        startSending(peer, uris)
+                    } else {
+                        pendingFiles = uris
+                        startDiscovery()
+                    }
                 }
 
                 // Heartbeat to detect when PC ShareDash is shutdown
@@ -710,7 +544,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val handleDeviceSelect: (DiscoveredPeer) -> Unit = { peer ->
+                var connectingId by remember { mutableStateOf<String?>(null) }
+                val handleDeviceSelect: (DiscoveredPeer) -> Unit = select@{ peer ->
+                    if (connectingId != null || hasActiveTransfer) return@select
                     if (!peer.isCompatible) {
                         Toast.makeText(
                             this@MainActivity,
@@ -735,6 +571,7 @@ class MainActivity : ComponentActivity() {
 
                         val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
                         val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
+                        connectingId = peer.deviceId
                         lifecycleScope.launch {
                             // Gather all candidate IPs to attempt handshake (resolved best endpoint first)
                             val best = resolveBestTargetEndpoint(peer)
@@ -765,34 +602,38 @@ class MainActivity : ComponentActivity() {
                             }
 
                             if (sent) {
-                                activeTarget = peer.copy(ipAddress = connectedIp, port = connectedPort)
+                                val connected = peer.copy(ipAddress = connectedIp, port = connectedPort)
+                                activeTarget = connected
+                                if (pendingFiles.isNotEmpty() && !hasActiveTransfer) startSending(connected, pendingFiles)
                                 pairingCoordinator.startPairingPoller(
-                                    scope = this,
+                                    scope = lifecycleScope,
                                     targetIp = connectedIp,
                                     targetPort = connectedPort,
                                     onIncoming = { _, _ -> },
                                     onAccepted = { name ->
                                         lifecycleScope.launch {
                                             delay(650)
-                                            Toast.makeText(this@MainActivity, "Securely Connected to $name (AES-256-GCM)", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(this@MainActivity, "Connected to $name", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 )
                             } else {
-                                Toast.makeText(this@MainActivity, "Could not reach ${peer.friendlyName}. Ensure ShareDash is active on PC.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this@MainActivity, "Could not reach ${peer.friendlyName}. Open ShareDash on the other device and check its connection.", Toast.LENGTH_LONG).show()
                             }
-                        }
+                        }.invokeOnCompletion { connectingId = null }
                     }
                 }
 
                 val handleDisconnect: () -> Unit = {
+                    pairingCoordinator.stopPolling()
+                    httpServer?.activePairedPeerName = null
                     activeTarget?.let { peer ->
                         lifecycleScope.launch {
                             pairingCoordinator.respondToPairRequest(peer.ipAddress, peer.port, false)
                         }
                     }
                     activeTarget = null
-                    selectedUris.clear()
+                    pendingFiles = emptyList()
                 }
 
                 val handleCancelTransfer: () -> Unit = {
@@ -801,7 +642,7 @@ class MainActivity : ComponentActivity() {
                             TransferRecord(
                                 fileName = telem.title.ifEmpty { "Transfer" },
                                 fileSize = telem.totalBytes,
-                                direction = TransferDirection.SENT,
+                                direction = telem.direction,
                                 status = TransferStatus.CANCELLED,
                                 peerName = activeTarget?.friendlyName ?: "ShareDash PC",
                                 transportUsed = "USB / Wi-Fi",
@@ -810,6 +651,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    receiving.clear()
                     activeSendJob?.cancel()
                     activeSendJob = null
                     httpServer?.cancelActiveTransfers()
@@ -817,10 +659,6 @@ class MainActivity : ComponentActivity() {
                     transportManager.closeAll()
 
                     val candidateHosts = mutableListOf<Pair<String, Int>>()
-                    candidateHosts.add("127.0.0.1" to 54325)
-                    candidateHosts.add("192.168.42.1" to 54321)
-                    candidateHosts.add("192.168.49.1" to 54321)
-                    candidateHosts.add("192.168.137.1" to 54321)
                     activeTarget?.let { peer ->
                         if (peer.ipAddress.isNotBlank()) {
                             candidateHosts.add(peer.ipAddress to peer.port)
@@ -841,7 +679,6 @@ class MainActivity : ComponentActivity() {
                     }
 
                     activeTelemetry = null
-                    httpServer?.resetCancellation()
                     currentNavTab = NavTab.HOME
                     Toast.makeText(this@MainActivity, "Transfer stopped", Toast.LENGTH_SHORT).show()
                 }
@@ -851,22 +688,26 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(NeoBg)
                         .statusBarsPadding()
+                        .navigationBarsPadding()
                 ) {
                     when (currentNavTab) {
                         NavTab.HOME -> {
                             HomeScreen(
                                 connectionMode = connectionModeState,
-                                onConnectionModeChange = { settingsManager.connectionMode = it },
+                                onConnectionModeChange = { activeTarget = null; settingsManager.connectionMode = it },
                                 isUsbCablePlugged = isUsbCablePluggedState,
                                 isUsbTetheringActive = isUsbTetheringActiveState,
                                 connectedPeer = activeTarget,
                                 discoveredPeers = combinedPeers,
                                 onEnableUsbTethering = { openUsbTetheringSettings() },
                                 onSkipUsb = {
-                                    isWirelessWarningDialogOpen = true
+                                    ensureWifiEnabled()
+                                    startDiscovery()
+                                    Toast.makeText(this@MainActivity, "Looking for nearby devices on Wi-Fi", Toast.LENGTH_SHORT).show()
                                 },
                                 onDeviceSelected = handleDeviceSelect,
-                                onDisconnect = handleDisconnect,
+                                connectingId = connectingId,
+                                onDisconnect = { if (!hasActiveTransfer) handleDisconnect() else Toast.makeText(this@MainActivity, "Finish the current transfer first", Toast.LENGTH_SHORT).show() },
                                 onPickFiles = { filePickerLauncher.launch("*/*") },
                                 onPickFolder = { folderPickerLauncher.launch(null) },
                                 onOpenDownloadsFolder = { openDownloadsFolder() },
@@ -883,21 +724,23 @@ class MainActivity : ComponentActivity() {
                         }
                         NavTab.TRANSFER -> {
                             TransferScreen(
-                                targetName = activeTarget?.friendlyName ?: "ShareDash PC",
+                                targetName = activeTarget?.friendlyName.orEmpty(),
                                 telemetry = activeTelemetry,
                                 onCancel = handleCancelTransfer,
                                 onFinish = {
-                                    selectedUris.clear()
+                                    pendingFiles = emptyList()
                                     activeTelemetry = null
                                     httpServer?.resetCancellation()
                                     currentNavTab = NavTab.HOME
                                 },
                                 onSendAnother = {
-                                    selectedUris.clear()
+                                    pendingFiles = emptyList()
                                     filePickerLauncher.launch("*/*")
                                 },
                                 onPickFiles = { filePickerLauncher.launch("*/*") },
                                 onPickFolder = { folderPickerLauncher.launch(null) },
+                                onPickGallery = { filteredPicker.launch(arrayOf("image/*", "video/*")) },
+                                onPickDocuments = { filteredPicker.launch(arrayOf("application/*", "text/*")) },
                                 onNavigateToHistory = { currentNavTab = NavTab.HISTORY }
                             )
                         }
@@ -914,7 +757,7 @@ class MainActivity : ComponentActivity() {
                                 deviceName = deviceNameState,
                                 onDeviceNameChange = { settingsManager.deviceName = it },
                                 connectionMode = connectionModeState,
-                                onConnectionModeChange = { settingsManager.connectionMode = it },
+                                onConnectionModeChange = { activeTarget = null; settingsManager.connectionMode = it },
                                 preferUsb = preferUsbState,
                                 onPreferUsbChange = { settingsManager.preferUsb = it },
                                 prefer5GHz = prefer5GHzState,
@@ -1003,10 +846,7 @@ class MainActivity : ComponentActivity() {
                                                 androidx.compose.material3.Text(
                                                     text = if (telem.status == "COMPLETED") "Transfer Complete · Tap to view"
                                                     else if (telem.status == "FAILED") "Transfer Failed · Tap to view"
-                                                    else "%.1f MB/s · %d%% (Tap to view)".format(
-                                                        telem.aggregateMbps,
-                                                        (telem.progressPct * 100).toInt()
-                                                    ),
+                                                    else "${formatTransferSpeed(telem.aggregateMbps)} · ${(telem.progressPct * 100).toInt()}%",
                                                     fontSize = 11.sp,
                                                     color = com.sharedash.app.ui.theme.TextSecondary
                                                 )
@@ -1035,32 +875,32 @@ class MainActivity : ComponentActivity() {
 
 
 
-                    if (isWirelessWarningDialogOpen) {
-                        WirelessWarningDialog(
-                            onConfirmWireless = {
-                                isWirelessWarningDialogOpen = false
-                                startDiscovery()
-                                Toast.makeText(this@MainActivity, "Wireless Mode: Searching nearby PCs via Wi-Fi & BT", Toast.LENGTH_SHORT).show()
+                    if (pendingFiles.isNotEmpty() && !hasActiveTransfer) {
+                        val peers = (listOfNotNull(activeTarget) + udpPeers).distinctBy { it.deviceId }
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { pendingFiles = emptyList() },
+                            title = { androidx.compose.material3.Text("Choose a recipient") },
+                            text = {
+                                androidx.compose.foundation.lazy.LazyColumn {
+                                    item { androidx.compose.material3.Text(if (peers.isEmpty())
+                                        "Open ShareDash on the other device and connect both devices by USB tethering or the same Wi-Fi."
+                                        else if (connectingId != null) "Connecting…" else "Select the device that should receive your files.") }
+                                    items(peers.size) { index ->
+                                        val peer = peers[index]
+                                        androidx.compose.material3.TextButton(enabled = connectingId == null, onClick = {
+                                            if (peer.deviceId == activeTarget?.deviceId) startSending(peer, pendingFiles)
+                                            else handleDeviceSelect(peer)
+                                        }) { androidx.compose.material3.Text(peer.friendlyName + " · " + peer.ipAddress) }
+                                    }
+                                }
                             },
-                            onUseUsb = {
-                                isWirelessWarningDialogOpen = false
-                                openUsbTetheringSettings()
-                            },
-                            onDismiss = { isWirelessWarningDialogOpen = false }
+                            confirmButton = {},
+                            dismissButton = { androidx.compose.material3.TextButton(onClick = { pendingFiles = emptyList() }) {
+                                androidx.compose.material3.Text("Cancel")
+                            } }
                         )
                     }
 
-                    if (isExternalWifiConnectedState && !hasDismissedWifiPromptThisSession) {
-                        WifiDisconnectPromptDialog(
-                            ssid = connectedWifiSsidState,
-                            onOpenWifiPanel = {
-                                openWifiDisconnectPanel()
-                            },
-                            onDismiss = {
-                                hasDismissedWifiPromptThisSession = true
-                            }
-                        )
-                    }
                 }
             }
         }
@@ -1103,6 +943,7 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun resolveMultipathEndpoints(target: DiscoveredPeer): List<TransportEndpoint> = withContext(Dispatchers.IO) {
         val verified = mutableListOf<TransportEndpoint>()
+        val autoUsbPc = target.deviceId == "usb-pc"
         val seenIps = mutableSetOf<String>()
 
         val initialCandidates = mutableListOf<Pair<String, Int>>()
@@ -1119,15 +960,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 2. Direct 5GHz Wi-Fi Hotspot Gateways
+        // 2. Direct Wi-Fi Hotspot Gateways
         initialCandidates.add("192.168.137.1" to 54321) // PC 5GHz Hotspot Gateway
         initialCandidates.add("192.168.49.1" to 54321)  // Wi-Fi Direct Autonomous Group
         initialCandidates.add("192.168.43.1" to 54321)  // Phone Hotspot Gateway
 
         // 3. USB Tethering Subnets (inspect all USB/RNDIS/NCM network interfaces)
-        val (detectedUsbPrefixes, detectedWifiPrefixes) = udpManager.getInterfaceSubnetPrefixes()
+        val (detectedUsbPrefixes, _) = udpManager.getInterfaceSubnetPrefixes()
         val usbSubnetPrefixes = detectedUsbPrefixes.toMutableSet()
-        val wifiSubnetPrefixes = detectedWifiPrefixes.toMutableSet()
         usbSubnetPrefixes.add("192.168.42")
         usbSubnetPrefixes.add("192.168.44")
 
@@ -1164,12 +1004,11 @@ class MainActivity : ComponentActivity() {
             usbSubnetPrefixes.any { candIp.startsWith("$it.") } ||
             candIp.startsWith("192.168.42.") ||
             candIp.startsWith("192.168.44.") ||
-            candIp.startsWith("169.254.") ||
-            (candIp.startsWith("10.") && !wifiSubnetPrefixes.any { candIp.startsWith("$it.") })
+            candIp.startsWith("169.254.")
         }
 
         // Probe all initial candidate endpoints concurrently in parallel (1500ms timeout)
-        val candidateList = initialCandidates.distinct()
+        val candidateList = initialCandidates.distinct().filter { (ip, port) -> port != 54325 || ip == "127.0.0.1" }
         val probeDeferreds = candidateList.map { (ip, port) ->
             async(Dispatchers.IO) {
                 try {
@@ -1186,12 +1025,15 @@ class MainActivity : ComponentActivity() {
                         val devId = json.optString("device_id", "")
 
                         // Loopback check: Prevent self-transfer, but allow remote Android phones and PCs!
-                        if (devId == DeviceIdentity.id) {
+                        val os = json.optString("os_name")
+                        if (devId.isBlank() || devId == DeviceIdentity.id ||
+                            (autoUsbPc && (os.startsWith("Android", true) || !checkIsUsb(ip, port))) ||
+                            (!autoUsbPc && devId != target.deviceId)) {
                             return@async null
                         }
 
                         val isUsb = checkIsUsb(ip, port)
-                        val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
+                        val name = if (isUsb) "USB Cable" else "Wi-Fi"
                         val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
 
                         val peerLocalIps = mutableListOf<String>()
@@ -1204,7 +1046,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        Triple(TransportEndpoint(ip, port, name, kind), peerLocalIps, ip)
+                        Triple(TransportEndpoint(ip, port, name, kind, devId, json.optString("device_name", target.friendlyName), os), peerLocalIps, ip)
                     } else {
                         conn.disconnect()
                         null
@@ -1240,12 +1082,12 @@ class MainActivity : ComponentActivity() {
                         conn.disconnect()
                         val json = org.json.JSONObject(body)
                         val devId = json.optString("device_id", "")
-                        if (devId == DeviceIdentity.id) return@async null
+                        if (devId != verified.firstOrNull()?.deviceId) return@async null
 
                         val isUsb = checkIsUsb(peerIp, 54321)
-                        val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
+                        val name = if (isUsb) "USB Cable" else "Wi-Fi"
                         val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
-                        TransportEndpoint(peerIp, 54321, name, kind)
+                        TransportEndpoint(peerIp, 54321, name, kind, devId, json.optString("device_name"), json.optString("os_name"))
                     } else {
                         conn.disconnect()
                         null
@@ -1263,18 +1105,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Safety fallback: If active probing didn't verify any endpoint, do not leave verified completely empty!
-        if (verified.isEmpty() && target.ipAddress.isNotEmpty() && target.ipAddress != "0.0.0.0" && target.ipAddress != "127.0.0.1") {
-            val isUsb = checkIsUsb(target.ipAddress, target.port)
-            val name = if (isUsb) "USB Cable" else "5GHz Wi-Fi"
-            val kind = if (isUsb) TransportKind.USB else TransportKind.LAN
-            verified.add(TransportEndpoint(target.ipAddress, target.port, name, kind))
-        }
-
         // Prioritize hardware USB NIC (RNDIS / Tethering, e.g. 192.168.42.x, ~35-42 MB/s)
         // over ADB reverse loopback (127.0.0.1:54325, ~20 MB/s user-space proxy)
         verified.sortWith(compareBy<TransportEndpoint> {
-            if (it.kind == TransportKind.USB && it.ip != "127.0.0.1") 0
+            if (!settingsManager.preferUsb && it.kind != TransportKind.USB) -1
+            else if (it.kind == TransportKind.USB && it.ip != "127.0.0.1") 0
             else if (it.kind == TransportKind.USB) 1
             else 2
         })
@@ -1285,9 +1120,7 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun resolveBestTargetEndpoint(target: DiscoveredPeer): Pair<String, Int>? {
         val endpoints = resolveMultipathEndpoints(target)
-        val best = endpoints.firstOrNull { it.kind == TransportKind.USB && it.ip != "127.0.0.1" }
-            ?: endpoints.firstOrNull { it.kind == TransportKind.USB }
-            ?: endpoints.firstOrNull()
+        val best = endpoints.firstOrNull()
         return best?.let { it.ip to it.port }
     }
 
@@ -1319,8 +1152,7 @@ class MainActivity : ComponentActivity() {
                     var skipped = 0L
                     while (skipped < offset) {
                         val s = stream.skip(offset - skipped)
-                        if (s <= 0) break
-                        skipped += s
+                        if (s > 0) skipped += s else if (stream.read() >= 0) skipped++ else return null
                     }
                     val buf = ByteArray(length)
                     var total = 0
@@ -1367,6 +1199,7 @@ class MainActivity : ComponentActivity() {
             conn.setRequestProperty("Connection", "Keep-Alive")
             conn.setRequestProperty("X-Transfer-Id", transferId)
             conn.setRequestProperty("X-File-Name", safeFileName)
+            conn.setRequestProperty("X-File-Name-Encoded", java.net.URLEncoder.encode(fileName, "UTF-8"))
             conn.setRequestProperty("X-File-Size", fileSize.toString())
             conn.setRequestProperty("X-Chunk-Id", chunkId.toString())
             conn.setRequestProperty("X-Chunk-Offset", chunkOffset.toString())
@@ -1416,13 +1249,13 @@ class MainActivity : ComponentActivity() {
 
     private data class ChunkTask(
         val uri: Uri,
+        val fileTransferId: String,
         val fileName: String,
         val fileSize: Long,
         val chunkId: Int,
         val chunkOffset: Long,
         val chunkLength: Int,
-        val totalChunks: Int,
-        val visualSlotIndex: Int
+        val totalChunks: Int
     )
 
     private fun executeRealTransfer(
@@ -1484,35 +1317,41 @@ class MainActivity : ComponentActivity() {
             var totalBytes = 0L
             val fileSizes = mutableListOf<Long>()
             uris.forEach { uri ->
-                var size = 0L
-                try {
-                    contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                        if (pfd.statSize > 0) size = pfd.statSize
-                    }
-                } catch (_: Exception) {}
-                if (size <= 0) {
-                    try {
-                        contentResolver.openInputStream(uri)?.use { input ->
-                            val avail = input.available()
-                            if (avail > 0) size = avail.toLong()
+                val size = try {
+                    contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use {
+                        if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null
+                    }?.takeIf { it >= 0 } ?: contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+                        ?.takeIf { it >= 0 } ?: contentResolver.openInputStream(uri)?.use { input ->
+                            val buffer = ByteArray(128 * 1024)
+                            var bytes = 0L
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                bytes += count
+                            }
+                            bytes
                         }
-                    } catch (_: Exception) {}
+                } catch (_: Exception) { null }
+                if (size == null) {
+                    withContext(Dispatchers.Main) {
+                        onUpdate(SchedulerTelemetry(transferId, firstFileName, "FAILED", 0.0, 0, 0, 0f, 0, emptyList(), emptyList()))
+                    }
+                    TransferForegroundService.stopService(this@MainActivity)
+                    return@launch
                 }
-                size = size.coerceAtLeast(1024L)
                 fileSizes.add(size)
                 totalBytes += size
             }
-            val effectiveTotalBytes = totalBytes.coerceAtLeast(1024L)
+            val effectiveTotalBytes = totalBytes
 
             // Setup chunking tasks across files
-            val visualSlotCount = 64
             val allTasks = mutableListOf<ChunkTask>()
-            var cumulativeBytesSoFar = 0L
 
             for (fileIdx in uris.indices) {
                 val uri = uris[fileIdx]
                 val fileName = queryFileName(uri) ?: "file_$fileIdx.bin"
                 val fSize = fileSizes[fileIdx]
+                val fileTransferId = if (uris.size == 1) transferId.toString() else UUID.randomUUID().toString()
 
                 // Dynamic Chunk Sizing tuned for mobile Dalvik heap safety:
                 // Cap max chunk size at 4 MB to guarantee zero OutOfMemoryError even for 10GB+ files,
@@ -1538,42 +1377,35 @@ class MainActivity : ComponentActivity() {
                     currentOffset += length
                 }
 
-                val totalChunks = maxOf(1, fileChunks.size)
+                if (fSize == 0L) fileChunks.add(0L to 0)
+                val totalChunks = fileChunks.size
 
                 for (chunkIdx in fileChunks.indices) {
                     val (offset, length) = fileChunks[chunkIdx]
-                    val chunkMidBytes = cumulativeBytesSoFar + offset + (length / 2)
-                    val visualIdx = ((chunkMidBytes.toDouble() / effectiveTotalBytes) * visualSlotCount).toInt().coerceIn(0, visualSlotCount - 1)
-
                     allTasks.add(
                         ChunkTask(
                             uri = uri,
+                            fileTransferId = fileTransferId,
                             fileName = fileName,
                             fileSize = fSize,
                             chunkId = chunkIdx,
                             chunkOffset = offset,
                             chunkLength = length,
-                            totalChunks = totalChunks,
-                            visualSlotIndex = visualIdx
+                            totalChunks = totalChunks
                         )
                     )
                 }
-                cumulativeBytesSoFar += fSize
             }
 
             val queue = ConcurrentLinkedQueue<ChunkTask>(allTasks)
             val usbBytesSent = AtomicLong(0L)
             val wifiBytesSent = AtomicLong(0L)
-            val completedVisualChunks = ConcurrentHashMap<Int, String>()
             val usbActive = AtomicBoolean(hasUsb)
             val wifiActive = AtomicBoolean(hasWifi)
+            val acknowledgedChunks = AtomicInteger(0)
             val transferFailed = AtomicBoolean(false)
             val fallbackNeeded = AtomicBoolean(false)
             val transferFinished = AtomicBoolean(false)
-
-            val initialChunks = (0 until visualSlotCount).map { idx ->
-                ChunkVisualItem(chunkId = idx, state = ChunkState.PENDING, transportName = if (hasUsb) "USB Cable" else "5GHz Wi-Fi")
-            }
 
             val initialTelem = SchedulerTelemetry(
                 transferId = transferId,
@@ -1586,9 +1418,9 @@ class MainActivity : ComponentActivity() {
                 etaSeconds = 0,
                 transports = listOfNotNull(
                     if (hasUsb) TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, 0, true) else null,
-                    if (hasWifi) TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 1.5, 0, true) else null
+                    if (hasWifi) TransportStats("Wi-Fi", TransportKind.LAN, 0.0, 1.5, 0, true) else null
                 ),
-                chunkStates = initialChunks
+                chunkStates = emptyList()
             )
             withContext(Dispatchers.Main) { onUpdate(initialTelem) }
 
@@ -1623,31 +1455,23 @@ class MainActivity : ComponentActivity() {
                     val remainingBytes = (effectiveTotalBytes - totalSent).coerceAtLeast(0L)
                     val eta = if (aggMbps > 0) (remainingBytes * 8 / (aggMbps * 1_000_000.0)).toLong() else 0L
 
-                    val visualChunks = (0 until visualSlotCount).map { idx ->
-                        val completedTransport = completedVisualChunks[idx]
-                        val state = when {
-                            completedTransport != null -> ChunkState.COMPLETED
-                            idx <= ((totalSent.toDouble() / effectiveTotalBytes) * visualSlotCount).toInt() -> ChunkState.IN_FLIGHT
-                            else -> ChunkState.PENDING
-                        }
-                        ChunkVisualItem(chunkId = idx, state = state, transportName = completedTransport ?: (if (hasUsb) "USB Cable" else "5GHz Wi-Fi"))
-                    }
-
                     val telem = SchedulerTelemetry(
                         transferId = transferId,
                         title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
                         status = "ACTIVE",
                         aggregateMbps = aggMbps,
+                        usbBytes = curUsb,
                         totalBytes = effectiveTotalBytes,
                         completedBytes = totalSent.coerceAtMost(effectiveTotalBytes),
-                        progressPct = (totalSent.toFloat() / effectiveTotalBytes.toFloat()).coerceIn(0f, 1f),
+                        progressPct = (totalSent.toFloat() / effectiveTotalBytes.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f),
                         etaSeconds = eta,
                         transports = listOfNotNull(
                             if (hasUsb || curUsb > 0) TransportStats("USB Fast-Path", TransportKind.USB, smoothUsbMbps, 0.4, (curUsb / (256 * 1024)), usbActive.get()) else null,
-                            if (hasWifi || curWifi > 0) TransportStats("5GHz Wi-Fi", TransportKind.LAN, smoothWifiMbps, 1.5, (curWifi / (256 * 1024)), wifiActive.get()) else null
+                            if (hasWifi || curWifi > 0) TransportStats("Wi-Fi", TransportKind.LAN, smoothWifiMbps, 1.5, (curWifi / (256 * 1024)), wifiActive.get()) else null
                         ),
-                        chunkStates = visualChunks
+                        chunkStates = emptyList()
                     )
+                    TransferForegroundService.updateProgress(this@MainActivity, telem.title, (telem.progressPct * 100).toInt(), formatTransferSpeed(telem.aggregateMbps))
                     withContext(Dispatchers.Main) { onUpdate(telem) }
                 }
             }
@@ -1692,153 +1516,49 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            fun sendChunk(endpoint: TransportEndpoint, task: ChunkTask, bytes: ByteArray) =
+                postChunkDetailed(endpoint, task.fileTransferId, task.fileName, task.fileSize,
+                    task.chunkId, task.chunkOffset, task.totalChunks, bytes)
+
+            suspend fun runWorker(primary: TransportEndpoint, alternate: TransportEndpoint?) {
+                val primaryActive = if (primary.kind == TransportKind.USB) usbActive else wifiActive
+                while (kotlinx.coroutines.currentCoroutineContext().isActive && !transferFailed.get() && !fallbackNeeded.get()) {
+                    val task = queue.poll() ?: return
+                    val bytes = readChunkFromChannel(task)
+                    if (bytes == null || bytes.size != task.chunkLength) {
+                        transferFailed.set(true)
+                        return
+                    }
+                    var endpoint = if (primaryActive.get() || alternate == null) primary else alternate
+                    var result = sendChunk(endpoint, task, bytes)
+                    if (result == PostResult.RETRY) {
+                        if (alternate != null && endpoint == primary) {
+                            primaryActive.set(false)
+                            endpoint = alternate
+                        }
+                        result = sendChunk(endpoint, task, bytes)
+                    }
+                    when (result) {
+                        PostResult.SUCCESS -> {
+                            val counter = if (endpoint.kind == TransportKind.USB) usbBytesSent else wifiBytesSent
+                            counter.addAndGet(bytes.size.toLong())
+                            acknowledgedChunks.incrementAndGet()
+                        }
+                        PostResult.NOT_FOUND -> fallbackNeeded.set(true)
+                        PostResult.RETRY -> transferFailed.set(true)
+                    }
+                }
+            }
+
+            val sendStarted = android.os.SystemClock.elapsedRealtime()
             try {
-                // Launch simultaneous worker pool across USB (3 workers) and Wi-Fi (4 workers)
                 coroutineScope {
-                    val workers = mutableListOf<kotlinx.coroutines.Job>()
-
-                    // USB Workers (3 workers)
-                    if (usbEndpoint != null) {
-                        val usbWorkersCount = if (isMultipath) 3 else 4
-                        repeat(usbWorkersCount) {
-                            workers.add(
-                                launch(Dispatchers.IO) {
-                                    try {
-                                        while (isActive && !transferFailed.get() && !fallbackNeeded.get()) {
-                                            val task = queue.poll() ?: break
-                                            val bytes = readChunkFromChannel(task)
-                                            if (bytes == null) {
-                                                transferFailed.set(true)
-                                                break
-                                            }
-
-                                            val res = postChunkDetailed(
-                                                endpoint = usbEndpoint,
-                                                transferId = transferId.toString(),
-                                                fileName = task.fileName,
-                                                fileSize = task.fileSize,
-                                                chunkId = task.chunkId,
-                                                chunkOffset = task.chunkOffset,
-                                                totalChunks = task.totalChunks,
-                                                chunkBytes = bytes
-                                            )
-
-                                            when (res) {
-                                                PostResult.SUCCESS -> {
-                                                    usbBytesSent.addAndGet(bytes.size.toLong())
-                                                    completedVisualChunks.put(task.visualSlotIndex, "USB Cable")
-                                                }
-                                                PostResult.NOT_FOUND -> {
-                                                    fallbackNeeded.set(true)
-                                                    break
-                                                }
-                                                PostResult.RETRY -> {
-                                                    if (hasWifi && wifiActive.get()) {
-                                                        // Failover: Return chunk to queue, let Wi-Fi finish
-                                                        queue.add(task)
-                                                        usbActive.set(false)
-                                                        break
-                                                    } else {
-                                                        // Retry once on USB
-                                                        try {
-                                                            val retry = postChunkDetailed(usbEndpoint, transferId.toString(), task.fileName, task.fileSize, task.chunkId, task.chunkOffset, task.totalChunks, bytes)
-                                                            if (retry == PostResult.SUCCESS) {
-                                                                usbBytesSent.addAndGet(bytes.size.toLong())
-                                                                completedVisualChunks.put(task.visualSlotIndex, "USB Cable")
-                                                            } else {
-                                                                transferFailed.set(true)
-                                                                break
-                                                            }
-                                                        } catch (_: Throwable) {
-                                                            transferFailed.set(true)
-                                                            break
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (t: Throwable) {
-                                        Log.e("MainActivity", "USB worker error: ${t.message}", t)
-                                        if (hasWifi && wifiActive.get()) {
-                                            usbActive.set(false)
-                                        }
-                                    }
-                                }
-                            )
-                        }
+                    if (usbEndpoint != null) repeat(if (isMultipath) 3 else 4) {
+                        launch(Dispatchers.IO) { runWorker(usbEndpoint, wifiEndpoint) }
                     }
-
-                    // Wi-Fi Workers (4 workers for high pipelined throughput)
-                    if (wifiEndpoint != null) {
-                        val wifiWorkersCount = if (isMultipath) 4 else 5
-                        repeat(wifiWorkersCount) {
-                            workers.add(
-                                launch(Dispatchers.IO) {
-                                    try {
-                                        while (isActive && !transferFailed.get() && !fallbackNeeded.get()) {
-                                            val task = queue.poll() ?: break
-                                            val bytes = readChunkFromChannel(task)
-                                            if (bytes == null) {
-                                                transferFailed.set(true)
-                                                break
-                                            }
-
-                                            val res = postChunkDetailed(
-                                                endpoint = wifiEndpoint,
-                                                transferId = transferId.toString(),
-                                                fileName = task.fileName,
-                                                fileSize = task.fileSize,
-                                                chunkId = task.chunkId,
-                                                chunkOffset = task.chunkOffset,
-                                                totalChunks = task.totalChunks,
-                                                chunkBytes = bytes
-                                            )
-
-                                            when (res) {
-                                                PostResult.SUCCESS -> {
-                                                    wifiBytesSent.addAndGet(bytes.size.toLong())
-                                                    completedVisualChunks.put(task.visualSlotIndex, "5GHz Wi-Fi")
-                                                }
-                                                PostResult.NOT_FOUND -> {
-                                                    fallbackNeeded.set(true)
-                                                    break
-                                                }
-                                                PostResult.RETRY -> {
-                                                    if (hasUsb && usbActive.get()) {
-                                                        // Failover: Return chunk to queue, let USB finish
-                                                        queue.add(task)
-                                                        wifiActive.set(false)
-                                                        break
-                                                    } else {
-                                                        try {
-                                                            val retry = postChunkDetailed(wifiEndpoint, transferId.toString(), task.fileName, task.fileSize, task.chunkId, task.chunkOffset, task.totalChunks, bytes)
-                                                            if (retry == PostResult.SUCCESS) {
-                                                                wifiBytesSent.addAndGet(bytes.size.toLong())
-                                                                completedVisualChunks.put(task.visualSlotIndex, "5GHz Wi-Fi")
-                                                            } else {
-                                                                transferFailed.set(true)
-                                                                break
-                                                            }
-                                                        } catch (_: Throwable) {
-                                                            transferFailed.set(true)
-                                                            break
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (t: Throwable) {
-                                        Log.e("MainActivity", "Wi-Fi worker error: ${t.message}", t)
-                                        if (hasUsb && usbActive.get()) {
-                                            wifiActive.set(false)
-                                        }
-                                    }
-                                }
-                            )
-                        }
+                    if (wifiEndpoint != null) repeat(if (isMultipath) 4 else 5) {
+                        launch(Dispatchers.IO) { runWorker(wifiEndpoint, usbEndpoint) }
                     }
-
-                    workers.forEach { it.join() }
                 }
             } finally {
                 openFdMap.values.forEach { (pfd, channel) ->
@@ -1849,67 +1569,47 @@ class MainActivity : ComponentActivity() {
             }
 
             telemetryJob.cancel()
+            telemetryJob.join()
             transferFinished.set(true)
 
             // If remote server returns 404 (only supports single-stream /send), execute backward-compatible fallback
             if (fallbackNeeded.get()) {
-                val primaryEndpoint = usbEndpoint ?: wifiEndpoint ?: endpoints.first()
+                val primaryEndpoint = endpoints.first()
                 executeSendFallback(target, primaryEndpoint, uris, transferId, effectiveTotalBytes, firstFileName, totalFiles, onUpdate)
                 return@launch
             }
 
             val totalSent = usbBytesSent.get() + wifiBytesSent.get()
-            val isSuccess = !transferFailed.get() && totalSent >= (effectiveTotalBytes * 0.99)
-
-            val finalChunks = (0 until visualSlotCount).map { idx ->
-                val trans = completedVisualChunks[idx] ?: (if (hasUsb) "USB Cable" else "5GHz Wi-Fi")
-                ChunkVisualItem(chunkId = idx, state = if (isSuccess) ChunkState.COMPLETED else ChunkState.CORRUPTED, transportName = trans)
-            }
-
-            if (isSuccess) {
-                val verifyingTelem = SchedulerTelemetry(
-                    transferId = transferId,
-                    title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
-                    status = "VERIFYING",
-                    aggregateMbps = 0.0,
-                    totalBytes = effectiveTotalBytes,
-                    completedBytes = effectiveTotalBytes,
-                    progressPct = 1.0f,
-                    etaSeconds = 0,
-                    transports = listOfNotNull(
-                        if (usbBytesSent.get() > 0) TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, (usbBytesSent.get() / (256 * 1024)), true) else null,
-                        if (wifiBytesSent.get() > 0) TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 1.5, (wifiBytesSent.get() / (256 * 1024)), true) else null
-                    ),
-                    chunkStates = finalChunks
-                )
-                withContext(Dispatchers.Main) { onUpdate(verifyingTelem) }
-                kotlinx.coroutines.delay(450)
-            }
+            val averageMbps = totalSent * 8.0 / ((android.os.SystemClock.elapsedRealtime() - sendStarted).coerceAtLeast(1) * 1000.0)
+            val isSuccess = !transferFailed.get() && totalSent == effectiveTotalBytes && acknowledgedChunks.get() == allTasks.size
 
             val finalTelem = SchedulerTelemetry(
                 transferId = transferId,
                 title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
                 status = if (isSuccess) "COMPLETED" else "FAILED",
-                aggregateMbps = 0.0,
+                aggregateMbps = averageMbps,
                 totalBytes = effectiveTotalBytes,
                 completedBytes = if (isSuccess) effectiveTotalBytes else totalSent,
-                progressPct = if (isSuccess) 1.0f else (totalSent.toFloat() / effectiveTotalBytes.toFloat()).coerceIn(0f, 1f),
+                progressPct = if (isSuccess) 1.0f else (totalSent.toFloat() / effectiveTotalBytes.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f),
                 etaSeconds = 0,
+                usbBytes = usbBytesSent.get(),
                 transports = listOfNotNull(
                     if (usbBytesSent.get() > 0) TransportStats("USB Fast-Path", TransportKind.USB, 0.0, 0.4, (usbBytesSent.get() / (256 * 1024)), true) else null,
-                    if (wifiBytesSent.get() > 0) TransportStats("5GHz Wi-Fi", TransportKind.LAN, 0.0, 1.5, (wifiBytesSent.get() / (256 * 1024)), true) else null
+                    if (wifiBytesSent.get() > 0) TransportStats("Wi-Fi", TransportKind.LAN, 0.0, 1.5, (wifiBytesSent.get() / (256 * 1024)), true) else null
                 ),
-                chunkStates = finalChunks
+                chunkStates = emptyList()
             )
 
             val transportLabel = when {
                 usbBytesSent.get() > 0 && wifiBytesSent.get() > 0 -> "USB + Wi-Fi Multipath"
                 usbBytesSent.get() > 0 -> "USB Fast-Path"
-                else -> "5GHz Wi-Fi"
+                else -> "Wi-Fi"
             }
 
             withContext(Dispatchers.Main) {
                 onUpdate(finalTelem)
+                if (finalTelem.status == "COMPLETED") TransferForegroundService.complete(this@MainActivity, finalTelem.title)
+                else TransferForegroundService.stopService(this@MainActivity)
                 historyManager.addRecord(
                     TransferRecord(
                         fileName = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
@@ -1918,7 +1618,7 @@ class MainActivity : ComponentActivity() {
                         status = if (isSuccess) TransferStatus.COMPLETED else TransferStatus.FAILED,
                         peerName = target.friendlyName,
                         transportUsed = transportLabel,
-                        speedMbps = 0.0
+                        speedMbps = averageMbps
                     )
                 )
             }
@@ -1938,7 +1638,6 @@ class MainActivity : ComponentActivity() {
         val resolvedIp = endpoint.ip
         val resolvedPort = endpoint.port
         val isUsb = endpoint.kind == TransportKind.USB
-        val totalChunks = 32
 
         var transferredBytes = 0L
         val startTime = System.currentTimeMillis()
@@ -1965,8 +1664,9 @@ class MainActivity : ComponentActivity() {
                 val header = "--$boundary\r\nContent-Disposition: form-data; name=\"files\"; filename=\"$fileName\"\r\nContent-Type: application/octet-stream\r\n\r\n"
                 os.write(header.toByteArray(Charsets.UTF_8))
 
-                val input = try { contentResolver.openInputStream(uri)?.buffered(2 * 1024 * 1024) } catch (_: Exception) { null }
-                if (input != null) {
+                val input = contentResolver.openInputStream(uri)?.buffered(2 * 1024 * 1024)
+                    ?: throw java.io.IOException("Cannot open selected file")
+                input.use {
                     val buffer = ByteArray(1024 * 1024)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
@@ -1974,7 +1674,7 @@ class MainActivity : ComponentActivity() {
                         transferredBytes += read
 
                         val nowMs = System.currentTimeMillis()
-                        val progress = if (effectiveTotalBytes > 0) (transferredBytes.toFloat() / effectiveTotalBytes.toFloat()).coerceIn(0f, 1f) else 0f
+                        val progress = if (effectiveTotalBytes > 0) (transferredBytes.toFloat() / effectiveTotalBytes.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) else 0f
 
                         if (nowMs - lastSendUiMs >= 35L || transferredBytes >= effectiveTotalBytes) {
                             val deltaSec = (nowMs - lastSendUiMs).coerceAtLeast(1) / 1000.0
@@ -1987,16 +1687,6 @@ class MainActivity : ComponentActivity() {
                             val remainingBytes = effectiveTotalBytes - transferredBytes
                             val eta = if (smoothMbps > 0) (remainingBytes * 8 / (smoothMbps * 1_000_000.0)).toLong() else 0
 
-                            val completedChunkIndex = if (effectiveTotalBytes > 0) ((transferredBytes.toDouble() / effectiveTotalBytes) * totalChunks).toInt() else 0
-                            val visualChunks = (0 until totalChunks).map { idx ->
-                                val stateEnum = when {
-                                    idx < completedChunkIndex -> ChunkState.COMPLETED
-                                    idx == completedChunkIndex -> ChunkState.IN_FLIGHT
-                                    else -> ChunkState.PENDING
-                                }
-                                ChunkVisualItem(chunkId = idx, state = stateEnum, transportName = if (isUsb) "USB Cable" else "5GHz Wi-Fi")
-                            }
-
                             val telem = SchedulerTelemetry(
                                 transferId = transferId,
                                 title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
@@ -2005,16 +1695,17 @@ class MainActivity : ComponentActivity() {
                                 totalBytes = effectiveTotalBytes,
                                 completedBytes = transferredBytes,
                                 progressPct = progress,
+                                usbBytes = if (isUsb) transferredBytes else 0,
                                 etaSeconds = eta,
                                 transports = listOf(
-                                    TransportStats(if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi", endpoint.kind, smoothMbps, if (isUsb) 0.4 else 1.5, (transferredBytes / (256 * 1024)), true)
+                                    TransportStats(if (isUsb) "USB Fast-Path" else "Wi-Fi", endpoint.kind, smoothMbps, if (isUsb) 0.4 else 1.5, (transferredBytes / (256 * 1024)), true)
                                 ),
-                                chunkStates = visualChunks
+                                chunkStates = emptyList()
                             )
+                            TransferForegroundService.updateProgress(this@MainActivity, telem.title, (telem.progressPct * 100).toInt(), formatTransferSpeed(telem.aggregateMbps))
                             withContext(Dispatchers.Main) { onUpdate(telem) }
                         }
                     }
-                    input.close()
                 }
 
                 val footer = "\r\n--$boundary--\r\n"
@@ -2032,10 +1723,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val finalChunks = (0 until totalChunks).map { idx ->
-            ChunkVisualItem(chunkId = idx, state = if (success) ChunkState.COMPLETED else ChunkState.CORRUPTED, transportName = if (isUsb) "USB Cable" else "5GHz Wi-Fi")
-        }
-
         val finalTelem = SchedulerTelemetry(
             transferId = transferId,
             title = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
@@ -2043,14 +1730,17 @@ class MainActivity : ComponentActivity() {
             aggregateMbps = smoothMbps,
             totalBytes = effectiveTotalBytes,
             completedBytes = if (success) effectiveTotalBytes else transferredBytes,
+            usbBytes = if (isUsb) transferredBytes else 0,
             progressPct = if (success) 1.0f else ((transferredBytes.toFloat() / effectiveTotalBytes.coerceAtLeast(1))).coerceIn(0f, 1f),
             etaSeconds = 0,
-            transports = listOf(TransportStats(if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi", endpoint.kind, smoothMbps, if (isUsb) 0.4 else 1.5, 0, true)),
-            chunkStates = finalChunks
+            transports = listOf(TransportStats(if (isUsb) "USB Fast-Path" else "Wi-Fi", endpoint.kind, smoothMbps, if (isUsb) 0.4 else 1.5, 0, true)),
+            chunkStates = emptyList()
         )
 
         withContext(Dispatchers.Main) {
             onUpdate(finalTelem)
+            if (success) TransferForegroundService.complete(this@MainActivity, finalTelem.title)
+            else TransferForegroundService.stopService(this@MainActivity)
             historyManager.addRecord(
                 TransferRecord(
                     fileName = if (totalFiles > 1) "$firstFileName + ${totalFiles - 1} more" else firstFileName,
@@ -2058,7 +1748,7 @@ class MainActivity : ComponentActivity() {
                     direction = TransferDirection.SENT,
                     status = if (success) TransferStatus.COMPLETED else TransferStatus.FAILED,
                     peerName = target.friendlyName,
-                    transportUsed = if (isUsb) "USB Fast-Path" else "5GHz Wi-Fi",
+                    transportUsed = if (isUsb) "USB Fast-Path" else "Wi-Fi",
                     speedMbps = smoothMbps
                 )
             )
@@ -2078,21 +1768,23 @@ class MainActivity : ComponentActivity() {
         return name ?: uri.lastPathSegment
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
         when (intent.action) {
             Intent.ACTION_SEND -> {
                 (intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))?.let { uri ->
-                    selectedUris.clear()
-                    selectedUris.add(uri)
-                    Toast.makeText(this, "Ready to share file. Select nearby device above.", Toast.LENGTH_SHORT).show()
+                    pendingFiles = listOf(uri)
                 }
             }
             Intent.ACTION_SEND_MULTIPLE -> {
                 intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris ->
-                    selectedUris.clear()
-                    selectedUris.addAll(uris)
-                    Toast.makeText(this, "Ready to share ${uris.size} files. Select nearby device above.", Toast.LENGTH_SHORT).show()
+                    pendingFiles = uris
                 }
             }
             "com.sharedash.app.WIFI_CONNECT" -> {
@@ -2121,6 +1813,8 @@ class MainActivity : ComponentActivity() {
 
         if (ungranted.isNotEmpty()) {
             permissionLauncher.launch(ungranted.toTypedArray())
+        } else {
+            startDiscovery()
         }
     }
 
@@ -2311,9 +2005,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        ensureWifiEnabled()
         checkUsbState()
-        checkExternalWifiState()
         if (_isUsbTetheringActive.value) {
             onUsbConnectedCallback?.invoke()
         }

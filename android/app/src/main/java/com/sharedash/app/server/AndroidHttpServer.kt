@@ -37,7 +37,7 @@ class AndroidHttpServer(
     private var serverJob: Job? = null
 
     val deviceId = com.sharedash.app.DeviceIdentity.id
-    val deviceName = Build.MODEL
+    val deviceName get() = com.sharedash.app.storage.SettingsManager.getInstance(context).deviceName
 
     data class ActiveChunkTransfer(
         val transferId: String,
@@ -50,11 +50,14 @@ class AndroidHttpServer(
         val receivedChunks: java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
         val startTime: Long = System.currentTimeMillis(),
         val totalBytesStreamed: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(0L),
-        val lastProgressReportTime: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis()),
-        val lastReportedBytes: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(0L)
+        val chunkLocks: Array<Any> = Array(16) { Any() }
     )
 
     private val activeChunkTransfers = java.util.concurrent.ConcurrentHashMap<String, ActiveChunkTransfer>()
+    // A sender may retry the last chunk after its acknowledgement was lost.
+    private val completedTransfers = object : LinkedHashMap<String, Int>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean = size > 256
+    }
     private val activeSockets = java.util.concurrent.ConcurrentHashMap.newKeySet<Socket>()
     private val activeFilesToCleanup = java.util.concurrent.ConcurrentHashMap.newKeySet<File>()
     private val isCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -66,16 +69,18 @@ class AndroidHttpServer(
         isCancelled.set(true)
         Log.i(TAG, "Cancelling all active incoming transfers on Android...")
 
-        activeChunkTransfers.keys.forEach { cancelledTransferIds.add(it) }
-        activeChunkTransfers.values.forEach { session ->
-            cancelledTransferIds.add(session.transferId)
-            try {
-                session.channel.close()
-                session.raf.close()
-                session.targetFile.delete()
-            } catch (_: Exception) {}
+        val interrupted = synchronized(activeChunkTransfers) {
+            activeChunkTransfers.keys.forEach { cancelledTransferIds.add(it) }
+            activeChunkTransfers.values.toTypedArray().also { activeChunkTransfers.clear() }
         }
-        activeChunkTransfers.clear()
+        interrupted.forEach { session ->
+            synchronized(session) {
+                if (session.receivedChunks.size != session.totalChunks) {
+                    try { session.raf.close() } catch (_: Exception) {}
+                    session.targetFile.delete()
+                }
+            }
+        }
 
         activeFilesToCleanup.forEach { file ->
             try { file.delete() } catch (_: Exception) {}
@@ -92,7 +97,6 @@ class AndroidHttpServer(
 
     fun resetCancellation() {
         isCancelled.set(false)
-        cancelledTransferIds.clear()
         Log.i(TAG, "Reset server cancellation state - ready for new transfers")
     }
 
@@ -138,8 +142,8 @@ class AndroidHttpServer(
         }
     }
 
-    var activePairedPeerName: String? = null
-    var pendingPairRequest: JSONObject? = null
+    @Volatile var activePairedPeerName: String? = null
+    @Volatile var pendingPairRequest: JSONObject? = null
     var onWifiConnectRequest: ((ssid: String, password: String) -> Unit)? = null
     var onStartHotspotRequest: ((callback: (ssid: String, password: String, gateway: String) -> Unit) -> Unit)? = null
 
@@ -230,7 +234,10 @@ class AndroidHttpServer(
                         val initiatorId = json.optString("initiator_device_id", "unknown")
                         val initiatorName = json.optString("initiator_name", "Remote Device")
                         var initiatorIp = json.optString("initiator_ip", "")
-                        if (initiatorIp.isBlank() || initiatorIp == "127.0.0.1") {
+                        val remoteIp = socket.inetAddress.hostAddress
+                        if (initiatorId.startsWith("android-") && remoteIp != null && !socket.inetAddress.isLoopbackAddress) {
+                            initiatorIp = remoteIp
+                        } else if (initiatorIp.isBlank() || initiatorIp == "127.0.0.1") {
                             initiatorIp = socket.inetAddress.hostAddress ?: "127.0.0.1"
                         }
                         val pin = json.optString("pin_code", "000000")
@@ -335,6 +342,7 @@ class AndroidHttpServer(
 
                     // 7b. Cancel In-Progress Transfer: POST /api/v1/transfers/cancel
                     method == "POST" && (path == "/api/v1/transfers/cancel" || path.startsWith("/api/v1/transfers/cancel")) -> {
+                        activeSockets.remove(socket)
                         cancelActiveTransfers()
                         val resp = JSONObject().apply {
                             put("success", true)
@@ -478,6 +486,7 @@ class AndroidHttpServer(
         } catch (e: Exception) {
             Log.d(TAG, "Client socket handled: ${e.message}")
         } finally {
+            activeSockets.remove(socket)
             try { socket.close() } catch (_: Exception) {}
         }
     }
@@ -503,142 +512,111 @@ class AndroidHttpServer(
         val totalChunks = headers["x-total-chunks"]?.toIntOrNull() ?: 1
         val transferId = headers["x-transfer-id"] ?: "default"
         val fileSize = headers["x-file-size"]?.toLongOrNull() ?: 0L
-        var fileName = headers["x-file-name"]?.let { sanitizeFileName(it) }
-            ?: "received_file_${System.currentTimeMillis()}.bin"
-
-        if (cancelledTransferIds.contains(transferId) || cancelledTransferIds.contains(fileName)) {
-            Log.i(TAG, "Rejecting chunk #$chunkId for transfer $transferId: transfer was cancelled.")
-            val resp = JSONObject().apply {
-                put("success", false)
-                put("error", "TRANSFER_CANCELLED")
-                put("message", "Transfer was cancelled by receiver")
-            }
-            sendJsonResponse(output, 410, resp, false)
+        val encodedName = headers["x-file-name-encoded"]
+        val fileName = sanitizeFileName(encodedName?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            ?: headers["x-file-name"] ?: "received_file.bin")
+        val sessionKey = "$transferId/$fileName"
+        if (contentLength < 0 || chunkId !in 0 until totalChunks || chunkOffset < 0 ||
+            chunkOffset > fileSize || contentLength > fileSize - chunkOffset) {
+            sendJsonResponse(output, 400, JSONObject().put("error", "Invalid chunk bounds"), false)
             return
         }
 
-        // Fresh transfer - clear blanket cancel flag
-        isCancelled.set(false)
-
-        val sessionKey = if (transferId.isNotBlank()) transferId else fileName
-        var isNewSession = false
-        val session = activeChunkTransfers.computeIfAbsent(sessionKey) {
-            isNewSession = true
-            acquireHighPerfLocks()
-            val targetFile = File(downloadDir, fileName)
-            val raf = java.io.RandomAccessFile(targetFile, "rw")
-            if (fileSize > 0) {
-                try { raf.setLength(fileSize) } catch (_: Exception) {}
-            }
-            ActiveChunkTransfer(transferId, fileName, fileSize, totalChunks, targetFile, raf)
+        fun acknowledge(count: Int) {
+            sendJsonResponse(output, 200, JSONObject().put("success", true).put("chunk_id", chunkId)
+                .put("completed_chunks", count).put("total_chunks", totalChunks), isKeepAlive)
         }
 
-        // Fire immediate transfer-start progress so Android UI flips to TransferScreen on chunk 0
-        if (isNewSession || session.receivedChunks.isEmpty()) {
-            onTransferProgress(session.fileName, session.totalBytesStreamed.get(), session.totalBytes, 0.0)
-        }
-
-        // Direct stream from socket to FileChannel in 1MB increments with in-flight CRC32 (zero heap garbage)
-        val crcHasher = if (expectedCrc32.isNotBlank()) java.util.zip.CRC32() else null
-        val buf = ByteArray(1024 * 1024)
-        var remaining = contentLength
-        var currentOffset = chunkOffset
-
-        try {
-            while (remaining > 0) {
-                if (isCancelled.get() || cancelledTransferIds.contains(transferId) || cancelledTransferIds.contains(sessionKey)) {
-                    try { session.channel.close() } catch (_: Exception) {}
-                    try { session.raf.close() } catch (_: Exception) {}
-                    try { session.targetFile.delete() } catch (_: Exception) {}
-                    activeChunkTransfers.remove(sessionKey)
-                    val resp = JSONObject().apply {
-                        put("success", false)
-                        put("error", "TRANSFER_CANCELLED")
-                        put("message", "Transfer was cancelled by receiver")
-                    }
-                    sendJsonResponse(output, 410, resp, false)
-                    return
-                }
-                val toRead = minOf(buf.size, remaining)
-                val read = input.read(buf, 0, toRead)
-                if (read == -1) break
-                if (crcHasher != null) {
-                    crcHasher.update(buf, 0, read)
-                }
-                val byteBuffer = java.nio.ByteBuffer.wrap(buf, 0, read)
-                session.channel.write(byteBuffer, currentOffset)
-                currentOffset += read
-                remaining -= read
-
-                // Streaming in-flight real-time progress update
-                val bytesNow = session.totalBytesStreamed.addAndGet(read.toLong())
-                val now = System.currentTimeMillis()
-                val lastTime = session.lastProgressReportTime.get()
-                if (now - lastTime >= 40L || remaining <= 0) {
-                    if (session.lastProgressReportTime.compareAndSet(lastTime, now)) {
-                        val elapsedSec = (now - session.startTime).coerceAtLeast(1) / 1000.0
-                        val speedMbps = ((bytesNow * 8.0) / 1_000_000.0) / elapsedSec
-                        onTransferProgress(session.fileName, bytesNow, session.totalBytes, speedMbps)
-                    }
-                }
-            }
-            session.receivedChunks.add(chunkId)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed streaming chunk #$chunkId at offset $chunkOffset: ${e.message}")
-            val resp = JSONObject().apply {
-                put("success", false)
-                put("error", "WRITE_FAILED")
-                put("chunk_id", chunkId)
-            }
-            sendJsonResponse(output, 500, resp, isKeepAlive)
-            return
-        }
-
-        if (crcHasher != null) {
-            val actualCrc32 = String.format("%08x", crcHasher.value)
-            if (actualCrc32 != expectedCrc32) {
-                Log.w(TAG, "Chunk #$chunkId CRC32 mismatch! Expected $expectedCrc32, got $actualCrc32")
-                val bytesThisChunk = (currentOffset - chunkOffset)
-                session.totalBytesStreamed.addAndGet(-bytesThisChunk)
-                val resp = JSONObject().apply {
-                    put("success", false)
-                    put("error", "CORRUPT_CHUNK")
-                    put("chunk_id", chunkId)
-                    put("message", "CRC32 mismatch - requesting retransmission")
-                }
-                sendJsonResponse(output, 400, resp, isKeepAlive)
+        val session = synchronized(activeChunkTransfers) {
+            if (transferId in cancelledTransferIds || sessionKey in cancelledTransferIds) {
+                sendJsonResponse(output, 410, JSONObject().put("error", "TRANSFER_CANCELLED"), false)
                 return
             }
+            if (completedTransfers.containsKey(sessionKey)) null else activeChunkTransfers.getOrPut(sessionKey) {
+                val target = reserveDownload(downloadDir, fileName)
+                val raf = java.io.RandomAccessFile(target, "rw")
+                acquireHighPerfLocks()
+                ActiveChunkTransfer(transferId, target.name, fileSize, totalChunks, target, raf)
+            }
+        }
+        val buffer = ByteArray(minOf(contentLength.coerceAtLeast(1), 256 * 1024))
+        fun readBody(write: (Int) -> Unit) {
+            var remaining = contentLength
+            while (remaining > 0) {
+                val count = input.read(buffer, 0, minOf(remaining, buffer.size))
+                if (count < 0) throw java.io.EOFException("Incomplete chunk")
+                write(count)
+                remaining -= count
+            }
         }
 
-        val completedCount = session.receivedChunks.size
-        val total = session.totalChunks
-
-        val elapsedSec = (System.currentTimeMillis() - session.startTime).coerceAtLeast(1) / 1000.0
-        val totalBytesWritten = session.totalBytesStreamed.get().coerceAtLeast(completedCount.toLong() * contentLength.toLong().coerceAtLeast(1L))
-        val speedMbps = ((totalBytesWritten * 8.0) / 1_000_000.0) / elapsedSec
-        onTransferProgress(session.fileName, totalBytesWritten, session.totalBytes, speedMbps)
-
-        val isAllBytesReceived = session.totalBytes > 0L && session.totalBytesStreamed.get() >= session.totalBytes
-        if (completedCount >= total || isAllBytesReceived) {
-            try {
-                session.channel.force(true)
-                session.channel.close()
-                session.raf.close()
-            } catch (_: Exception) {}
-            activeChunkTransfers.remove(sessionKey)
-            releaseHighPerfLocksIfIdle()
-            Log.i(TAG, "Transfer completed for ${session.fileName}: $completedCount/$total chunks verified & saved (${session.totalBytesStreamed.get()}/${session.totalBytes} bytes)")
-            onFileReceived(session.fileName, session.targetFile.length())
+        if (session == null) {
+            readBody { }
+            acknowledge(totalChunks)
+            return
         }
-
-        val resp = JSONObject().apply {
-            put("success", true)
-            put("chunk_id", chunkId)
-            put("completed_chunks", completedCount)
-            put("total_chunks", total)
+        isCancelled.set(false)
+        if (session.totalChunks != totalChunks || session.totalBytes != fileSize) {
+            sendJsonResponse(output, 400, JSONObject().put("error", "Inconsistent file metadata"), false)
+            return
         }
-        sendJsonResponse(output, 200, resp, isKeepAlive)
+        // Independent USB and Wi-Fi chunks stream concurrently. Only a retry of the same
+        // chunk (or a colliding lock stripe) waits for the previous writer.
+        synchronized(session.chunkLocks[chunkId % session.chunkLocks.size]) {
+            if (chunkId in session.receivedChunks) {
+                readBody { }
+                acknowledge(session.receivedChunks.size)
+                return
+            }
+            val crc = java.util.zip.CRC32()
+            var position = chunkOffset
+            readBody { count ->
+                crc.update(buffer, 0, count)
+                val bytes = java.nio.ByteBuffer.wrap(buffer, 0, count)
+                while (bytes.hasRemaining()) position += session.channel.write(bytes, position)
+            }
+            if (expectedCrc32.isNotEmpty() && "%08x".format(crc.value) != expectedCrc32) {
+                sendJsonResponse(output, 400, JSONObject().put("error", "CORRUPT_CHUNK"), isKeepAlive)
+                return
+            }
+            val count = synchronized(session) {
+                val written = session.totalBytesStreamed.get() + contentLength
+                val count = session.receivedChunks.size + 1
+                if (count == totalChunks && written != fileSize) {
+                    sendJsonResponse(output, 400, JSONObject().put("error", "Incomplete file"), isKeepAlive)
+                    return
+                }
+                if (count == totalChunks) {
+                    session.channel.force(true)
+                    session.raf.close()
+                }
+                session.receivedChunks.add(chunkId)
+                session.totalBytesStreamed.set(written)
+                val elapsedMs = (System.currentTimeMillis() - session.startTime).coerceAtLeast(1)
+                onTransferProgress(session.fileName, written, fileSize, written * 8.0 / (elapsedMs * 1000.0))
+                if (count == totalChunks) {
+                    synchronized(activeChunkTransfers) {
+                        completedTransfers[sessionKey] = count
+                        activeChunkTransfers.remove(sessionKey)
+                    }
+                    releaseHighPerfLocksIfIdle()
+                    onFileReceived(session.fileName, written)
+                }
+                count
+            }
+            acknowledge(count)
+        }
+    }
+
+    private fun reserveDownload(directory: File, name: String): File {
+        val extension = File(name).extension.let { if (it.isEmpty()) "" else ".$it" }
+        val stem = name.removeSuffix(extension)
+        var candidate = File(directory, name)
+        var index = 1
+        while (!candidate.createNewFile()) {
+            candidate = File(directory, "$stem (${index++})$extension")
+        }
+        return candidate
     }
 
     private fun handleIncomingFileUpload(
@@ -905,6 +883,7 @@ class AndroidHttpServer(
 
     fun stop() {
         serverJob?.cancel()
+        cancelActiveTransfers()
         try { serverSocket?.close() } catch (_: Exception) {}
     }
 

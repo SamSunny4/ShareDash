@@ -165,6 +165,7 @@ class HotspotManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun start5GHzHotspot(onSuccess: ((ssid: String, password: String, gateway: String) -> Unit)? = null) {
+        if (_hotspotState.value == HotspotState.Starting) return
         if (!hasHotspotPermission()) {
             _hotspotState.value = HotspotState.Error("Wi-Fi / Location permission required for Hotspot")
             return
@@ -240,7 +241,11 @@ class HotspotManager(private val context: Context) {
             return
         }
 
-        create5GHzP2pGroupActual(mgr, channel, false, onSuccess)
+        if (com.sharedash.app.storage.SettingsManager.getInstance(context).prefer5GHz) {
+            create5GHzP2pGroupActual(mgr, channel, false, onSuccess)
+        } else {
+            createAutoP2pGroup(mgr, channel, onSuccess)
+        }
     }
 
     @SuppressLint("MissingPermission")

@@ -1,5 +1,9 @@
 package com.sharedash.app.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import com.sharedash.app.model.formatTransferSpeed
+
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
@@ -110,8 +114,8 @@ fun TransferHistoryScreen(
         }
     }
 
-    val selectedRecord = remember(selectedRecordId, records) {
-        records.find { it.id == selectedRecordId }
+    val selectedRecord = remember(selectedRecordId, filteredRecords) {
+        filteredRecords.find { it.id == selectedRecordId }
     }
 
     val totalBytesReceived = remember(records) {
@@ -289,16 +293,12 @@ fun TransferHistoryScreen(
         // ═══════════════════════════════════════════════════════════════
         //  3. FILTER CHIPS + NARROW SEARCH (same row)
         // ═══════════════════════════════════════════════════════════════
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("ALL" to "All", "RECEIVED" to "↓", "SENT" to "↑", "COMPLETED" to "✓").forEach { (filterKey, label) ->
+                listOf("ALL" to "All", "RECEIVED" to "Received", "SENT" to "Sent", "COMPLETED" to "Completed", "FAILED" to "Unfinished").forEach { (filterKey, label) ->
                     val isSelected = selectedFilter == filterKey
                     Box(
                         modifier = Modifier
@@ -308,7 +308,7 @@ fun TransferHistoryScreen(
                                 else Brush.linearGradient(listOf(NeoCard, NeoCard))
                             )
                             .clickable { selectedFilter = filterKey }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = label,
@@ -321,7 +321,7 @@ fun TransferHistoryScreen(
             }
 
             // Narrow search box
-            NeoInset(modifier = Modifier.width(130.dp), cornerRadius = 10.dp, backgroundColor = NeoCardPressed) {
+            NeoInset(modifier = Modifier.fillMaxWidth(), cornerRadius = 10.dp, backgroundColor = NeoCardPressed) {
                 Row(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -331,7 +331,7 @@ fun TransferHistoryScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text(text = "Search...", fontSize = 11.sp, color = TextMuted) },
+                        placeholder = { Text(text = "Search by file or device", fontSize = 11.sp, color = TextMuted) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
                             unfocusedBorderColor = Color.Transparent,
@@ -392,20 +392,19 @@ fun TransferHistoryScreen(
                                     append(rec.peerName)
                                     append(" · ")
                                     append(formattedDate)
-                                    append(" · ")
-                                    append(rec.transportUsed)
-                                    if (rec.speedMbps > 0) append(" · %.1f MB/s".format(rec.speedMbps))
+                                    if (rec.transportUsed.isNotBlank()) append(" · ${rec.transportUsed}")
+                                    if (rec.speedMbps > 0) append(" · ${formatTransferSpeed(rec.speedMbps)}")
                                 },
                                 fontSize = 11.sp,
                                 color = TextMuted,
-                                maxLines = 1,
+                                maxLines = 3,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            NeoButton(
-                                onClick = { openTransferredFile(context, rec) },
+                            if (isReceived && rec.status == TransferStatus.COMPLETED && !rec.filePath.isNullOrBlank()) NeoButton(
+                                onClick = { openReceivedFile(context, java.io.File(rec.filePath)) },
                                 cornerRadius = 10.dp,
                                 accentColor = if (isReceived) NeoGreen else NeoBlue
                             ) {
@@ -448,12 +447,12 @@ fun TransferHistoryScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = if (searchQuery.isNotEmpty()) "No matching transfers" else "No Transfer History",
+                        text = if (searchQuery.isNotEmpty() || selectedFilter != "ALL") "No matching transfers" else "No Transfer History",
                         fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (searchQuery.isNotEmpty()) "Try a different search keyword" else "Files sent or received will appear here automatically",
+                        text = if (searchQuery.isNotEmpty() || selectedFilter != "ALL") "Try another filter or search term" else "Files sent or received will appear here automatically",
                         fontSize = 12.sp, color = TextMuted, textAlign = TextAlign.Center
                     )
                 }
@@ -530,7 +529,7 @@ private fun CompactTransferRecordRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${if (isReceived) "↓" else "↑"} ${formatFileSize(record.fileSize)} · $formattedDate",
+                    text = listOf(if (isReceived) "Received" else "Sent", record.status.name.lowercase().replaceFirstChar { it.uppercase() }, formatFileSize(record.fileSize), formattedDate).joinToString(" · "),
                     fontSize = 11.sp,
                     color = TextMuted,
                     maxLines = 1
@@ -562,11 +561,11 @@ private fun getFileIcon(fileName: String): ImageVector {
     }
 }
 
-private fun formatFileSize(bytes: Long): String {
+internal fun formatFileSize(bytes: Long): String {
     if (bytes <= 0) return "0 B"
-    val kb = bytes / 1024.0
-    val mb = kb / 1024.0
-    val gb = mb / 1024.0
+    val kb = bytes / 1000.0
+    val mb = kb / 1000.0
+    val gb = mb / 1000.0
     return when {
         gb >= 1.0 -> "%.2f GB".format(gb)
         mb >= 1.0 -> "%.1f MB".format(mb)
@@ -575,32 +574,17 @@ private fun formatFileSize(bytes: Long): String {
     }
 }
 
-private fun openTransferredFile(context: android.content.Context, record: TransferRecord) {
+internal fun openReceivedFile(context: android.content.Context, file: java.io.File) {
+    if (!file.isFile) {
+        Toast.makeText(context, "This file was moved or deleted", Toast.LENGTH_SHORT).show()
+        return
+    }
     try {
-        val path = record.filePath
-        if (!path.isNullOrBlank()) {
-            val file = java.io.File(path)
-            if (file.exists()) {
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    file
-                )
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
-                    setDataAndType(uri, mime)
-                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                context.startActivity(intent)
-                return
-            }
-        }
-        // Fallback: Open system Downloads app
-        val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "Transferred file saved in Downloads/ShareDash", Toast.LENGTH_SHORT).show()
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    } catch (_: Exception) {
+        Toast.makeText(context, "Unable to open this file. Find it in Downloads/ShareDash.", Toast.LENGTH_LONG).show()
     }
 }

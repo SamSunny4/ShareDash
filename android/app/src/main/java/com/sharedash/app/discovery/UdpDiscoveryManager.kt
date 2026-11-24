@@ -29,13 +29,13 @@ import java.net.URL
 
 class UdpDiscoveryManager(
     private val context: Context,
-    private val deviceName: String,
     private val serverPort: Int = 54321
 ) {
+    private val deviceName get() = com.sharedash.app.storage.SettingsManager.getInstance(context).deviceName
     private val _discoveredPeers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
     val discoveredPeers: StateFlow<List<DiscoveredPeer>> = _discoveredPeers.asStateFlow()
 
-    private val peerMap = mutableMapOf<String, DiscoveredPeer>()
+    private val peerMap = java.util.concurrent.ConcurrentHashMap<String, DiscoveredPeer>()
     private var discoveryJob: Job? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
@@ -154,7 +154,7 @@ class UdpDiscoveryManager(
                     val myIps = getLocalIpAddresses()
 
                     // Strict self-detection filter: ignore own beacons or own IPs
-                    if (devId == myDeviceId || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
+                    if (devId == myDeviceId || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
                         continue
                     }
 
@@ -176,7 +176,7 @@ class UdpDiscoveryManager(
                     )
 
                     peerMap[devId] = peer
-                    _discoveredPeers.value = peerMap.values.toList()
+                    _discoveredPeers.value = peerMap.values.toTypedArray().toList()
                 } catch (e: Exception) {
                     Log.w(TAG, "Malformed beacon JSON: ${e.message}")
                 }
@@ -234,7 +234,7 @@ class UdpDiscoveryManager(
             val keysToRemove = peerMap.filterValues { now - it.lastSeenTimestamp > 30000 }.keys
             if (keysToRemove.isNotEmpty()) {
                 keysToRemove.forEach { peerMap.remove(it) }
-                _discoveredPeers.value = peerMap.values.toList()
+                _discoveredPeers.value = peerMap.values.toTypedArray().toList()
             }
             delay(5000)
         }
@@ -264,7 +264,7 @@ class UdpDiscoveryManager(
                 val myIps = getLocalIpAddresses()
 
                 // Strict self-detection filter: ignore own HTTP server on phone
-                if (devId == myDeviceId || name == deviceName || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
+                if (devId == myDeviceId || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
                     return
                 }
 
@@ -319,7 +319,7 @@ class UdpDiscoveryManager(
                 )
 
                 peerMap[devId] = peer
-                _discoveredPeers.value = peerMap.values.toList()
+                _discoveredPeers.value = peerMap.values.toTypedArray().toList()
                 Log.i(TAG, "Discovered remote device via HTTP Probe: $name at $ip:$port (USB: $hasAnyUsb)")
 
                 // Immediately announce phone to PC's UDP discovery port 54320
@@ -388,7 +388,8 @@ class UdpDiscoveryManager(
 
     fun stopDiscovery() {
         discoveryJob?.cancel()
-        multicastLock?.release()
+        if (multicastLock?.isHeld == true) multicastLock?.release()
+        multicastLock = null
     }
 
     companion object {

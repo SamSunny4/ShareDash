@@ -28,7 +28,7 @@ val DarkShareDashColors = ShareDashColors(
     darkShadow = Color(0xFF030406),
     textPrimary = Color(0xFFF0F4FF),
     textSecondary = Color(0xFF8899BB),
-    textMuted = Color(0xFF4A5A78),
+    textMuted = Color(0xFF8998B3),
     isDark = true
 )
 
@@ -40,7 +40,7 @@ val LightShareDashColors = ShareDashColors(
     darkShadow = Color(0xFFCBD5E1),
     textPrimary = Color(0xFF0F172A),
     textSecondary = Color(0xFF475569),
-    textMuted = Color(0xFF94A3B8),
+    textMuted = Color(0xFF52647A),
     isDark = false
 )
 

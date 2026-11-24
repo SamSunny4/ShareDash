@@ -58,6 +58,7 @@ fun NeoCard(
                 spotColor = themeColors.darkShadow
             )
             .clip(shape)
+            .background(actualBg)
             .background(
                 Brush.linearGradient(
                     colors = if (isPressed && onClick != null) {

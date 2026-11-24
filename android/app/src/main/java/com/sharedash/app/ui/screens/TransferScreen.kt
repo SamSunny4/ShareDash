@@ -1,6 +1,5 @@
 package com.sharedash.app.ui.screens
 
-import android.content.Intent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -49,7 +48,6 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,10 +69,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.sharedash.app.model.ChunkState
 import com.sharedash.app.model.SchedulerTelemetry
 import com.sharedash.app.model.TransportKind
-import com.sharedash.app.ui.components.PieceVisualizerGrid
 import com.sharedash.app.ui.theme.NeoBg
 import com.sharedash.app.ui.theme.NeoBlue
 import com.sharedash.app.ui.theme.NeoButton
@@ -89,7 +85,8 @@ import com.sharedash.app.ui.theme.NeoRed
 import com.sharedash.app.ui.theme.TextMuted
 import com.sharedash.app.ui.theme.TextPrimary
 import com.sharedash.app.ui.theme.TextSecondary
-import kotlinx.coroutines.delay
+import com.sharedash.app.model.TransferDirection
+import com.sharedash.app.model.formatTransferSpeed
 
 enum class TransferUiStage {
     TRANSFERRING,
@@ -107,6 +104,8 @@ fun TransferScreen(
     onSendAnother: () -> Unit = {},
     onPickFiles: () -> Unit = {},
     onPickFolder: () -> Unit = {},
+    onPickGallery: () -> Unit = {},
+    onPickDocuments: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -124,6 +123,8 @@ fun TransferScreen(
             targetName = targetName,
             onPickFiles = onPickFiles,
             onPickFolder = onPickFolder,
+            onPickGallery = onPickGallery,
+            onPickDocuments = onPickDocuments,
             onNavigateToHistory = onNavigateToHistory,
             modifier = modifier
         )
@@ -140,53 +141,21 @@ private fun ActiveTransferScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val isTelemetryCompleted = telemetry.status.equals("COMPLETED", ignoreCase = true)
-    val isTelemetryVerifying = telemetry.status.equals("VERIFYING", ignoreCase = true)
-    val isTelemetryFailed = telemetry.status.equals("FAILED", ignoreCase = true)
-
-    // Normalize progress 0.0f .. 1.0f
-    val normalizedProgress = if (telemetry.progressPct > 1.0f) {
-        (telemetry.progressPct / 100f).coerceIn(0f, 1f)
-    } else {
-        telemetry.progressPct.coerceIn(0f, 1f)
+    val received = telemetry.direction == TransferDirection.RECEIVED
+    val recipient = telemetry.peerName.ifBlank { targetName }.ifBlank { "the other device" }
+    val normalizedProgress = telemetry.progressPct.coerceIn(0f, 1f)
+    val uiStage = when (telemetry.status) {
+        "COMPLETED" -> TransferUiStage.COMPLETED
+        "FAILED" -> TransferUiStage.FAILED
+        "VERIFYING" -> TransferUiStage.VERIFYING
+        else -> TransferUiStage.TRANSFERRING
     }
-
-    val isDoneOrNearDone = isTelemetryCompleted || isTelemetryVerifying || normalizedProgress >= 0.999f
-
-    var uiStage by remember { mutableStateOf(if (isTelemetryFailed) TransferUiStage.FAILED else TransferUiStage.TRANSFERRING) }
-
-    // Synchronize verification delay for a smooth, flicker-free visual experience
-    LaunchedEffect(isTelemetryCompleted, isDoneOrNearDone, isTelemetryFailed) {
-        if (isTelemetryFailed) {
-            uiStage = TransferUiStage.FAILED
-        } else if (isTelemetryCompleted) {
-            if (uiStage == TransferUiStage.TRANSFERRING) {
-                uiStage = TransferUiStage.VERIFYING
-                delay(400)
-            }
-            uiStage = TransferUiStage.COMPLETED
-        } else if (isDoneOrNearDone) {
-            if (uiStage == TransferUiStage.TRANSFERRING) {
-                uiStage = TransferUiStage.VERIFYING
-            }
-            delay(900)
-            uiStage = TransferUiStage.COMPLETED
-        }
-    }
-
-    // Determine USB vs Wi-Fi distribution ratio
-    val usbTransport = telemetry.transports.find { it.kind == TransportKind.USB }
-    val completedChunks = telemetry.chunkStates.filter { it.state == ChunkState.COMPLETED }
-    val totalChunksCount = telemetry.chunkStates.size.coerceAtLeast(1)
-    val usbCompletedCount = completedChunks.count { it.transportName?.contains("usb", ignoreCase = true) == true }
-
-    val hasUsb = usbTransport?.isActive == true || usbCompletedCount > 0
-    val targetUsbRatio = when {
-        completedChunks.isNotEmpty() -> (usbCompletedCount.toFloat() / totalChunksCount.toFloat()).coerceIn(0f, 1f)
-        hasUsb -> 0.70f * normalizedProgress
-        else -> 0.0f
-    }
-    val targetWifiRatio = (normalizedProgress - targetUsbRatio).coerceAtLeast(0f)
+    val usbBytes = telemetry.usbBytes
+    val showDistribution = usbBytes != null && telemetry.completedBytes > 0
+    val usbShare = ((usbBytes ?: 0L).toDouble() / telemetry.completedBytes.coerceAtLeast(1)).coerceIn(0.0, 1.0).toFloat()
+    val hasUsb = usbShare > 0f
+    val targetUsbRatio = usbShare * normalizedProgress
+    val targetWifiRatio = normalizedProgress - targetUsbRatio
 
     // Continuous smooth linear interpolation for silky-smooth progress without pauses
     val targetTotalProg = if (uiStage != TransferUiStage.TRANSFERRING) 1.0f else normalizedProgress
@@ -196,12 +165,12 @@ private fun ActiveTransferScreen(
         label = "totalProgress"
     )
     val animatedUsbProgress by animateFloatAsState(
-        targetValue = if (uiStage != TransferUiStage.TRANSFERRING) targetUsbRatio else targetUsbRatio,
+        targetValue = targetUsbRatio,
         animationSpec = tween(durationMillis = 180, easing = LinearEasing),
         label = "usbProgress"
     )
     val animatedWifiProgress by animateFloatAsState(
-        targetValue = if (uiStage != TransferUiStage.TRANSFERRING) targetWifiRatio else targetWifiRatio,
+        targetValue = targetWifiRatio,
         animationSpec = tween(durationMillis = 180, easing = LinearEasing),
         label = "wifiProgress"
     )
@@ -211,12 +180,10 @@ private fun ActiveTransferScreen(
     val formattedPct = if (uiStage != TransferUiStage.TRANSFERRING) "100.00%" else "%.2f%%".format(pctFloat)
 
     val speedMbS = telemetry.aggregateMbps / 8.0
-    val formattedSpeed = if (speedMbS >= 1.0) "%.2f MB/s".format(speedMbS) else "%.1f KB/s".format(speedMbS * 1024.0)
-    val sentMb = telemetry.completedBytes / (1024.0 * 1024.0)
-    val totalMb = telemetry.totalBytes / (1024.0 * 1024.0)
+    val formattedSpeed = formatTransferSpeed(telemetry.aggregateMbps)
 
     // Track peak speed observed throughout transfer
-    var peakSpeedMbS by remember { mutableDoubleStateOf(0.0) }
+    var peakSpeedMbS by remember(telemetry.transferId) { mutableDoubleStateOf(0.0) }
     if (speedMbS > peakSpeedMbS) {
         peakSpeedMbS = speedMbS
     }
@@ -312,7 +279,7 @@ private fun ActiveTransferScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = if (currentStage == TransferUiStage.VERIFYING) "Verifying integrity..." else "Streaming with $targetName",
+                                            text = if (currentStage == TransferUiStage.VERIFYING) "Finishing transfer…" else if (received) "Receiving from $recipient" else "Sending to $recipient",
                                             fontSize = 12.sp,
                                             color = if (currentStage == TransferUiStage.VERIFYING) NeoCyan else TextSecondary
                                         )
@@ -397,7 +364,7 @@ private fun ActiveTransferScreen(
                                     // Arc 2: 5GHz Wi-Fi (Green)
                                     if (animatedWifiProgress > 0.001f) {
                                         drawArc(
-                                            color = NeoGreen,
+                                            color = if (showDistribution) NeoGreen else NeoBlue,
                                             startAngle = -90f + (animatedUsbProgress * 360f),
                                             sweepAngle = animatedWifiProgress * 360f,
                                             useCenter = false,
@@ -440,7 +407,7 @@ private fun ActiveTransferScreen(
                                         )
                                         Spacer(modifier = Modifier.width(5.dp))
                                         Text(
-                                            text = "Checking CRC32",
+                                            text = "Finishing…",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = NeoCyan
@@ -465,7 +432,7 @@ private fun ActiveTransferScreen(
                                     if (telemetry.etaSeconds > 0) {
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            text = "ETA: ${telemetry.etaSeconds}s",
+                                            text = if (telemetry.aggregateMbps <= 0.0) "Estimating time…" else if (telemetry.etaSeconds < 1) "Less than a second left" else "${telemetry.etaSeconds}s left",
                                             fontSize = 11.sp,
                                             color = TextMuted
                                         )
@@ -507,7 +474,7 @@ private fun ActiveTransferScreen(
                                             Text(text = "Peak Speed", fontSize = 11.sp, color = TextMuted)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = if (peakSpeedMbS >= 1.0) "%.2f MB/s".format(peakSpeedMbS) else "%.1f KB/s".format(peakSpeedMbS * 1024.0),
+                                                text = if (peakSpeedMbS > 0) formatTransferSpeed(peakSpeedMbS * 8) else "—",
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = NeoCyan
@@ -529,7 +496,7 @@ private fun ActiveTransferScreen(
                                             Text(text = "Total Payload", fontSize = 11.sp, color = TextMuted)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "%.2f / %.2f MB".format(sentMb, totalMb.coerceAtLeast(sentMb)),
+                                                text = "${formatFileSize(telemetry.completedBytes)} / ${formatFileSize(telemetry.totalBytes)}",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
@@ -541,16 +508,8 @@ private fun ActiveTransferScreen(
                                 Spacer(modifier = Modifier.height(10.dp))
 
                                 // Transport Multipath Ratio
-                                val currentNorm = normalizedProgress.coerceAtLeast(0.001f)
-                                val usbPct = (targetUsbRatio / currentNorm * 100f).coerceIn(0f, 100f)
-                                val wifiPct = (targetWifiRatio / currentNorm * 100f).coerceIn(0f, 100f)
-                                val ratioText = when {
-                                    hasUsb && targetWifiRatio > 0.001f -> "USB %.1f%% · Wi-Fi %.1f%%".format(usbPct, wifiPct)
-                                    hasUsb -> "100% USB Fast-Path"
-                                    else -> "100% 5GHz Wi-Fi"
-                                }
-
-                                NeoCard(
+                                val ratioText = "USB %.0f%% · Wi-Fi %.0f%%".format(usbShare * 100, (1 - usbShare) * 100)
+                                if (showDistribution) NeoCard(
                                     modifier = Modifier.fillMaxWidth(),
                                     cornerRadius = 14.dp,
                                     backgroundColor = NeoCardPressed
@@ -585,10 +544,6 @@ private fun ActiveTransferScreen(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // ═══════════════════════════════════════════════════════════════
-                        //  BITTORRENT-STYLE PIECE MAP VISUALIZER
-                        // ═══════════════════════════════════════════════════════════════
-                        PieceVisualizerGrid(chunkStates = telemetry.chunkStates)
                     }
                 }
 
@@ -631,13 +586,13 @@ private fun ActiveTransferScreen(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(
-                                            text = "Transfer Complete!",
+                                            text = if (received) "File received" else "Transfer complete",
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = TextPrimary
                                         )
                                         Text(
-                                            text = "File verified & saved successfully",
+                                            text = if (received) "From $recipient" else "Sent to $recipient",
                                             fontSize = 12.sp,
                                             color = NeoGreen
                                         )
@@ -705,7 +660,7 @@ private fun ActiveTransferScreen(
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
-                                Text(
+                                if (received) Text(
                                     text = "Saved to Downloads/ShareDash",
                                     fontSize = 13.sp,
                                     color = TextSecondary,
@@ -744,7 +699,7 @@ private fun ActiveTransferScreen(
                                             Text(text = "Payload Size", fontSize = 11.sp, color = TextMuted)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = "%.2f MB".format(totalMb.coerceAtLeast(sentMb)),
+                                                text = formatFileSize(telemetry.totalBytes),
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = TextPrimary
@@ -762,10 +717,10 @@ private fun ActiveTransferScreen(
                                                 .fillMaxWidth()
                                                 .padding(12.dp)
                                         ) {
-                                            Text(text = "Peak Speed", fontSize = 11.sp, color = TextMuted)
+                                            Text(text = "Transfer speed", fontSize = 11.sp, color = TextMuted)
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
-                                                text = if (peakSpeedMbS >= 1.0) "%.2f MB/s".format(peakSpeedMbS) else "%.1f KB/s".format(peakSpeedMbS * 1024.0),
+                                                text = if (telemetry.aggregateMbps > 0) formattedSpeed else "—",
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = NeoCyan
@@ -774,43 +729,12 @@ private fun ActiveTransferScreen(
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(10.dp))
 
-                                NeoCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    cornerRadius = 14.dp,
-                                    backgroundColor = NeoCardPressed
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.FolderOpen,
-                                            contentDescription = null,
-                                            tint = NeoPurple,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Saved in Downloads/ShareDash",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = TextSecondary
-                                        )
-                                    }
-                                }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // Piece Map visualizer in completed state
-                        PieceVisualizerGrid(chunkStates = telemetry.chunkStates)
-
-                        Spacer(modifier = Modifier.height(22.dp))
 
                         // ═══════════════════════════════════════════════════════════════
                         //  ACTION BUTTONS: SEND ANOTHER FILE / SELECT FILES
@@ -837,7 +761,7 @@ private fun ActiveTransferScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Select Files for Sending / Send Another",
+                                    text = "Send more files",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -847,14 +771,11 @@ private fun ActiveTransferScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Secondary Action: Open in Downloads
-                        NeoButton(
-                            onClick = {
-                                try {
-                                    val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {}
-                            },
+                        if (received) NeoButton(
+                            onClick = { openReceivedFile(context, java.io.File(
+                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                                "ShareDash/${telemetry.title}"
+                            )) },
                             cornerRadius = 16.dp,
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -873,7 +794,7 @@ private fun ActiveTransferScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Open in Downloads / ShareDash",
+                                    text = "Open file",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
@@ -905,7 +826,7 @@ private fun ActiveTransferScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Done — Return to Home",
+                                    text = "Done",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -957,7 +878,7 @@ private fun ActiveTransferScreen(
                                             color = NeoRed
                                         )
                                         Text(
-                                            text = "Connection lost or PC shutdown",
+                                            text = "The transfer did not finish",
                                             fontSize = 12.sp,
                                             color = TextSecondary
                                         )
@@ -1022,7 +943,7 @@ private fun ActiveTransferScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 Text(
-                                    text = "Unable to reach $targetName. The PC may be shutdown or disconnected from the network.",
+                                    text = "Check the file is available and $recipient is still connected, then try again.",
                                     fontSize = 13.sp,
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center,
@@ -1069,6 +990,8 @@ private fun TransferIdleScreen(
     targetName: String,
     onPickFiles: () -> Unit,
     onPickFolder: () -> Unit,
+    onPickGallery: () -> Unit,
+    onPickDocuments: () -> Unit,
     onNavigateToHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1123,7 +1046,7 @@ private fun TransferIdleScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Ready to stream files at line speed",
+                            text = "Send files to a nearby device",
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
@@ -1203,7 +1126,7 @@ private fun TransferIdleScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Target: $targetName\nFiles are automatically split into 256KB-8MB chunks and sent over USB & Wi-Fi simultaneously.",
+                    text = if (targetName.isBlank()) "Choose files, then select a recipient." else "Send to $targetName",
                     fontSize = 12.sp,
                     color = TextSecondary,
                     textAlign = TextAlign.Center,
@@ -1234,7 +1157,7 @@ private fun TransferIdleScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Choose Files & Videos",
+                            text = "Choose files",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -1269,14 +1192,14 @@ private fun TransferIdleScreen(
                 title = "Gallery",
                 subtitle = "Photos & Videos",
                 accentColor = NeoPurple,
-                onClick = onPickFiles,
+                onClick = onPickGallery,
                 modifier = Modifier.weight(1f)
             )
 
             TransferCategoryItem(
                 icon = Icons.Default.Folder,
                 title = "Folders",
-                subtitle = "Directories & Trees",
+                subtitle = "Files in a folder",
                 accentColor = NeoCyan,
                 onClick = onPickFolder,
                 modifier = Modifier.weight(1f)
@@ -1294,7 +1217,7 @@ private fun TransferIdleScreen(
                 title = "Documents",
                 subtitle = "PDFs, Docs, Zips",
                 accentColor = NeoGreen,
-                onClick = onPickFiles,
+                onClick = onPickDocuments,
                 modifier = Modifier.weight(1f)
             )
 

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -106,6 +107,7 @@ fun HomeScreen(
     onStopHotspot: () -> Unit = {},
     deviceName: String = "My Phone",
     hasActiveTransfer: Boolean = false,
+    connectingId: String? = null,
     modifier: Modifier = Modifier
 ) {
     val transition = rememberInfiniteTransition(label = "usbPulse")
@@ -187,16 +189,12 @@ fun HomeScreen(
                                     .clip(CircleShape)
                                     .background(
                                         if (connectedPeer != null) NeoGreen
-                                        else if (isUsbTetheringActive) NeoCyan
-                                        else if (isUsbCablePlugged) NeoYellow
                                         else TextMuted
                                     )
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = if (connectedPeer != null) "Connected to ${connectedPeer.friendlyName}"
-                                else if (isUsbTetheringActive) "USB Tethering Active"
-                                else if (isUsbCablePlugged) "USB Cable Plugged"
                                 else deviceName,
                                 fontSize = 12.sp,
                                 color = TextSecondary,
@@ -287,9 +285,10 @@ fun HomeScreen(
                 // The sliding active pill background
                 Box(
                     modifier = Modifier
+                        .matchParentSize()
+                        .wrapContentWidth(Alignment.Start)
                         .offset(x = pillOffset)
                         .width(pillWidth)
-                        .matchParentSize()
                         .clip(RoundedCornerShape(14.dp))
                         .background(
                             Brush.linearGradient(
@@ -451,7 +450,7 @@ fun HomeScreen(
                     // Waiting for USB connection and tethering text
                     if (isUsbTetheringActive) {
                         Text(
-                            text = "Connected",
+                            text = "USB tethering is on",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = NeoGreen,
@@ -459,7 +458,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "USB tethering active. Ready to transfer at line speed.",
+                            text = "Select a nearby PC to send files.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -475,7 +474,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Waiting for USB Tethering... Turn on USB Tethering in Settings to activate maximum speed.",
+                            text = "Turn on USB tethering in your phone’s settings, or continue over Wi-Fi.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -503,7 +502,7 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Enable USB Tethering",
+                                    text = "Open tethering settings",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -512,7 +511,7 @@ fun HomeScreen(
                         }
                     } else {
                         Text(
-                            text = "Waiting for USB Connection & Tethering",
+                            text = "Connect to your PC",
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -563,7 +562,7 @@ fun HomeScreen(
             // ═══════════════════════════════════════════════════════════════
             //  4. SKIP USB BUTTON (WIRELESS BYPASS) - hidden when USB active
             // ═══════════════════════════════════════════════════════════════
-            if (!isUsbCablePlugged && !isUsbTetheringActive) {
+            if (!isUsbTetheringActive && connectedPeer == null) {
                 NeoCard(
                     modifier = Modifier.fillMaxWidth(),
                     cornerRadius = 20.dp,
@@ -598,13 +597,13 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Skip USB",
+                                    text = "Use Wi-Fi",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "Continue wirelessly via Wi-Fi Direct or LAN",
+                                    text = "Connect both devices to the same network",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
@@ -616,7 +615,7 @@ fun HomeScreen(
                             cornerRadius = 12.dp
                         ) {
                             Text(
-                                text = "Skip →",
+                                text = "Continue",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = NeoCyan,
@@ -628,61 +627,6 @@ fun HomeScreen(
             }
         } else {
             // PHONE TO PHONE MODE: DUAL-LINK USB CABLE + 5GHz WI-FI DIRECT / HOTSPOT
-
-            // 1. DUAL-LINK MULTIPATH READY BANNER (when USB tethering is active)
-            if (isUsbTetheringActive) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    NeoCyan.copy(alpha = 0.2f),
-                                    NeoPurple.copy(alpha = 0.2f)
-                                )
-                            )
-                        )
-                        .border(
-                            1.5.dp,
-                            Brush.linearGradient(listOf(NeoCyan, NeoPurple)),
-                            RoundedCornerShape(18.dp)
-                        )
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(NeoCyan.copy(alpha = 0.25f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ElectricBolt,
-                                contentDescription = null,
-                                tint = NeoCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "🚀 Simultaneous USB + Wi-Fi Multipath Active",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeoCyan
-                            )
-                            Text(
-                                text = "Transferring concurrently through USB cable & Wi-Fi just like PC!",
-                                fontSize = 11.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
 
             // 2. HERO PHONE-TO-PHONE CONNECTION CARD
             NeoCard(
@@ -696,43 +640,6 @@ fun HomeScreen(
                         .padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Status Badge Pill
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isUsbTetheringActive) NeoCyan.copy(alpha = 0.15f)
-                                else if (isUsbCablePlugged) NeoYellow.copy(alpha = 0.15f)
-                                else NeoPurple.copy(alpha = 0.15f)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isUsbTetheringActive) Icons.Default.Usb
-                            else if (isUsbCablePlugged) Icons.Default.Cable
-                            else Icons.Default.PhoneAndroid,
-                            contentDescription = null,
-                            tint = if (isUsbTetheringActive) NeoCyan
-                            else if (isUsbCablePlugged) NeoYellow
-                            else NeoPurple,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isUsbTetheringActive) "⚡ USB Cable Linked + 📶 Wi-Fi Multipath"
-                            else if (isUsbCablePlugged) "🔌 USB Cable Plugged — Enable Tethering"
-                            else "📱 Phone to Phone: USB Cable + Wi-Fi",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isUsbTetheringActive) NeoCyan
-                            else if (isUsbCablePlugged) NeoYellow
-                            else NeoPurple
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
                     // Animated Glowing Center Hub
                     Box(
                         modifier = Modifier.size(105.dp),
@@ -787,7 +694,7 @@ fun HomeScreen(
 
                     if (isUsbTetheringActive) {
                         Text(
-                            text = "USB Cable Linked & Ready",
+                            text = "USB tethering is on",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = NeoGreen,
@@ -795,7 +702,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "USB tethering active between phones. Files will transfer simultaneously through USB cable and Wi-Fi for maximum line speed!",
+                            text = "Select the other phone below. Connect both phones over Wi-Fi to add a second transfer link.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -803,7 +710,7 @@ fun HomeScreen(
                         )
                     } else if (isUsbCablePlugged) {
                         Text(
-                            text = "USB-C Cable Detected!",
+                            text = "Cable detected",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -811,7 +718,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Turn on USB Tethering on either phone to activate maximum line-speed simultaneous transfer.",
+                            text = "Open tethering settings on one phone and turn on USB tethering.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -839,7 +746,7 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Enable USB Tethering",
+                                    text = "Open tethering settings",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -856,7 +763,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Connect phones via USB-C cable and enable USB Tethering to transfer simultaneously through USB and Wi-Fi just like PC!",
+                            text = "Use the same Wi-Fi, or connect the phones by cable and turn on USB tethering on one phone.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -883,7 +790,7 @@ fun HomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Connect USB-C Cable / Tethering",
+                                    text = "Open tethering settings",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = TextPrimary
@@ -915,12 +822,27 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isHotspotActive) "5GHz Hotspot Running (Tap to Stop)" else "Create 5GHz Direct Hotspot",
+                                text = when (hotspotState) {
+                                    is HotspotState.Active -> "Stop hotspot"
+                                    HotspotState.Starting -> "Starting hotspot…"
+                                    else -> "Create Wi-Fi hotspot"
+                                },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         }
+                    }
+                    when (hotspotState) {
+                        is HotspotState.Active -> {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text("On the other phone, join ${hotspotState.ssid} in Wi-Fi settings.\nPassword: ${hotspotState.password}",
+                                    color = TextPrimary, fontSize = 14.sp)
+                            }
+                        }
+                        is HotspotState.Error -> Text(hotspotState.message, color = TextPrimary, fontSize = 13.sp)
+                        else -> Unit
                     }
                 }
             }
@@ -1046,7 +968,8 @@ fun HomeScreen(
         }
 
         // Discovered Devices Section (if not connected, or additional nearby devices)
-        if (discoveredPeers.isNotEmpty()) {
+        val availablePeers = discoveredPeers.filter { it.deviceId != connectedPeer?.deviceId }
+        if (availablePeers.isNotEmpty()) {
             Text(
                 text = "Discovered Devices Nearby",
                 fontSize = 14.sp,
@@ -1058,7 +981,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            discoveredPeers.forEach { peer ->
+            availablePeers.forEach { peer ->
                 NeoCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1112,7 +1035,7 @@ fun HomeScreen(
                             cornerRadius = 12.dp
                         ) {
                             Text(
-                                text = "Connect",
+                                text = if (connectingId == peer.deviceId) "Connecting…" else "Connect",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = NeoCyan,

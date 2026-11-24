@@ -87,7 +87,10 @@ data class SchedulerTelemetry(
     val progressPct: Float,
     val etaSeconds: Long,
     val transports: List<TransportStats>,
-    val chunkStates: List<ChunkVisualItem>
+    val chunkStates: List<ChunkVisualItem>,
+    val direction: TransferDirection = TransferDirection.SENT,
+    val usbBytes: Long? = null,
+    val peerName: String = ""
 )
 
 enum class TransferDirection {
@@ -114,3 +117,9 @@ data class TransferRecord(
     val speedMbps: Double = 0.0,
     val filePath: String? = null
 )
+
+fun formatTransferSpeed(mbps: Double): String {
+    val megabytesPerSecond = mbps / 8.0
+    return if (megabytesPerSecond >= 1.0) "%.1f MB/s".format(megabytesPerSecond)
+    else "%.1f KB/s".format(megabytesPerSecond * 1000.0)
+}

@@ -35,7 +35,7 @@ class TransferForegroundService : Service() {
         if (action == ACTION_TRANSFER_COMPLETE) {
             val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Transfer Complete"
             showCompletedNotification(title)
-            stopForeground(STOP_FOREGROUND_DETACH)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
