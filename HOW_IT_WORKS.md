@@ -62,11 +62,11 @@ USB tethering exposes a network interface. ADB uses TCP forwarding: local `127.0
 
 The current phone workflow prefers requesting a phone-hosted hotspot over the USB connection. It also contains Windows hotspot fallback logic. Hotspot creation and band selection are hardware- and OS-dependent.
 
-The USB-skip control updates the assistant's state. It should not be read as evidence of a complete USB-free automatic pairing implementation.
+For wireless-only setup, start Wi-Fi Direct on the phone and join its network on the PC. **Use wireless connection** checks discovered Android peers and the possible hotspot gateway. The GUI queries `/api/v1/info`, matches `direct_host_ip` against the candidate address, and attempts pairing. On success it selects the Wi-Fi target and opens **Transfer**. [Windows connection flow](src/gui/app.rs)
 
 ### PC setup
 
-The PC view starts discovery, lists candidates, and invokes the existing pairing helper for a selected peer. A separate action probes and pairs with the saved IP address. The latter updates the view on success; the discovered-peer callback currently invokes the handshake without the same explicit transfer-target update.
+The PC view lists discovered candidates and also offers a saved address. Both paths use the pairing helper. After the remote peer reports acceptance, the engine records the peer name, IP and port. The GUI monitor uses that endpoint to update the transfer target. [Pairing helper](src/gui/engine.rs)
 
 The saved address defaults to `192.168.137.1:54321`. There is no editable address control in the current GUI.
 

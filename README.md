@@ -1,6 +1,6 @@
 # ShareDash
 
-Local file transfer between Windows computers and Android devices, with USB, Wi-Fi, and combined connections.
+Local file transfer between Android phones, between a phone and a Windows PC, and between Windows PCs.
 
 ShareDash includes a native Windows desktop application built with Rust and GPUI, an interactive terminal client, and a Jetpack Compose Android companion. Devices exchange files directly over reachable local connections; no cloud account is required.
 
@@ -14,13 +14,35 @@ ShareDash includes a native Windows desktop application built with Rust and GPUI
 | --- | --- |
 | Desktop interface | Connection assistants, device details, native file and folder selection, transfer progress, and incoming-transfer status |
 | USB connections | Android USB tethering or ADB port forwarding |
-| Wireless connections | Local discovery, hotspot setup helpers, and HTTP peer connections |
+| Wireless connections | Phone-hosted Wi-Fi Direct, a Windows hotspot fallback for phone-to-PC setup, and local IP discovery for PC-to-PC |
 | Multipath sending | Concurrent chunk workers across available USB and Wi-Fi targets |
-| Folder transfer | Packages the selected folder into a ZIP archive before sending |
+| Folder transfer | Windows packages a selected folder into a ZIP. Android walks the selected folder tree and sends its files individually. |
 | Progress | Bytes transferred, average send speed, estimated time remaining, and per-channel statistics |
 | Integrity | CRC32 checks on the desktop HTTP chunk path; separate binary-protocol modules provide encryption and cryptographic hash utilities |
 
 Multipath can use both connections, but it is not guaranteed to outperform the faster single connection. ShareDash's desktop HTTP transfer path does **not** provide application-level end-to-end encryption. See [Security](SECURITY.md) for the current trust boundary.
+
+## Intentional behavior to preserve
+
+Use these behaviors as regression checks when changing discovery, pairing, transfer workers, or either UI. If a path looks redundant or stops working, check which device and connection state used it in the last working release before removing it. Update this section when a product decision deliberately changes one of these behaviors. [V1_GUI_2 source baseline](https://github.com/SamSunny4/ShareDash/tree/V1_GUI_2)
+
+| When | Expected behavior and reason |
+| --- | --- |
+| A phone starts wireless setup | The phone hosts a Wi-Fi Direct group and shows the network name and password for the other device to join. Request 5 GHz when preferred and fall back to automatic band selection if needed. Discovery uses UDP and HTTP. Bluetooth LE is intentionally absent. |
+| Wi-Fi is off or already connected to a router | Ask to enable Wi-Fi only when the radio is off. If already on another network, explain that sharing the radio can reduce speed. Offer to open Wi-Fi settings so the user can turn off auto-reconnect and disconnect, or **Continue on this Wi-Fi**. Continuing keeps the router association while still starting Wi-Fi Direct. |
+| A user connects a USB cable | Prefer the USB tethering interface when reachable. **Open tethering settings** targets Android’s tethering page and gives manual directions if the phone cannot open it. On Windows, authorized ADB forward and reverse connections provide a second USB path so either device can send. |
+| A PC adds wireless to a phone connection | Try the phone-hosted group first. Keep the Windows hotspot as a fallback if that link fails. Honor a USB-only choice and keep Windows hotspot settings behind an explicit user action. For wireless-only setup, the PC can join the group shown on the phone and verify its owner. |
+| A peer appears or accepts a request | Discovery lists candidates. Pairing confirmation supplies the transfer target. The Windows connection assistant should take the user to **Transfer** with the confirmed peer and usable links. Keep this distinct from detecting a cable or submitting a pairing request. |
+| Both links reach the same peer | USB and Wi-Fi workers take different chunks from a shared queue. A faster link can carry more of the file. Preserve single-link sending, retries, offset writes for out-of-order chunks, and counting a successful retry only once. Android also supports older receivers through the single-stream send endpoint when the chunk endpoint returns HTTP 404. |
+| An Android transfer is active | Reuse send buffers and file channels, keep background subnet scans out of the transfer, and retain foreground transfer notifications. The progress rings show each link’s contribution to total bytes. USB runs anticlockwise and Wi-Fi runs clockwise. Show aggregate progress when the transport breakdown is unavailable. |
+
+Android also accepts files from the system share sheet, including multiple files. Keep those entry points working alongside the in-app file and folder pickers. [Android connection and send flow](android/app/src/main/java/com/sharedash/app/MainActivity.kt) · [Android receiver](android/app/src/main/java/com/sharedash/app/server/AndroidHttpServer.kt) · [Windows connection flow](src/gui/app.rs)
+
+### Checking a change
+
+- For setup changes, exercise Wi-Fi off, already on a router, and USB only. Confirm that accepting a peer reaches **Transfer** and that declining wireless setup leaves USB usable.
+- For transfer changes, send in both directions, compare source and destination SHA-256 hashes, and check the USB-only, Wi-Fi-only, and combined paths affected by the change. Include a retry or interrupted link when changing worker or progress accounting.
+- Phone-to-PC has been tested. A 25 MiB Android-emulator-to-Windows send also passed an independent SHA-256 comparison. Simultaneous USB and Wi-Fi Direct throughput between two physical phones still needs hardware verification.
 
 ## Build and run the desktop app
 

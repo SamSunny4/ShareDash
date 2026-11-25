@@ -40,7 +40,7 @@ The desktop maintains forwarding between local port `54325` and the phone's HTTP
 
 The assistant exchanges Wi-Fi capabilities and tries to establish a phone-hosted hotspot connection, with Windows hotspot setup as a fallback. Availability depends on the adapters, drivers, and phone.
 
-If the assistant offers **Use USB only**, you can proceed without a wireless connection. **Use wireless connection** preserves the existing USB-skip action, but it is not a guarantee of automatic setup on every device. If setup stalls, connect both devices to a reachable local network or hotspot and inspect the connection activity.
+Choose **Use USB only** to keep sending over the cable. For a wireless-only connection, start Wi-Fi Direct in ShareDash on the phone, join the displayed network on Windows, then choose **Use wireless connection**. The assistant verifies the phone and opens **Transfer** after pairing. If setup stalls, check the network name against the one displayed on the phone and retry.
 
 ## Connect another computer
 
