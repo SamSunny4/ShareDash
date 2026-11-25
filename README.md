@@ -135,7 +135,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for validation scope and review expectati
 | [src/bin/sharedash_gui.rs](src/bin/sharedash_gui.rs) | GPUI application entry point |
 | [src/main.rs](src/main.rs), [src/cli.rs](src/cli.rs) | Terminal entry point and interactive workflows |
 | [src/server/](src/server/) | Axum HTTP endpoints, receive handlers, and WebSocket telemetry |
-| [src/discovery/](src/discovery/) | UDP and Bluetooth discovery, pairing helpers |
+| [src/discovery/](src/discovery/) | UDP discovery, pairing helpers |
 | [src/hotspot.rs](src/hotspot.rs) | Windows network inspection and hotspot orchestration |
 | [src/protocol/](src/protocol/), [src/scheduler/](src/scheduler/), [src/storage/](src/storage/) | Binary protocol, scheduling, manifests, and storage utilities |
 | [src/transport/](src/transport/) | Transport implementations and simulation support |

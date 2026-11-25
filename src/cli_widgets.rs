@@ -63,7 +63,7 @@ pub fn draw_progress_bar(pct: f64, width: usize, elapsed_secs: f64) {
     let _ = io::stdout().flush();
 }
 
-/// Animated BLE scan progress bar that runs for `duration`.
+/// Animated network scan progress bar that runs for `duration`.
 pub async fn animated_scan_progress(duration: Duration) {
     let start = Instant::now();
     let total = duration.as_secs_f64();

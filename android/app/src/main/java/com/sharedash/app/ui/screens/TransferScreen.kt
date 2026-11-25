@@ -158,7 +158,7 @@ private fun ActiveTransferScreen(
     val targetWifiRatio = normalizedProgress - targetUsbRatio
 
     // Continuous smooth linear interpolation for silky-smooth progress without pauses
-    val targetTotalProg = if (uiStage != TransferUiStage.TRANSFERRING) 1.0f else normalizedProgress
+    val targetTotalProg = if (uiStage == TransferUiStage.COMPLETED) 1.0f else normalizedProgress
     val animatedTotalProgress by animateFloatAsState(
         targetValue = targetTotalProg,
         animationSpec = tween(durationMillis = 180, easing = LinearEasing),
@@ -321,7 +321,11 @@ private fun ActiveTransferScreen(
                             // Dual-Colored Circular Progress Arcs / Radar Sweep
                             val arcTrackColor = NeoDarkShadow.copy(alpha = 0.6f)
                             Canvas(modifier = Modifier.size(180.dp)) {
-                                val strokeW = 14.dp.toPx()
+                                val strokeW = 8.dp.toPx()
+                                val inset = 12.dp.toPx()
+                                val innerOrigin = androidx.compose.ui.geometry.Offset(inset, inset)
+                                val innerSize = androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset)
+                                if (showDistribution) drawArc(arcTrackColor, -90f, 360f, false, innerOrigin, innerSize, style = Stroke(width = strokeW))
 
                                 // Background Track
                                 drawArc(
@@ -355,7 +359,7 @@ private fun ActiveTransferScreen(
                                         drawArc(
                                             color = NeoCyan,
                                             startAngle = -90f,
-                                            sweepAngle = animatedUsbProgress * 360f,
+                                            sweepAngle = -animatedUsbProgress * 360f,
                                             useCenter = false,
                                             style = Stroke(width = strokeW, cap = StrokeCap.Round)
                                         )
@@ -365,8 +369,10 @@ private fun ActiveTransferScreen(
                                     if (animatedWifiProgress > 0.001f) {
                                         drawArc(
                                             color = if (showDistribution) NeoGreen else NeoBlue,
-                                            startAngle = -90f + (animatedUsbProgress * 360f),
+                                            startAngle = -90f,
                                             sweepAngle = animatedWifiProgress * 360f,
+                                            topLeft = if (showDistribution) innerOrigin else androidx.compose.ui.geometry.Offset.Zero,
+                                            size = if (showDistribution) innerSize else size,
                                             useCenter = false,
                                             style = Stroke(width = strokeW, cap = StrokeCap.Round)
                                         )

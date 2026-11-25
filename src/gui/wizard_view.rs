@@ -117,15 +117,7 @@ pub fn render_wizard_view(
         )));
     } else if state.waiting_for_usb {
         p1_card = p1_card
-            .child(status_spin("Waiting for USB connection (Plug in USB-C cable & enable USB Tethering)..."))
-            .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .text_size(px(12.0))
-                    .text_color(theme::accent_cyan())
-                    .child("Tip: On Android phone, turn ON 'USB Tethering' (Settings → Network & Internet → Hotspot & Tethering)"),
-            )
+            .child(status_spin("Plug in your phone and enable USB tethering."))
             .child(
                 div()
                     .px_4()
@@ -141,10 +133,10 @@ pub fn render_wizard_view(
     } else {
         p1_card = p1_card.child(status_warn("Continuing in Wireless Mode without USB."));
     }
-    root = root.child(p1_card);
+    if state.current_phase == 1 { root = root.child(p1_card); }
 
     // ── Phase 2: Hardware Capabilities ─────────────────────────
-    if state.current_phase >= 2 {
+    if state.current_phase == 2 {
         let mut p2_card = div()
             .w_full()
             .p_4()
@@ -209,7 +201,7 @@ pub fn render_wizard_view(
     }
 
     // ── Phase 3 & 4: Hotspot Provisioning ─────────────────────
-    if state.current_phase >= 3 {
+    if (3..5).contains(&state.current_phase) {
         let p3_card = div()
             .w_full()
             .p_4()
@@ -223,7 +215,7 @@ pub fn render_wizard_view(
             })
             .child(phase_header(3, "Set up the wireless connection"))
             .child(status_ok(&format!(
-                "Optimal Host Decision: {} ({})",
+                "Host: {} · {}",
                 state.host_choice, state.host_reason
             )))
             .child(if !state.hotspot_ssid.is_empty() {
@@ -232,7 +224,7 @@ pub fn render_wizard_view(
                     state.hotspot_ssid, state.hotspot_band
                 ))
             } else {
-                status_spin("Setting up 5GHz Wi-Fi link...")
+                status_spin("Check your phone to finish Wi-Fi setup…")
             });
         root = root.child(p3_card);
     }
@@ -295,7 +287,7 @@ pub fn render_wizard_view(
                     .pb_2()
                     .child("Connection activity"),
             )
-            .child(log_list(&state.logs)),
+            .child(log_list(&state.logs[state.logs.len().saturating_sub(1)..])),
     );
 
     root

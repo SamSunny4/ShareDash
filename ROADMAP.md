@@ -6,7 +6,7 @@ This roadmap separates implemented capabilities from proposed work. It does not 
 
 - Native Windows GPUI interface and separate terminal client.
 - Android companion built with Jetpack Compose.
-- UDP/BLE discovery helpers and USB tethering/ADB connection paths.
+- UDP discovery helpers and USB tethering/ADB connection paths.
 - Phone hotspot and Windows hotspot orchestration helpers.
 - Desktop HTTP chunk sending with concurrent workers across available connections.
 - File and ZIP-packaged folder sending, progress, cancellation, and receive status.

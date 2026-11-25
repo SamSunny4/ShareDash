@@ -344,18 +344,7 @@ pub async fn create_hotspot_with_band(ssid: &str, password: &str, target_band: &
             }
         }
 
-        // Fallback: Open Windows Settings only if direct automation fails
-        let _ = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", "Start-Process 'ms-settings:network-mobilehotspot'"])
-            .spawn();
-
-        Ok(HotspotInfo {
-            ssid: ssid.to_string(),
-            password: password.to_string(),
-            band: target_band.to_string(),
-            gateway_ip: "192.168.137.1".to_string(),
-            is_active: false,
-        })
+        Err(anyhow::anyhow!("Windows could not start a mobile hotspot"))
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -1245,8 +1234,8 @@ if ($startOut -match "started") {{
     return
 }}
 
-Write-Host "Opening Windows Mobile Hotspot settings as secondary fallback..." -ForegroundColor Yellow
-Start-Process 'ms-settings:network-mobilehotspot'
+Write-Host "Mobile hotspot unavailable." -ForegroundColor Yellow
+throw "Mobile hotspot could not be started"
 "#,
         ssid = ssid,
         password = password
@@ -1405,3 +1394,27 @@ pub async fn scan_direct_usb_pc_peers() -> Vec<DirectPcPeer> {
     discovered
 }
 
+
+pub enum PhoneHotspot {
+    Ready(String, String, String),
+    UsbOnly,
+    Unavailable,
+}
+
+pub async fn request_phone_hotspot(ip: &str, port: u16) -> PhoneHotspot {
+    let request = async {
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(4))
+            .timeout(std::time::Duration::from_secs(96))
+            .build()?;
+        let url = format!("http://{}:{}/api/v1/hotspot/start", ip, port);
+        client.post(url).send().await?.error_for_status()?.json::<serde_json::Value>().await
+    }.await;
+    let Ok(reply) = request else { return PhoneHotspot::Unavailable };
+    if reply["status"] == "usb_only" { return PhoneHotspot::UsbOnly; }
+    match (reply["ssid"].as_str(), reply["password"].as_str()) {
+        (Some(ssid), Some(pass)) if !ssid.is_empty() && reply["success"] != false =>
+            PhoneHotspot::Ready(ssid.into(), pass.into(), reply["gateway"].as_str().unwrap_or("192.168.49.1").into()),
+        _ => PhoneHotspot::Unavailable,
+    }
+}

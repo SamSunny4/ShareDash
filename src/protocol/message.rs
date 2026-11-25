@@ -12,7 +12,8 @@ pub enum TransportKind {
     Lan,
     WifiDirect,
     InternetQuic,
-    Bluetooth,
+    #[serde(skip)]
+    Reserved, // Preserve the binary index of MockSim for existing peers.
     MockSim,
 }
 

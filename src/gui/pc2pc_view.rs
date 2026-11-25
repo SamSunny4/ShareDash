@@ -1,6 +1,6 @@
 //! ShareDash PC-to-PC Wireless Mode View
 //!
-//! Visualizes Bluetooth LE discovery, hardware compatibility check,
+//! Visualizes network discovery, hardware compatibility check,
 //! hotspot creation, and high-speed Wi-Fi channel establishment.
 
 use super::theme;
@@ -14,7 +14,6 @@ pub struct PcToPcViewState {
     pub pc_wifi_standard: String,
     pub pc_wifi_phy: u32,
     pub pc_wifi_enabled: bool,
-    pub bt_available: bool,
     pub discovered_pcs: Vec<crate::gui::engine::DiscoveredDevice>,
     pub selected_pc_name: String,
     pub target_ip: String,
@@ -34,7 +33,6 @@ impl Default for PcToPcViewState {
             pc_wifi_standard: "Wi-Fi 6 (802.11ax)".into(),
             pc_wifi_phy: 1200,
             pc_wifi_enabled: true,
-            bt_available: true,
             discovered_pcs: Vec::new(),
             selected_pc_name: String::new(),
             target_ip: String::new(),
@@ -107,18 +105,10 @@ pub fn render_pc2pc_view(
             ),
             false,
         ))
-        .child(tree_item(
-            "Bluetooth Radio",
-            if state.bt_available {
-                "Ready (BLE 4.0+ Active)"
-            } else {
-                "Unavailable / Limited"
-            },
-            true,
-        ));
+        ;
     root = root.child(p1_card);
 
-    // ── Phase 2: Bluetooth LE Radar & Peer Discovery ───────────
+    // ── Phase 2: Peer Discovery ───────────
     if state.current_phase >= 2 {
         let on_connect_arc = std::sync::Arc::new(on_connect_pc);
         let mut p2_card = div()
@@ -186,6 +176,7 @@ pub fn render_pc2pc_view(
                     let connect_cb = on_connect_arc.clone();
                     let dev_name_click = dev_name.clone();
                     let dev_addr_click = dev_addr.clone();
+                    let port = dev.port;
 
                     div()
                         .flex()
@@ -213,8 +204,8 @@ pub fn render_pc2pc_view(
                                         .text_size(px(11.0))
                                         .text_color(theme::text_secondary())
                                         .child(format!(
-                                            "{} · RSSI: {} dBm · IP: {}",
-                                            dev.transport, dev.rssi, dev_addr
+                                            "{} · {}:{}",
+                                            dev.transport, dev_addr, port
                                         )),
                                 ),
                         )
@@ -224,7 +215,7 @@ pub fn render_pc2pc_view(
                                     connect_cb(
                                         dev_name_click.clone(),
                                         dev_addr_click.clone(),
-                                        54321,
+                                        port,
                                     );
                                 }),
                         )

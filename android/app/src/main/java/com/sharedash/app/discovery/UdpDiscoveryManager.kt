@@ -29,7 +29,11 @@ import java.net.URL
 
 class UdpDiscoveryManager(
     private val context: Context,
-    private val serverPort: Int = 54321
+    private val serverPort: Int = 54321,
+    private val directHostIp: () -> String? = { null },
+    private val onDirectHost: (String) -> Unit = {},
+    private val transferBusy: () -> Boolean = { false },
+    private val allowedPeerIp: (String) -> Boolean = { true }
 ) {
     private val deviceName get() = com.sharedash.app.storage.SettingsManager.getInstance(context).deviceName
     private val _discoveredPeers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
@@ -77,7 +81,8 @@ class UdpDiscoveryManager(
                     put("os_name", "Android " + android.os.Build.VERSION.RELEASE)
                     put("server_port", serverPort)
                     put("app_version", CURRENT_APP_VERSION)
-                    put("supported_transports", org.json.JSONArray(listOf("Wi-Fi Direct", "LAN")))
+                    put("supported_transports", org.json.JSONArray(listOf("Wi-Fi Direct", "USB")))
+                    directHostIp()?.let { put("direct_host_ip", it) }
                     put("timestamp_ms", System.currentTimeMillis())
                 }
 
@@ -158,7 +163,9 @@ class UdpDiscoveryManager(
                         continue
                     }
 
-                    val bridges = mutableListOf("Wi-Fi Direct", "LAN")
+                    if (ip == json.optString("direct_host_ip")) onDirectHost(ip)
+                    if (!allowedPeerIp(ip)) continue
+                    val bridges = mutableListOf("Wi-Fi Direct")
                     if (ip == "127.0.0.1" || ip.startsWith("192.168.42.")) {
                         bridges.add(0, "USB Fast-Path")
                     }
@@ -189,41 +196,26 @@ class UdpDiscoveryManager(
     }
 
     private suspend fun subnetHttpProbeLoop() = coroutineScope {
-        val semaphore = Semaphore(32)
+        val semaphore = Semaphore(8)
         while (isActive) {
-            // Check localhost USB bridge (127.0.0.1:54325 for ADB Reverse, 127.0.0.1:54321 / 10.0.2.2 for emulator)
-            probeIpAddress("127.0.0.1", 54325, "USB Cable")
-            probeIpAddress("127.0.0.1", 54321, "USB Cable")
-            probeIpAddress("10.0.2.2", 54321, "USB / Host")
-            probeIpAddress("192.168.137.1", 54321, "PC 5GHz Hotspot")
-            probeIpAddress("192.168.42.1", 54321, "USB Tethering Turbo")
-            probeIpAddress("192.168.43.1", 54321, "Phone Hotspot")
-
-            val (usbPrefixes, wifiPrefixes) = getInterfaceSubnetPrefixes()
-
-            // Probe default gateways and common Wi-Fi / USB Tethering IP ranges
-            val myIps = getLocalIpAddresses()
-            for (myIp in myIps) {
-                val parts = myIp.split(".")
-                if (parts.size == 4) {
-                    val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
-                    val isUsbSubnet = usbPrefixes.contains(prefix) || (prefix.startsWith("10.") && !wifiPrefixes.contains(prefix))
-                    val badge = if (isUsbSubnet) "USB Cable" else "Wi-Fi LAN"
-                    
-                    // Probe common PC host addresses on this subnet
-                    for (i in 1..254) {
-                        val targetIp = "$prefix.$i"
-                        if (targetIp != myIp) {
-                            launch {
+            if (!transferBusy()) {
+                probeIpAddress("127.0.0.1", 54325, "USB Cable")
+                val (usbPrefixes, _) = getInterfaceSubnetPrefixes()
+                val myIps = getLocalIpAddresses().toSet()
+                // USB tethering can isolate broadcasts. Finish each sweep before starting another.
+                coroutineScope {
+                    for (prefix in usbPrefixes) {
+                        for (host in 1..254) {
+                            val ip = "$prefix.$host"
+                            if (ip !in myIps) launch {
                                 semaphore.withPermit {
-                                    probeIpAddress(targetIp, 54321, badge)
+                                    if (!transferBusy()) probeIpAddress(ip, 54321, "USB Cable")
                                 }
                             }
                         }
                     }
                 }
             }
-
             delay(4000)
         }
     }
@@ -241,9 +233,10 @@ class UdpDiscoveryManager(
     }
 
     private fun probeIpAddress(ip: String, port: Int, transportBadge: String) {
+        var conn: HttpURLConnection? = null
         try {
             val url = URL("http://$ip:$port/api/v1/info")
-            val conn = url.openConnection() as HttpURLConnection
+            conn = url.openConnection() as HttpURLConnection
             conn.connectTimeout = 400
             conn.readTimeout = 500
             conn.requestMethod = "GET"
@@ -264,7 +257,7 @@ class UdpDiscoveryManager(
                 val myIps = getLocalIpAddresses()
 
                 // Strict self-detection filter: ignore own HTTP server on phone
-                if (devId == myDeviceId || ip in myIps || (ip == "127.0.0.1" && devId.startsWith("android"))) {
+                if (devId == myDeviceId || (ip in myIps && port != 54325)) {
                     return
                 }
 
@@ -330,7 +323,8 @@ class UdpDiscoveryManager(
                         put("os_name", "Android " + android.os.Build.VERSION.RELEASE)
                         put("server_port", 54321)
                         put("app_version", CURRENT_APP_VERSION)
-                        put("supported_transports", org.json.JSONArray(listOf("Wi-Fi Direct", "LAN")))
+                        put("supported_transports", org.json.JSONArray(listOf("Wi-Fi Direct", "USB")))
+                        directHostIp()?.let { put("direct_host_ip", it) }
                         put("timestamp_ms", System.currentTimeMillis())
                     }
                     val bytes = announceJson.toString().toByteArray()
@@ -340,7 +334,10 @@ class UdpDiscoveryManager(
                     targetSocket.close()
                 } catch (_: Exception) {}
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     fun getInterfaceSubnetPrefixes(): Pair<Set<String>, Set<String>> {

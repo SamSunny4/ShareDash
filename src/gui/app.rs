@@ -35,6 +35,7 @@ struct HardwareMonitorData {
     pc_caps: crate::discovery::WifiCapsInfo,
     wifi_on: bool,
     paired: Option<String>,
+    endpoint: Option<(String, u16)>,
     pending_data: Option<PendingPairData>,
 }
 
@@ -148,6 +149,12 @@ impl ShareDashApp {
                 let paired = engine_clone.state.active_paired_peer.lock().clone();
                 let pending = engine_clone.state.pending_pair.lock().clone();
 
+                let endpoint = pending.as_ref()
+                    .filter(|p| p.status == "ACCEPTED" && Some(&p.initiator_name) == paired.as_ref())
+                    .map(|p| (p.initiator_ip.clone(), p.initiator_port))
+                    .or_else(|| engine_clone.paired_endpoint.lock().as_ref()
+                        .filter(|(name, _, _)| Some(name) == paired.as_ref())
+                        .map(|(_, ip, port)| (ip.clone(), *port)));
                 let pending_data = pending
                     .filter(|request| request.status == "PENDING")
                     .map(|request| PendingPairData {
@@ -166,6 +173,7 @@ impl ShareDashApp {
                         wifi_on,
                         paired,
                         pending_data,
+                        endpoint,
                     })
                     .is_err()
                 {
@@ -184,6 +192,7 @@ impl ShareDashApp {
                     view.home_status.wifi_standard = data.pc_caps.wifi_standard.clone();
                     view.home_status.wifi_phy_rate = data.pc_caps.max_phy_rate_mbps;
                     view.home_status.wifi_enabled = data.wifi_on;
+                    let peer_changed = view.home_status.paired_peer != data.paired;
                     view.home_status.paired_peer = data.paired.clone();
                     view.home_status.pending_pair = data.pending_data;
 
@@ -209,6 +218,19 @@ impl ShareDashApp {
 
                     if let Some(ref peer) = data.paired {
                         view.transfer_state.target_name = peer.clone();
+                        if let Some((ip, port)) = data.endpoint {
+                            if ip != "127.0.0.1" && data.rndis_ip.as_ref() != Some(&ip) {
+                                view.transfer_state.wifi_target_ip = ip;
+                                view.transfer_state.wifi_target_port = port;
+                                view.transfer_state.wifi_ready = true;
+                                if !view.transfer_state.usb_ready { view.transfer_state.send_mode = SendModeChoice::WifiOnly; }
+                            } else if peer_changed {
+                                view.transfer_state.wifi_ready = view.wizard_state.wifi_ready;
+                            }
+                            if peer_changed && matches!(view.active_view, ActiveView::PcToPc | ActiveView::Wizard) {
+                                view.active_view = ActiveView::Transfer;
+                            }
+                        }
                     }
 
                     cx.notify();
@@ -222,6 +244,11 @@ impl ShareDashApp {
         use crate::server::api::{respond_to_pair_request, PairRespondRequest};
 
         let state = self.engine.state.clone();
+        if action.eq_ignore_ascii_case("accept") {
+            if let Some(req) = state.pending_pair.lock().as_ref() {
+                *self.engine.paired_endpoint.lock() = Some((req.initiator_name.clone(), req.initiator_ip.clone(), req.initiator_port));
+            }
+        }
         let request = PairRespondRequest {
             action: action.to_owned(),
             target_name: None,
@@ -249,6 +276,7 @@ impl ShareDashApp {
 
     // ── Wizard Workflow Automation ────────────────────────────
     fn start_wizard_flow(&mut self, cx: &mut Context<Self>) {
+        self.wizard_state = WizardViewState::default();
         self.wizard_state.current_phase = 1;
         self.wizard_state.logs.clear();
         self.wizard_state
@@ -285,7 +313,6 @@ impl ShareDashApp {
                 let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info("Step 2: Exchanging Wi-Fi specifications over USB...")));
 
                 let phone_caps = engine.query_phone_wifi_caps_http(&usb_ip, usb_port).await;
-                let pc_caps = crate::hotspot::detect_pc_wifi_caps().await;
                 let pc_wifi_on = crate::hotspot::check_pc_wifi_adapter_enabled().await;
 
                 let (phone_wifi_standard, phone_wifi_phy) = if let Some(ref p_caps) = phone_caps {
@@ -305,25 +332,16 @@ impl ShareDashApp {
 
                 // Phase 3 & 4: Optimal Host & Hotspot Provisioning (Phone Wi-Fi Direct Primary, PC Hotspot Fallback)
                 if pc_wifi_on {
-                    let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
-                    let (best_host, host_reason) =
-                        crate::hotspot::select_optimal_hotspot_host(&pc_caps, phone_caps_ref).await;
-
-                    let host_choice = match best_host {
-                        crate::hotspot::HotspotHostChoice::Pc => "PC".to_string(),
-                        crate::hotspot::HotspotHostChoice::Phone => "Phone".to_string(),
-                    };
-
                     let _ = tx.unbounded_send(WizardEvent::Phase3OptimalHost {
-                        choice: host_choice,
-                        reason: host_reason,
+                        choice: "Phone".into(),
+                        reason: "Wi-Fi Direct".into(),
                     });
-                    let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::ok("Optimal Host: Phone 5GHz Wi-Fi Direct AP selected as Primary.")));
-
                     // ── Primary Strategy: Request Phone to host 5GHz Wi-Fi Direct / LocalHotspot ──
                     let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::info("Requesting Phone to start 5GHz Wi-Fi Direct / Hotspot over USB...")));
 
-                    if let Some((p_ssid, p_pass, p_gw)) = engine.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
+                    let result = crate::hotspot::request_phone_hotspot(&usb_ip, usb_port).await;
+                    let usb_only = matches!(result, crate::hotspot::PhoneHotspot::UsbOnly);
+                    if let crate::hotspot::PhoneHotspot::Ready(p_ssid, p_pass, p_gw) = result {
                         let _ = tx.unbounded_send(WizardEvent::Phase4HotspotActive {
                             ssid: p_ssid.clone(),
                             band: "5 GHz".to_string(),
@@ -355,12 +373,12 @@ impl ShareDashApp {
                         } else {
                             let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("PC Wi-Fi did not associate to phone hotspot within timeout.")));
                         }
-                    } else {
-                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("Phone hotspot start failed over USB.")));
+                    } else if !usb_only {
+                        let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("Phone hotspot unavailable.")));
                     }
 
                     // ── Fallback Strategy: Create PC Hotspot if Phone Hosting failed ──
-                    if !wifi_connected {
+                    if !wifi_connected && !usb_only {
                         let _ = tx.unbounded_send(WizardEvent::Log(LogEntry::warn("Phone Wi-Fi Direct not active. Falling back to PC Hotspot...")));
 
                         let (ssid, password) = crate::hotspot::generate_hotspot_credentials();
@@ -472,6 +490,18 @@ impl ShareDashApp {
                         WizardEvent::Phase5UsbConfirmed => {
                             view.wizard_state.current_phase = 5;
                             view.wizard_state.usb_ready = true;
+                            view.transfer_state.usb_ready = true;
+                            view.transfer_state.wifi_ready = view.wizard_state.wifi_ready;
+                            view.transfer_state.send_mode = if view.wizard_state.wifi_ready { SendModeChoice::Multipath } else { SendModeChoice::UsbOnly };
+                            view.transfer_state.usb_target_ip = view.wizard_state.usb_ip.clone();
+                            view.transfer_state.usb_target_port = view.wizard_state.usb_port;
+                            if let Some(ip) = &view.wizard_state.wifi_ip {
+                                view.transfer_state.wifi_target_ip = ip.clone();
+                                view.transfer_state.wifi_ready = true;
+                            }
+                            if matches!(view.active_view, ActiveView::Wizard) {
+                                view.active_view = ActiveView::Transfer;
+                            }
                         }
                     }
                     cx.notify();
@@ -487,7 +517,7 @@ impl ShareDashApp {
         self.pc2pc_state.is_scanning = true;
         self.pc2pc_state.logs.clear();
         self.pc2pc_state.logs.push(LogEntry::info(
-            "Broadcasting Bluetooth LE beacon & scanning for nearby PCs...",
+            "Looking for nearby computers…",
         ));
 
         let engine = self.engine.clone();
@@ -720,6 +750,7 @@ impl Render for ShareDashApp {
                         (ActiveView::Info, "nav-info", "Device details"),
                     ]
                     .into_iter()
+                    .filter(|(view, _, _)| *view != ActiveView::Wizard || self.home_status.paired_peer.is_none())
                     .map(|(view, id, label)| {
                         nav_button(id, label, self.active_view == view).on_click(cx.listener(
                             move |this, _, _, cx| {
@@ -751,12 +782,47 @@ impl Render for ShareDashApp {
                     &self.wizard_state,
                     cx.listener(|this, _, _, cx| this.navigate_to(ActiveView::Home, cx)),
                     cx.listener(|this, _, _, cx| {
-                        // Skip USB to Wireless mode
-                        this.wizard_state.waiting_for_usb = false;
-                        this.wizard_state.current_phase = 2;
-                        this.wizard_state
-                            .logs
-                            .push(LogEntry::warn("Switched to Wireless Mode (Wi-Fi Direct)."));
+                        this.wizard_state.logs.push(LogEntry::info("Join the Wi-Fi Direct network shown on your phone."));
+                        let engine = this.engine.clone();
+                        let (tx, rx) = futures::channel::oneshot::channel();
+                        this.engine.tokio_handle.spawn(async move {
+                            let mut candidates: Vec<_> = engine.state.discovery.get_active_peers().into_iter()
+                                .filter(|p| p.os_name.to_lowercase().starts_with("android"))
+                                .map(|p| (p.remote_addr.ip().to_string(), p.server_port)).collect();
+                            if let Some(ip) = crate::hotspot::detect_phone_hotspot_gateway().await {
+                                candidates.insert(0, (ip, 54321));
+                            }
+                            for (ip, port) in candidates {
+                                let client = reqwest::Client::new();
+                                let reply = client.get(format!("http://{ip}:{port}/api/v1/info"))
+                                    .timeout(Duration::from_secs(2)).send().await;
+                                if let Ok(reply) = reply {
+                                    if let Ok(info) = reply.json::<serde_json::Value>().await {
+                                        if info["direct_host_ip"].as_str() == Some(ip.as_str()) &&
+                                            engine.pair_handshake_target(&ip, port).await {
+                                            let _ = tx.send(Some((ip, port)));
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            let _ = tx.send(None);
+                        });
+                        cx.spawn(async move |this, cx| {
+                            let target = rx.await.ok().flatten();
+                            let _ = this.update(cx, |view, cx| {
+                                if let Some((ip, port)) = target {
+                                    view.transfer_state.wifi_target_ip = ip;
+                                    view.transfer_state.wifi_target_port = port;
+                                    view.transfer_state.wifi_ready = true;
+                                    view.transfer_state.send_mode = SendModeChoice::WifiOnly;
+                                    view.active_view = ActiveView::Transfer;
+                                } else {
+                                    view.wizard_state.logs.push(LogEntry::warn("Start Wi-Fi Direct on your phone, join its network on this PC, then try again."));
+                                }
+                                cx.notify();
+                            });
+                        }).detach();
                         cx.notify();
                     }),
                     cx.listener(|_, _, _, _| {

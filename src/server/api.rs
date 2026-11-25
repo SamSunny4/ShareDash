@@ -23,7 +23,7 @@ struct AdbCacheEntry {
 static ADB_CACHE: OnceLock<Mutex<Option<AdbCacheEntry>>> = OnceLock::new();
 const ADB_CACHE_TTL_SECS: u64 = 1;
 
-use crate::discovery::{BleDiscovery, DiscoveredPeer, PairingManager, PairingSession, PeerDiscovery};
+use crate::discovery::{DiscoveredPeer, PairingManager, PairingSession, PeerDiscovery};
 use crate::hotspot;
 use crate::protocol::message::TransportKind;
 use crate::scheduler::dynamic_scheduler::{MultipathScheduler, TransferHandle};
@@ -49,7 +49,6 @@ pub struct AppState {
     pub server_port: u16,
     pub pairing_mgr: Arc<PairingManager>,
     pub discovery: Arc<PeerDiscovery>,
-    pub ble_discovery: Arc<BleDiscovery>,
     pub manifest_db: Arc<ManifestDb>,
     pub telemetry_tx: tokio::sync::broadcast::Sender<SchedulerTelemetry>,
     pub active_transfers: Arc<Mutex<HashMap<Uuid, TransferHandle>>>,
@@ -367,32 +366,6 @@ pub async fn get_discovered_peers(State(state): State<AppState>) -> impl IntoRes
         peers_map.insert(p.device_id.clone(), p);
     }
 
-    // 2. Add BLE-discovered peers (merge or add)
-    for ble_p in state.ble_discovery.get_ble_peers() {
-        if let Some(existing) = peers_map.get_mut(&ble_p.device_id) {
-            if !existing.supported_transports.contains(&"Bluetooth LE".to_string()) {
-                existing.supported_transports.push("Bluetooth LE".to_string());
-            }
-        } else {
-            // Check if already discovered under another ID (e.g. UDP beacon with friendly name match or IP match)
-            let mut matched = false;
-            for existing in peers_map.values_mut() {
-                let same_name = !existing.friendly_name.is_empty() && existing.friendly_name == ble_p.friendly_name;
-                let same_ip = !ble_p.remote_addr.ip().is_unspecified() && existing.remote_addr.ip() == ble_p.remote_addr.ip();
-                if same_name || same_ip {
-                    if !existing.supported_transports.contains(&"Bluetooth LE".to_string()) {
-                        existing.supported_transports.push("Bluetooth LE".to_string());
-                    }
-                    matched = true;
-                    break;
-                }
-            }
-            if !matched {
-                peers_map.insert(ble_p.device_id.clone(), ble_p);
-            }
-        }
-    }
-
     // 3. If a USB mobile device is plugged in via ADB, add it as a high-speed candidate peer
     let (usb_connected, usb_name) = check_adb_devices().await;
     if usb_connected {
@@ -577,8 +550,7 @@ pub async fn respond_to_pair_request(
             let status = if is_accept { "ACCEPTED" } else { "REJECTED" };
             return Json(serde_json::json!({ "success": true, "status": status, "step": "SYN_ACK_RECEIVED" })).into_response();
         }
-        // If no outgoing pair exists, fall through to the local-UI branch so
-        // a stale SYN_ACK doesn't silently modify state.
+        return Json(serde_json::json!({ "success": false, "status": "NO_OUTGOING_REQUEST" })).into_response();
     }
 
     let pair_info = {
@@ -1048,16 +1020,6 @@ pub async fn upload_and_transfer_files(
         if let Some(ref out) = *state.outgoing_pair.lock() {
             if !out.target_ip.is_empty() && out.target_ip != "127.0.0.1" {
                 target_endpoint = Some((out.target_ip.clone(), out.target_port));
-            }
-        }
-    }
-
-    if target_endpoint.is_none() {
-        for p in state.ble_discovery.get_ble_peers() {
-            let ip_str = p.remote_addr.ip().to_string();
-            if ip_str != "127.0.0.1" {
-                target_endpoint = Some((ip_str, p.server_port));
-                break;
             }
         }
     }

@@ -50,6 +50,8 @@ class AndroidHttpServer(
         val receivedChunks: java.util.concurrent.ConcurrentHashMap.KeySetView<Int, Boolean> = java.util.concurrent.ConcurrentHashMap.newKeySet(),
         val startTime: Long = System.currentTimeMillis(),
         val totalBytesStreamed: java.util.concurrent.atomic.AtomicLong = java.util.concurrent.atomic.AtomicLong(0L),
+        var usbBytes: Long = 0,
+        var linksKnown: Boolean = true,
         val chunkLocks: Array<Any> = Array(16) { Any() }
     )
 
@@ -145,7 +147,9 @@ class AndroidHttpServer(
     @Volatile var activePairedPeerName: String? = null
     @Volatile var pendingPairRequest: JSONObject? = null
     var onWifiConnectRequest: ((ssid: String, password: String) -> Unit)? = null
-    var onStartHotspotRequest: ((callback: (ssid: String, password: String, gateway: String) -> Unit) -> Unit)? = null
+    var directHostIp: () -> String? = { null }
+    var isAllowedInterface: (java.net.InetAddress) -> Boolean = { true }
+    var onStartHotspotRequest: ((callback: (status: String, ssid: String, password: String, gateway: String) -> Unit) -> Unit)? = null
 
     fun start(scope: CoroutineScope) {
         if (serverJob != null && serverJob?.isActive == true) return
@@ -178,6 +182,7 @@ class AndroidHttpServer(
         activeSockets.add(socket)
         try {
             socket.tcpNoDelay = true
+            if (!isAllowedInterface(socket.localAddress)) return
             socket.receiveBufferSize = 4 * 1024 * 1024
             socket.sendBufferSize = 1024 * 1024
             socket.soTimeout = 30000
@@ -220,6 +225,7 @@ class AndroidHttpServer(
                             put("os_name", "Android " + Build.VERSION.RELEASE)
                             put("app_version", UdpDiscoveryManager.CURRENT_APP_VERSION)
                             put("server_port", port)
+                            directHostIp()?.let { put("direct_host_ip", it) }
                             put("local_ips", JSONArray(getLocalIpAddresses()))
                         }
                         sendJsonResponse(output, 200, info, isKeepAlive)
@@ -423,20 +429,22 @@ class AndroidHttpServer(
                     method == "POST" && path == "/api/v1/hotspot/start" -> {
                         if (onStartHotspotRequest != null) {
                             val latch = java.util.concurrent.CountDownLatch(1)
+                            var status = "usb_only"
                             var resultSsid = ""
                             var resultPass = ""
                             var resultGw = "192.168.49.1"
                             try {
-                                onStartHotspotRequest?.invoke { s, p, g ->
+                                onStartHotspotRequest?.invoke { state, s, p, g ->
+                                    status = state
                                     resultSsid = s
                                     resultPass = p
                                     resultGw = g
                                     latch.countDown()
                                 }
-                                val completed = latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                                val completed = latch.await(92, java.util.concurrent.TimeUnit.SECONDS)
                                 val resp = JSONObject().apply {
                                     put("success", completed && resultSsid.isNotBlank())
-                                    put("status", if (completed && resultSsid.isNotBlank()) "hotspot_started" else "failed")
+                                    put("status", status)
                                     put("ssid", resultSsid)
                                     put("password", resultPass)
                                     put("gateway", resultGw)
@@ -491,7 +499,7 @@ class AndroidHttpServer(
         }
     }
 
-    var onTransferProgress: (fileName: String, bytesReceived: Long, totalBytes: Long, speedMbps: Double) -> Unit = { _, _, _, _ -> }
+    var onTransferProgress: (fileName: String, bytesReceived: Long, totalBytes: Long, speedMbps: Double, usbBytes: Long?) -> Unit = { _, _, _, _, _ -> }
 
     private fun handleIncomingChunkUpload(
         input: BufferedInputStream,
@@ -593,7 +601,13 @@ class AndroidHttpServer(
                 session.receivedChunks.add(chunkId)
                 session.totalBytesStreamed.set(written)
                 val elapsedMs = (System.currentTimeMillis() - session.startTime).coerceAtLeast(1)
-                onTransferProgress(session.fileName, written, fileSize, written * 8.0 / (elapsedMs * 1000.0))
+                when (headers["x-transport-kind"]?.uppercase()) {
+                    "USB" -> session.usbBytes += contentLength
+                    "WIFI" -> Unit
+                    else -> session.linksKnown = false
+                }
+                onTransferProgress(session.fileName, written, fileSize, written * 8.0 / (elapsedMs * 1000.0),
+                    session.usbBytes.takeIf { session.linksKnown })
                 if (count == totalChunks) {
                     synchronized(activeChunkTransfers) {
                         completedTransfers[sessionKey] = count
@@ -650,7 +664,7 @@ class AndroidHttpServer(
             ?: "received_file_${System.currentTimeMillis()}.bin"
 
         // Immediate start callback
-        onTransferProgress(fileName, 0L, contentLength.toLong().coerceAtLeast(0L), 0.0)
+        onTransferProgress(fileName, 0L, contentLength.toLong().coerceAtLeast(0L), 0.0, null)
 
         val startTime = System.currentTimeMillis()
         var lastSpeedCalcTime = startTime
@@ -709,7 +723,7 @@ class AndroidHttpServer(
                     currentSmoothSpeed = if (currentSmoothSpeed == 0.0) instantSpeed else (currentSmoothSpeed * 0.35 + instantSpeed * 0.65)
                     lastSpeedCalcTime = now
                     lastSpeedCalcBytes = totalWritten
-                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed)
+                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed, null)
                 }
             }
             fos.flush()
@@ -752,7 +766,7 @@ class AndroidHttpServer(
                     currentSmoothSpeed = if (currentSmoothSpeed == 0.0) instantSpeed else (currentSmoothSpeed * 0.35 + instantSpeed * 0.65)
                     lastSpeedCalcTime = now
                     lastSpeedCalcBytes = totalWritten
-                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed)
+                    onTransferProgress(fileName, totalWritten, totalExpected, currentSmoothSpeed, null)
                 }
             }
             fos.flush()

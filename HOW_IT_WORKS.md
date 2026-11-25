@@ -25,7 +25,7 @@ flowchart TD
 | Desktop presentation | [src/gui/](src/gui/) | Home, phone setup, PC setup, transfer, and device-detail views |
 | GUI engine | [src/gui/engine.rs](src/gui/engine.rs) | HTTP service startup, peer probes, pairing helpers, archives, chunk dispatch |
 | HTTP API | [src/server/api.rs](src/server/api.rs) | Device information, pairing, transfer reception, cancellation, and network actions |
-| Discovery | [src/discovery/](src/discovery/) | Local UDP beacons, BLE discovery, PIN/QR pairing helpers |
+| Discovery | [src/discovery/](src/discovery/) | Local UDP beacons, PIN/QR pairing helpers |
 | Network orchestration | [src/hotspot.rs](src/hotspot.rs) | Adapter inspection, ADB/tethering support, hotspot selection and connection helpers |
 | Protocol library | [src/protocol/](src/protocol/) | Binary framing, messages, AES-GCM and hash utilities |
 | Scheduler and storage | [src/scheduler/](src/scheduler/), [src/storage/](src/storage/) | Framed-transfer scheduling, manifests, sparse writes, integrity utilities |
@@ -42,11 +42,9 @@ The terminal entry point initializes `Server`, which starts the HTTP service and
 
 ## Discovery and connection setup
 
-### UDP and Bluetooth
+### UDP discovery
 
-Despite its filename, [src/discovery/mdns.rs](src/discovery/mdns.rs) implements custom UDP discovery, not a standard mDNS service. The discovery broadcast port is `54320`. BLE support lives in [src/discovery/bluetooth.rs](src/discovery/bluetooth.rs).
-
-Discovery supplies candidates. Reachable HTTP endpoints are used for capability exchange and pairing; BLE is not the bulk file-data transport.
+ShareDash broadcasts discovery beacons on UDP port `54320`. Peers use HTTP to exchange capabilities and pair. [UDP discovery implementation](src/discovery/mdns.rs)
 
 ### Phone setup
 

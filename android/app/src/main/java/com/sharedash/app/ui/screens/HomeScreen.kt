@@ -458,7 +458,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Select a nearby PC to send files.",
+                            text = if (connectedPeer != null) "Ready to send files." else "Select a nearby PC to send files.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -562,7 +562,7 @@ fun HomeScreen(
             // ═══════════════════════════════════════════════════════════════
             //  4. SKIP USB BUTTON (WIRELESS BYPASS) - hidden when USB active
             // ═══════════════════════════════════════════════════════════════
-            if (!isUsbTetheringActive && connectedPeer == null) {
+            if (hotspotState !is HotspotState.Active) {
                 NeoCard(
                     modifier = Modifier.fillMaxWidth(),
                     cornerRadius = 20.dp,
@@ -597,13 +597,13 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Use Wi-Fi",
+                                    text = "Use Wi-Fi Direct",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "Connect both devices to the same network",
+                                    text = "Start a direct wireless connection",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
@@ -763,7 +763,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Use the same Wi-Fi, or connect the phones by cable and turn on USB tethering on one phone.",
+                            text = "Create a direct network on one phone and join it on the other. Add USB tethering to use both links.",
                             fontSize = 13.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -823,9 +823,9 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = when (hotspotState) {
-                                    is HotspotState.Active -> "Stop hotspot"
-                                    HotspotState.Starting -> "Starting hotspot…"
-                                    else -> "Create Wi-Fi hotspot"
+                                    is HotspotState.Active -> "Stop Wi-Fi Direct"
+                                    HotspotState.Starting -> "Starting Wi-Fi Direct…"
+                                    else -> "Start Wi-Fi Direct"
                                 },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
@@ -846,6 +846,10 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        if (connectionMode == SettingsManager.MODE_PHONE_TO_PC && hotspotState is HotspotState.Active) {
+            Text("Join ${hotspotState.ssid} on your PC.\nPassword: ${hotspotState.password}", color = TextPrimary)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -1023,7 +1027,7 @@ fun HomeScreen(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "${peer.osName} · ${if (peer.ipAddress.isNotBlank()) peer.ipAddress else "BLE Nearby"}",
+                                    text = "${peer.osName} · ${if (peer.ipAddress.isNotBlank()) peer.ipAddress else "Nearby device"}",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )

@@ -102,7 +102,7 @@ pub fn render_home_view(
     };
     let wifi = if status.wifi_enabled {
         format!(
-            "{} · {} Mbps link",
+            "{} · {} Mbps PHY",
             status.wifi_standard, status.wifi_phy_rate
         )
     } else {
@@ -131,35 +131,13 @@ pub fn render_home_view(
                 status.paired_peer.is_some(),
             )),
     );
-    root = root.child(panel().p_6().gap_4()
-        .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme::accent_blue()).child("PHONE TO COMPUTER"))
-        .child(div().text_size(px(25.0)).font_weight(FontWeight::SEMIBOLD).child("Start with your phone."))
-        .child(div().max_w(px(620.0)).text_size(px(14.0)).text_color(theme::text_secondary())
-            .child("Open ShareDash on Android, then connect a USB cable or use a wireless connection. The setup assistant checks the available connections for you."))
-        .child(div().flex().items_center().gap_4()
-            .child(action_button("card-phone-wizard", "Connect phone  →", true).on_click(on_select_wizard))
-            .child(div().text_size(px(12.0)).text_color(theme::text_muted()).child("No cloud account required"))));
-    root = root.child(div().flex().gap_4()
-        .child(card_button("card-pc2pc-wizard", "COMPUTER TO COMPUTER", "Connect another PC",
-            "Discover a nearby ShareDash computer and establish a wireless connection.").on_click(on_select_pc2pc))
-        .child(card_button("card-transfer-direct", "FILE TRANSFER", "Send files or a folder",
-            "Use an available connection. Choose a file, or send a folder as a ZIP archive.").on_click(on_select_transfer)));
+    if status.paired_peer.is_none() {
+        root = root.child(action_button("card-phone-wizard", "Set up phone connection", true).on_click(on_select_wizard));
+    }
     root.child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::text_muted())
-                    .child("Keep ShareDash open on both devices while transferring."),
-            )
-            .child(
-                action_button("btn-top-info", "Device & network details", false)
-                    .on_click(on_select_info),
-            ),
+        div().flex().flex_wrap().gap_3()
+            .child(action_button("card-transfer-direct", "Send files or a folder", true).on_click(on_select_transfer))
+            .child(action_button("card-pc2pc-wizard", "Connect another PC", false).on_click(on_select_pc2pc))
+            .child(action_button("btn-top-info", "Device details", false).on_click(on_select_info)),
     )
 }

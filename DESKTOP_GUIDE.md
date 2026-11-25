@@ -52,7 +52,7 @@ If the assistant offers **Use USB only**, you can proceed without a wireless con
 
 **Scan again** repeats discovery. **Connect to saved address** uses the address displayed beside that action; the current interface does not include an editable IP-address field. The default is `192.168.137.1:54321`, which may not match your peer.
 
-Bluetooth assists discovery. File data uses the reachable IP connection. The PC connection flow is still under development: a discovered peer or accepted request does not guarantee that every view has updated its transfer target. Check the target shown on the transfer page.
+ShareDash discovers peers over the local IP link. File data uses the reachable IP connection. After pairing, the transfer screen shows the connected device.
 
 ## Send a file or folder
 

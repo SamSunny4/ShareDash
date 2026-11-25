@@ -1,6 +1,6 @@
 //! ShareDash GUI Backend Engine
 //!
-//! Spawns the Axum HTTP & WebSocket server, handles background discovery (BLE, UDP mDNS, ADB),
+//! Spawns the Axum HTTP & WebSocket server, handles background discovery (UDP, ADB),
 //! and provides all transfer & wizard capabilities for the GUI without touching CLI code.
 
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ use parking_lot::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 use super::{adb, receive};
-use crate::discovery::{BleDiscovery, PairingManager, PeerDiscovery, WifiCapsInfo};
+use crate::discovery::{PairingManager, PeerDiscovery, WifiCapsInfo};
 use crate::hotspot;
 use crate::scheduler::metrics::SchedulerTelemetry;
 use crate::server::api::{
@@ -59,18 +59,18 @@ pub struct TransferProgressSnapshot {
     pub status: String,
 }
 
-/// Discovered BLE/network device for the GUI list
+/// Discovered network device for the GUI list
 #[derive(Clone, Debug)]
 pub struct DiscoveredDevice {
     pub name: String,
     pub address: String,
-    pub rssi: i16,
-    pub peripheral_id: String,
+    pub port: u16,
     pub transport: String,
 }
 
 pub struct GuiEngine {
     pub state: AppState,
+    pub paired_endpoint: Mutex<Option<(String, String, u16)>>,
     pub tokio_handle: tokio::runtime::Handle,
     pub is_transfer_active: Arc<std::sync::atomic::AtomicBool>,
     pub(super) receive_activity: tokio::sync::watch::Receiver<receive::ReceiveActivity>,
@@ -120,11 +120,7 @@ impl GuiEngine {
             tracing::warn!("Could not start UDP discovery: {}", e);
         }
 
-        // Start BLE discovery
-        let ble_discovery = Arc::new(BleDiscovery::new());
-        if let Err(e) = ble_discovery.start().await {
-            tracing::warn!("Could not start BLE discovery: {}", e);
-        }
+
 
         let state = AppState {
             device_id,
@@ -132,7 +128,6 @@ impl GuiEngine {
             server_port: port,
             pairing_mgr,
             discovery,
-            ble_discovery,
             manifest_db,
             telemetry_tx: telemetry_tx.clone(),
             active_transfers: Arc::new(Mutex::new(HashMap::new())),
@@ -235,6 +230,7 @@ impl GuiEngine {
         hotspot::cleanup_cached_wlan_profiles().await;
 
         Ok(Self {
+            paired_endpoint: Mutex::new(None),
             state,
             tokio_handle: tokio::runtime::Handle::current(),
             is_transfer_active,
@@ -395,27 +391,6 @@ impl GuiEngine {
         false
     }
 
-    pub async fn send_start_hotspot_over_usb(&self, ip: &str, port: u16) -> Option<(String, String, String)> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .ok()?;
-        let url = format!("http://{}:{}/api/v1/hotspot/start", ip, port);
-        for _ in 0..3 {
-            if let Ok(resp) = client.post(&url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
-                        let ssid = json.get("ssid")?.as_str()?.to_string();
-                        let password = json.get("password")?.as_str()?.to_string();
-                        let gw = json.get("gateway").and_then(|g| g.as_str()).unwrap_or("192.168.43.1").to_string();
-                        return Some((ssid, password, gw));
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(600)).await;
-        }
-        None
-    }
 
     pub async fn send_start_hotspot_with_band(&self, ip: &str, port: u16, band: &str) -> Option<(String, String, String)> {
         let client = reqwest::Client::builder()
@@ -465,15 +440,37 @@ impl GuiEngine {
             "initiator_device_id": self.state.device_id,
             "initiator_name": self.state.device_name,
             "initiator_ip": initiator_ip,
+            "initiator_port": self.state.server_port,
             "pin_code": pin,
             "app_version": env!("CARGO_PKG_VERSION"),
             "status": "PENDING"
         });
 
         let url = format!("http://{}:{}/api/v1/pair/request", ip, port);
-        match client.post(&url).json(&body).send().await {
-            Ok(resp) => resp.status().is_success(),
-            Err(_) => false,
+        let Ok(response) = client.post(&url).json(&body).send().await else { return false };
+        if !response.status().is_success() { return false; }
+        let Ok(reply) = response.json::<serde_json::Value>().await else { return false };
+        if reply["success"] != true { return false; }
+
+        let base = format!("http://{}:{}", ip, port);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(response) = client.get(format!("{base}/api/v1/pair/status")).send().await {
+                if let Ok(status) = response.json::<serde_json::Value>().await {
+                    if status["is_paired"] == true && status["paired_device_name"] == self.state.device_name {
+                        let name = match client.get(format!("{base}/api/v1/info")).send().await {
+                            Ok(info) => info.json::<serde_json::Value>().await.ok()
+                                .and_then(|v| v["device_name"].as_str().map(str::to_owned)),
+                            Err(_) => None,
+                        }.unwrap_or_else(|| ip.to_owned());
+                        *self.paired_endpoint.lock() = Some((name.clone(), ip.into(), port));
+                        *self.state.active_paired_peer.lock() = Some(name);
+                        return true;
+                    }
+                }
+            }
+            if Instant::now() >= deadline { return false; }
+            tokio::time::sleep(Duration::from_millis(350)).await;
         }
     }
 
@@ -541,22 +538,11 @@ impl GuiEngine {
     }
 
     // ═══════════════════════════════════════════════════════════
-    //  BLE SCAN & DISCOVERY
+    //  NETWORK DISCOVERY
     // ═══════════════════════════════════════════════════════════
 
     pub async fn scan_devices(&self) -> Vec<DiscoveredDevice> {
-        let mut list = Vec::new();
-
-        // 1. From BLE Discovery
-        for p in self.state.ble_discovery.get_ble_peers() {
-            list.push(DiscoveredDevice {
-                name: p.friendly_name,
-                address: p.device_id.clone(),
-                rssi: -50,
-                peripheral_id: p.device_id,
-                transport: "Bluetooth LE".to_string(),
-            });
-        }
+        let mut list: Vec<DiscoveredDevice> = Vec::new();
 
         // 2. From UDP mDNS
         for p in self.state.discovery.get_active_peers() {
@@ -564,37 +550,13 @@ impl GuiEngine {
                 list.push(DiscoveredDevice {
                     name: p.friendly_name,
                     address: p.remote_addr.ip().to_string(),
-                    rssi: -40,
-                    peripheral_id: p.device_id,
+                    port: p.server_port,
                     transport: "Wi-Fi (mDNS)".to_string(),
                 });
             }
         }
 
         list
-    }
-
-    pub async fn query_wifi_caps_ble(&self, peripheral_id: &str) -> Option<WifiCapsInfo> {
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            if (peer.device_id == peripheral_id || peer.friendly_name == peripheral_id) && peer.wifi_caps.is_some() {
-                return peer.wifi_caps;
-            }
-        }
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            if let Some(ref caps) = peer.wifi_caps {
-                return Some(caps.clone());
-            }
-        }
-        self.state.ble_discovery.read_wifi_capabilities().await
-    }
-
-    pub async fn send_wifi_connect_ble(&self, ssid: &str, password: &str) -> bool {
-        let cmd = serde_json::json!({
-            "cmd": "wifi_connect",
-            "ssid": ssid,
-            "password": password
-        });
-        self.state.ble_discovery.send_gatt_command(&cmd.to_string()).await
     }
 
     // ═══════════════════════════════════════════════════════════

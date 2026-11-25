@@ -9,7 +9,7 @@ pub mod storage;
 pub mod transport;
 
 pub use cli::TerminalCli;
-pub use discovery::{BleDiscovery, DiscoveryMethod, PairingManager, PeerDiscovery};
+pub use discovery::{PairingManager, PeerDiscovery};
 pub use protocol::{Frame, FrameHeader, FrameType, SessionCrypto};
 pub use scheduler::{MultipathScheduler, SchedulerTelemetry};
 pub use server::Server;

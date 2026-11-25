@@ -2,12 +2,8 @@ package com.sharedash.app.discovery
 
 import android.os.Build
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -16,9 +12,7 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
-class AndroidPairingCoordinator {
-
-    private var pollingJob: Job? = null
+class AndroidPairingCoordinator(private val openConnection: (URL) -> HttpURLConnection) {
 
     suspend fun sendPairRequest(
         targetIp: String,
@@ -30,7 +24,7 @@ class AndroidPairingCoordinator {
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$targetIp:$targetPort/api/v1/pair/request")
-            val conn = url.openConnection() as HttpURLConnection
+            val conn = openConnection(url)
             conn.connectTimeout = 3000
             conn.readTimeout = 3000
             conn.requestMethod = "POST"
@@ -54,8 +48,9 @@ class AndroidPairingCoordinator {
             writer.flush()
             writer.close()
 
-            val code = conn.responseCode
-            code in 200..299
+            try {
+                conn.responseCode in 200..299 && conn.inputStream.bufferedReader().use { JSONObject(it.readText()).optBoolean("success") }
+            } finally { conn.disconnect() }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to send pair request to $targetIp:$targetPort: ${e.message}")
             false
@@ -69,7 +64,7 @@ class AndroidPairingCoordinator {
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$targetIp:$targetPort/api/v1/pair/respond")
-            val conn = url.openConnection() as HttpURLConnection
+            val conn = openConnection(url)
             conn.connectTimeout = 3000
             conn.readTimeout = 3000
             conn.requestMethod = "POST"
@@ -101,7 +96,7 @@ class AndroidPairingCoordinator {
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val url = URL("http://$targetIp:$targetPort/api/v1/pair/confirm")
-            val conn = url.openConnection() as HttpURLConnection
+            val conn = openConnection(url)
             conn.connectTimeout = 3000
             conn.readTimeout = 3000
             conn.requestMethod = "POST"
@@ -125,62 +120,28 @@ class AndroidPairingCoordinator {
         }
     }
 
-    fun startPairingPoller(
-        scope: CoroutineScope,
-        targetIp: String,
-        targetPort: Int,
-        onIncoming: (pin: String, name: String) -> Unit,
-        onAccepted: (name: String) -> Unit
-    ) {
-        pollingJob?.cancel()
-        pollingJob = scope.launch(Dispatchers.IO) {
-            var confirmed = false
-            while (isActive && !confirmed) {
+    suspend fun awaitAcceptance(ip: String, port: Int, localName: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val deadline = android.os.SystemClock.elapsedRealtime() + 30_000L
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                val conn = openConnection(URL("http://$ip:$port/api/v1/pair/status"))
                 try {
-                    val url = URL("http://$targetIp:$targetPort/api/v1/pair/status")
-                    val conn = url.openConnection() as HttpURLConnection
                     conn.connectTimeout = 1500
                     conn.readTimeout = 1500
-                    conn.requestMethod = "GET"
-
-                    if (conn.responseCode == 200) {
-                        val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                        val text = reader.readText()
-                        reader.close()
-
-                        val json = JSONObject(text)
-                        val isPaired = json.optBoolean("is_paired", false)
-                        val pairedName = json.optString("paired_device_name", "")
-
-                        if (isPaired && pairedName.isNotEmpty()) {
-                            confirmed = true
-                            // Complete 3-Way Handshake Step 3: ACK
-                            confirmPairSession(targetIp, targetPort)
-                            withContext(Dispatchers.Main) {
-                                onAccepted(pairedName)
-                            }
-                        }
-
-                        val pending = json.optJSONObject("pending_request")
-                        if (pending != null && pending.optString("status") == "PENDING") {
-                            val pin = pending.optString("pin_code", "")
-                            val name = pending.optString("initiator_name", "Nearby Device")
-                            withContext(Dispatchers.Main) {
-                                onIncoming(pin, name)
-                            }
-                        }
+                    val status = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+                    if (status.optBoolean("is_paired") && status.optString("paired_device_name") == localName) {
+                        confirmPairSession(ip, port)
+                        return@withContext true
                     }
-                } catch (_: Exception) {}
-
-                delay(1000)
+                } catch (_: java.io.IOException) {
+                } catch (_: org.json.JSONException) {
+                } finally {
+                    conn.disconnect()
+                }
+                delay(450)
             }
+            false
         }
-    }
-
-    fun stopPolling() {
-        pollingJob?.cancel()
-        pollingJob = null
-    }
 
     companion object {
         private const val TAG = "AndroidPairingCoordinator"

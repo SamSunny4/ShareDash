@@ -75,6 +75,7 @@ import com.sharedash.app.model.TransferStatus
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import com.sharedash.app.ui.theme.ShareDashTheme
 import com.sharedash.app.ui.theme.NeoBg
@@ -120,7 +121,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var hotspotManager: HotspotManager
     private var httpServer: com.sharedash.app.server.AndroidHttpServer? = null
     private val transportManager = AndroidTransportManager()
-    private var activeSendJob: kotlinx.coroutines.Job? = null
+    @Volatile private var activeSendJob: kotlinx.coroutines.Job? = null
 
     private val _isUsbCablePlugged = MutableStateFlow(false)
     val isUsbCablePlugged: StateFlow<Boolean> = _isUsbCablePlugged
@@ -270,7 +271,7 @@ class MainActivity : ComponentActivity() {
     private var onPairAcceptedCallback: ((targetId: String, targetName: String) -> Unit)? = null
     private var onPairConfirmedCallback: (() -> Unit)? = null
     private var onUsbConnectedCallback: (() -> Unit)? = null
-    private var onTransferProgressCallback: ((String, Long, Long, Double) -> Unit)? = null
+    private var onTransferProgressCallback: ((String, Long, Long, Double, Long?) -> Unit)? = null
     private var onFileReceivedCallback: ((String, Long) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -279,8 +280,19 @@ class MainActivity : ComponentActivity() {
         settingsManager = SettingsManager.getInstance(this)
         historyManager = TransferHistoryManager.getInstance(this)
 
-        udpManager = UdpDiscoveryManager(this)
         hotspotManager = HotspotManager(this)
+        udpManager = UdpDiscoveryManager(this,
+            directHostIp = { (hotspotManager.hotspotState.value as? HotspotState.Active)?.ipAddress },
+            onDirectHost = { ip ->
+                val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                val network = currentWifi()
+                if (network != null && cm.getLinkProperties(network)?.routes.orEmpty().any { it.gateway?.hostAddress == ip }) {
+                    directClientWifi = network
+                }
+            },
+            transferBusy = { activeSendJob?.isActive == true || TransferForegroundService.isServiceRunning },
+            allowedPeerIp = { ip -> externalWifiRoutes().none { it.matches(java.net.InetAddress.getByName(ip)) } }
+        )
 
         // Eagerly start Android HTTP Server on port 54321 for symmetric discovery and pairing
         httpServer = com.sharedash.app.server.AndroidHttpServer(
@@ -291,8 +303,12 @@ class MainActivity : ComponentActivity() {
             onPairConfirmed = { onPairConfirmedCallback?.invoke() },
             onFileReceived = { fileName, bytes -> onFileReceivedCallback?.invoke(fileName, bytes) }
         )
+        httpServer?.directHostIp = { (hotspotManager.hotspotState.value as? HotspotState.Active)?.ipAddress }
+        httpServer?.isAllowedInterface = { local ->
+            local.isLoopbackAddress || externalWifiRoutes().none { it.matches(local) }
+        }
         var lastNotificationTimeMs = 0L
-        httpServer?.onTransferProgress = { fileName, bytesRecv, totalBytes, speedMbps ->
+        httpServer?.onTransferProgress = { fileName, bytesRecv, totalBytes, speedMbps, usbBytes ->
             val now = System.currentTimeMillis()
             if (now - lastNotificationTimeMs >= 300L || (totalBytes > 0 && bytesRecv >= totalBytes)) {
                 lastNotificationTimeMs = now
@@ -302,7 +318,7 @@ class MainActivity : ComponentActivity() {
                     this@MainActivity, fileName, pct, speedText
                 )
             }
-            onTransferProgressCallback?.invoke(fileName, bytesRecv, totalBytes, speedMbps)
+            onTransferProgressCallback?.invoke(fileName, bytesRecv, totalBytes, speedMbps, usbBytes)
         }
         httpServer?.onWifiConnectRequest = { ssid, password ->
             connectToWifiNetwork(ssid, password)
@@ -310,12 +326,21 @@ class MainActivity : ComponentActivity() {
         httpServer?.onStartHotspotRequest = { callback ->
             lifecycleScope.launch(Dispatchers.Main) {
                 try {
-                    hotspotManager.start5GHzHotspot { ssid, password, gateway ->
-                        callback(ssid, password, gateway)
+                    val result = kotlinx.coroutines.withTimeoutOrNull(90_000L) {
+                        val choice = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                        wirelessDecision = choice
+                        prepareWireless()
+                        if (!choice.await()) return@withTimeoutOrNull null
+                        hotspotManager.hotspotState.first { it is HotspotState.Active || it is HotspotState.Error }
+                    }
+                    when (result) {
+                        is HotspotState.Active -> callback("hotspot_started", result.ssid, result.password, result.ipAddress)
+                        is HotspotState.Error -> callback("failed", "", "", "")
+                        else -> callback("usb_only", "", "", "")
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Error in onStartHotspotRequest: ${e.message}")
-                    callback("", "", "")
+                    callback("failed", "", "", "")
                 }
             }
         }
@@ -372,7 +397,7 @@ class MainActivity : ComponentActivity() {
                     currentNavTab = NavTab.HOME
                 }
 
-                val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator() }
+                val pairingCoordinator = remember { com.sharedash.app.discovery.AndroidPairingCoordinator(::openPeerConnection) }
 
                 val udpPeers by udpManager.discoveredPeers.collectAsState()
                 val hotspotState by hotspotManager.hotspotState.collectAsState()
@@ -431,14 +456,14 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val receiving = remember { mutableMapOf<String, SchedulerTelemetry>() }
-                onTransferProgressCallback = { fileName, bytesRecv, totalBytes, speedMbps ->
+                onTransferProgressCallback = { fileName, bytesRecv, totalBytes, speedMbps, usbBytes ->
                     lifecycleScope.launch(Dispatchers.Main) {
                         val previous = receiving[fileName]
                         val peerName = activeTarget?.friendlyName.orEmpty()
                         val telem = SchedulerTelemetry(
                             transferId = previous?.transferId ?: UUID.randomUUID(), title = fileName,
                             status = if (totalBytes > 0 && bytesRecv >= totalBytes) "VERIFYING" else "ACTIVE",
-                            aggregateMbps = speedMbps, totalBytes = totalBytes, completedBytes = bytesRecv,
+                            usbBytes = usbBytes, aggregateMbps = speedMbps, totalBytes = totalBytes, completedBytes = bytesRecv,
                             progressPct = if (totalBytes > 0) (bytesRecv.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f,
                             etaSeconds = if (speedMbps > 0) ((totalBytes - bytesRecv).coerceAtLeast(0) * 8 / (speedMbps * 1_000_000)).toLong() else 0,
                             transports = emptyList(), chunkStates = emptyList(),
@@ -478,13 +503,6 @@ class MainActivity : ComponentActivity() {
                 // Discovery peers from UDP (Wi-Fi Direct / Zero-LAN / Hotspot / USB)
                 val phoneMode = connectionModeState == SettingsManager.MODE_PHONE_TO_PHONE
                 val combinedPeers = udpPeers.filter { it.osName.startsWith("Android", true) == phoneMode }
-
-                // Cleanup poller on dispose
-                androidx.compose.runtime.DisposableEffect(Unit) {
-                    onDispose {
-                        pairingCoordinator.stopPolling()
-                    }
-                }
 
                 fun startSending(peer: DiscoveredPeer, uris: List<Uri>) {
                     if (uris.isEmpty() || activeSendJob?.isActive == true) return
@@ -527,6 +545,7 @@ class MainActivity : ComponentActivity() {
                         var consecutiveFailures = 0
                         while (isActive && activeTarget != null) {
                             delay(3000)
+                            if (activeSendJob?.isActive == true) continue
                             val targetPeer = activeTarget ?: break
                             val ep = resolveBestTargetEndpoint(targetPeer)
                             if (ep == null) {
@@ -554,45 +573,21 @@ class MainActivity : ComponentActivity() {
                             Toast.LENGTH_LONG
                         ).show()
                     } else {
-                        val effectiveIp = if (peer.ipAddress.isEmpty() || peer.ipAddress == "0.0.0.0") {
-                            val myIps = udpManager.getLocalIpAddresses()
-                            val (usbPrefixes, _) = udpManager.getInterfaceSubnetPrefixes()
-                            peer.candidateIps.firstOrNull { it != "127.0.0.1" && it != "0.0.0.0" } ?: when {
-                                myIps.any { it.startsWith("192.168.137.") } -> "192.168.137.1"
-                                myIps.any { it.startsWith("192.168.42.") } -> "192.168.42.1"
-                                myIps.any { it.startsWith("192.168.43.") } -> "192.168.43.1"
-                                myIps.any { it.startsWith("192.168.49.") } -> "192.168.49.1"
-                                usbPrefixes.isNotEmpty() -> "${usbPrefixes.first()}.1"
-                                else -> ""
-                            }
-                        } else {
-                            peer.ipAddress
-                        }
-
                         val pin = String.format("%06d", java.util.Random().nextInt(900000) + 100000)
                         val myIp = udpManager.getLocalIpAddresses().firstOrNull() ?: "127.0.0.1"
                         connectingId = peer.deviceId
                         lifecycleScope.launch {
-                            // Gather all candidate IPs to attempt handshake (resolved best endpoint first)
-                            val best = resolveBestTargetEndpoint(peer)
-                            val targetIpsToTry = mutableListOf<String>()
-                            if (best != null) targetIpsToTry.add(best.first)
-                            if (effectiveIp.isNotEmpty() && !targetIpsToTry.contains(effectiveIp)) targetIpsToTry.add(effectiveIp)
-                            for (cand in peer.candidateIps) {
-                                if (cand.isNotEmpty() && cand != "0.0.0.0" && cand != "127.0.0.1" && !targetIpsToTry.contains(cand)) {
-                                    targetIpsToTry.add(cand)
-                                }
-                            }
-                            if (targetIpsToTry.isEmpty()) {
-                                Toast.makeText(this@MainActivity, "No network path to ${peer.friendlyName}. Please connect Wi-Fi or USB tethering.", Toast.LENGTH_LONG).show()
+                            val paths = resolveMultipathEndpoints(peer)
+                            if (paths.isEmpty()) {
+                                prepareWireless()
                                 return@launch
                             }
-
                             var sent = false
-                            var connectedIp = effectiveIp.ifEmpty { targetIpsToTry.first() }
-                            var connectedPort = peer.port
-                            for (candIp in targetIpsToTry) {
-                                val portToTry = if (candIp == best?.first) best.second else peer.port
+                            var connectedIp = paths.first().ip
+                            var connectedPort = paths.first().port
+                            for (path in paths) {
+                                val candIp = path.ip
+                                val portToTry = path.port
                                 if (pairingCoordinator.sendPairRequest(candIp, portToTry, pin, settingsManager.deviceName, myIp)) {
                                     sent = true
                                     connectedIp = candIp
@@ -601,22 +596,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            if (sent) {
+                            if (sent && pairingCoordinator.awaitAcceptance(connectedIp, connectedPort, settingsManager.deviceName)) {
                                 val connected = peer.copy(ipAddress = connectedIp, port = connectedPort)
                                 activeTarget = connected
                                 if (pendingFiles.isNotEmpty() && !hasActiveTransfer) startSending(connected, pendingFiles)
-                                pairingCoordinator.startPairingPoller(
-                                    scope = lifecycleScope,
-                                    targetIp = connectedIp,
-                                    targetPort = connectedPort,
-                                    onIncoming = { _, _ -> },
-                                    onAccepted = { name ->
-                                        lifecycleScope.launch {
-                                            delay(650)
-                                            Toast.makeText(this@MainActivity, "Connected to $name", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                )
+                            } else if (sent) {
+                                Toast.makeText(this@MainActivity, "Connection request was not accepted.", Toast.LENGTH_LONG).show()
                             } else {
                                 Toast.makeText(this@MainActivity, "Could not reach ${peer.friendlyName}. Open ShareDash on the other device and check its connection.", Toast.LENGTH_LONG).show()
                             }
@@ -625,7 +610,6 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val handleDisconnect: () -> Unit = {
-                    pairingCoordinator.stopPolling()
                     httpServer?.activePairedPeerName = null
                     activeTarget?.let { peer ->
                         lifecycleScope.launch {
@@ -668,7 +652,7 @@ class MainActivity : ComponentActivity() {
                         for ((host, port) in candidateHosts) {
                             try {
                                 val url = java.net.URL("http://$host:$port/api/v1/transfers/cancel")
-                                val conn = url.openConnection() as java.net.HttpURLConnection
+                                val conn = openPeerConnection(url)
                                 conn.requestMethod = "POST"
                                 conn.connectTimeout = 800
                                 conn.readTimeout = 800
@@ -700,11 +684,7 @@ class MainActivity : ComponentActivity() {
                                 connectedPeer = activeTarget,
                                 discoveredPeers = combinedPeers,
                                 onEnableUsbTethering = { openUsbTetheringSettings() },
-                                onSkipUsb = {
-                                    ensureWifiEnabled()
-                                    startDiscovery()
-                                    Toast.makeText(this@MainActivity, "Looking for nearby devices on Wi-Fi", Toast.LENGTH_SHORT).show()
-                                },
+                                onSkipUsb = { prepareWireless() },
                                 onDeviceSelected = handleDeviceSelect,
                                 connectingId = connectingId,
                                 onDisconnect = { if (!hasActiveTransfer) handleDisconnect() else Toast.makeText(this@MainActivity, "Finish the current transfer first", Toast.LENGTH_SHORT).show() },
@@ -712,11 +692,7 @@ class MainActivity : ComponentActivity() {
                                 onPickFolder = { folderPickerLauncher.launch(null) },
                                 onOpenDownloadsFolder = { openDownloadsFolder() },
                                 hotspotState = hotspotState,
-                                onStartHotspot = {
-                                    hotspotManager.start5GHzHotspot { _, _, _ ->
-                                        udpManager.startDiscovery(lifecycleScope)
-                                    }
-                                },
+                                onStartHotspot = { prepareWireless() },
                                 onStopHotspot = { hotspotManager.stopHotspot() },
                                 deviceName = deviceNameState,
                                 hasActiveTransfer = hasActiveTransfer
@@ -883,7 +859,7 @@ class MainActivity : ComponentActivity() {
                             text = {
                                 androidx.compose.foundation.lazy.LazyColumn {
                                     item { androidx.compose.material3.Text(if (peers.isEmpty())
-                                        "Open ShareDash on the other device and connect both devices by USB tethering or the same Wi-Fi."
+                                        "Open ShareDash on the other device and connect using USB tethering or Wi-Fi Direct."
                                         else if (connectingId != null) "Connecting…" else "Select the device that should receive your files.") }
                                     items(peers.size) { index ->
                                         val peer = peers[index]
@@ -906,39 +882,68 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun ensureWifiEnabled() {
-        val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return
-        if (!wifiManager.isWifiEnabled) {
-            android.util.Log.i("MainActivity", "Wi-Fi is OFF on app launch. Enabling...")
-            try {
-                @Suppress("DEPRECATION")
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                    wifiManager.isWifiEnabled = true
-                } else {
-                    var directEnabled = false
-                    try {
-                        val method = wifiManager.javaClass.getMethod("setWifiEnabled", Boolean::class.javaPrimitiveType)
-                        directEnabled = method.invoke(wifiManager, true) as? Boolean ?: false
-                    } catch (_: Exception) {}
+    private var wirelessDecision: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+    @Volatile private var allowedWifi: android.net.Network? = null
+    private var resumeWirelessSetup = false
+    private var wifiDialog: android.app.AlertDialog? = null
 
-                    if (!directEnabled) {
-                        try {
-                            val panelIntent = Intent(android.provider.Settings.Panel.ACTION_WIFI).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            startActivity(panelIntent)
-                        } catch (_: Exception) {
-                            val settingsIntent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            startActivity(settingsIntent)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Could not enable Wi-Fi on app launch: ${e.message}")
-            }
+    private fun currentWifi(): android.net.Network? {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        return cm.allNetworks.firstOrNull {
+            cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
         }
+    }
+
+    private fun externalWifiRoutes(): List<android.net.RouteInfo> {
+        val network = currentWifi() ?: return emptyList()
+        val ssid = hotspotManager.getConnectedWifiSsid().orEmpty()
+        if (ssid.startsWith("DIRECT-", true) || ssid.startsWith("ShareDash", true) || network == fallbackWifi || network == directClientWifi) return emptyList()
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        return cm.getLinkProperties(network)?.routes.orEmpty().filter { !it.isDefaultRoute && (it.gateway == null || it.gateway?.isAnyLocalAddress == true) }
+    }
+
+    @Volatile private var directClientWifi: android.net.Network? = null
+    @Volatile private var fallbackWifi: android.net.Network? = null
+
+    private fun openPeerConnection(url: java.net.URL): java.net.HttpURLConnection {
+        val network = fallbackWifi
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val address = java.net.InetAddress.getByName(url.host)
+        val useFallback = network != null && !address.isLoopbackAddress &&
+            cm.getLinkProperties(network)?.routes.orEmpty().any { !it.isDefaultRoute && it.matches(address) }
+        return (if (useFallback) network!!.openConnection(url) else url.openConnection()) as java.net.HttpURLConnection
+    }
+
+    private fun prepareWireless() {
+        if (wifiDialog?.isShowing == true) return
+        val wifi = applicationContext.getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+        val network = currentWifi()
+        fun startDirect() {
+            hotspotManager.start5GHzHotspot { _, _, _ -> startDiscovery() }
+            wirelessDecision?.complete(true)
+        }
+        if (wifi.isWifiEnabled && (hotspotManager.hotspotState.value is HotspotState.Active ||
+                network == null || !hotspotManager.isConnectedToExternalWifi() || allowedWifi == network)) {
+            startDirect()
+            return
+        }
+        val builder = android.app.AlertDialog.Builder(this)
+        if (!wifi.isWifiEnabled) {
+            builder.setTitle("Turn on Wi-Fi")
+                .setMessage("Wi-Fi Direct needs the Wi-Fi radio. You can leave it disconnected from your router.")
+        } else {
+            builder.setTitle("Switch to Wi-Fi Direct?")
+                .setMessage("Sharing the radio with this network can slow transfers. Turn off auto-reconnect for this network, then disconnect. Leave Wi-Fi on.")
+                .setNeutralButton("Continue on this Wi-Fi") { _, _ ->
+                    allowedWifi = network
+                    startDirect()
+                }
+        }
+        wifiDialog = builder.setPositiveButton("Wi-Fi settings") { _, _ ->
+            resumeWirelessSetup = true
+            startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+        }.setNegativeButton("Cancel") { _, _ -> wirelessDecision?.complete(false) }
+            .setOnCancelListener { wirelessDecision?.complete(false) }.show()
     }
 
     private suspend fun resolveMultipathEndpoints(target: DiscoveredPeer): List<TransportEndpoint> = withContext(Dispatchers.IO) {
@@ -968,8 +973,6 @@ class MainActivity : ComponentActivity() {
         // 3. USB Tethering Subnets (inspect all USB/RNDIS/NCM network interfaces)
         val (detectedUsbPrefixes, _) = udpManager.getInterfaceSubnetPrefixes()
         val usbSubnetPrefixes = detectedUsbPrefixes.toMutableSet()
-        usbSubnetPrefixes.add("192.168.42")
-        usbSubnetPrefixes.add("192.168.44")
 
         // Read kernel ARP table for active USB tethering peers
         try {
@@ -999,21 +1002,21 @@ class MainActivity : ComponentActivity() {
         initialCandidates.add("127.0.0.1" to 54325)
 
         val checkIsUsb: (String, Int) -> Boolean = { candIp, candPort ->
-            candPort == 54325 ||
             (candIp == "127.0.0.1" && candPort == 54325) ||
-            usbSubnetPrefixes.any { candIp.startsWith("$it.") } ||
-            candIp.startsWith("192.168.42.") ||
-            candIp.startsWith("192.168.44.") ||
-            candIp.startsWith("169.254.")
+                usbSubnetPrefixes.any { candIp.startsWith("$it.") }
         }
 
         // Probe all initial candidate endpoints concurrently in parallel (1500ms timeout)
-        val candidateList = initialCandidates.distinct().filter { (ip, port) -> port != 54325 || ip == "127.0.0.1" }
+        val stationRoutes = externalWifiRoutes()
+        fun routeAllowed(ip: String) = runCatching { stationRoutes.none { it.matches(java.net.InetAddress.getByName(ip)) } }.getOrDefault(false)
+        val candidateList = initialCandidates.distinct().filter { (ip, port) ->
+            (port != 54325 || ip == "127.0.0.1") && routeAllowed(ip)
+        }
         val probeDeferreds = candidateList.map { (ip, port) ->
             async(Dispatchers.IO) {
                 try {
                     val probeUrl = java.net.URL("http://$ip:$port/api/v1/info")
-                    val conn = probeUrl.openConnection() as java.net.HttpURLConnection
+                    val conn = openPeerConnection(probeUrl)
                     conn.connectTimeout = 1500
                     conn.readTimeout = 2000
                     conn.requestMethod = "GET"
@@ -1067,12 +1070,12 @@ class MainActivity : ComponentActivity() {
         }
 
         // Secondary parallel probes for additional interface IPs disclosed by peer
-        val secondaryFiltered = secondaryCandidateIps.distinct().filter { !seenIps.contains(it) }
+        val secondaryFiltered = secondaryCandidateIps.distinct().filter { !seenIps.contains(it) && routeAllowed(it) }
         val secondaryDeferreds = secondaryFiltered.map { peerIp ->
             async(Dispatchers.IO) {
                 try {
                     val probeUrl = java.net.URL("http://$peerIp:54321/api/v1/info")
-                    val conn = probeUrl.openConnection() as java.net.HttpURLConnection
+                    val conn = openPeerConnection(probeUrl)
                     conn.connectTimeout = 1500
                     conn.readTimeout = 2000
                     conn.requestMethod = "GET"
@@ -1126,15 +1129,15 @@ class MainActivity : ComponentActivity() {
 
     private fun readChunkBytes(uri: Uri, offset: Long, length: Int): ByteArray? {
         return try {
-            contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                java.io.FileInputStream(pfd.fileDescriptor).channel.use { channel ->
+            contentResolver.openFileDescriptor(uri, "r")?.let { pfd ->
+                ParcelFileDescriptor.AutoCloseInputStream(pfd).channel.use { channel ->
                     channel.position(offset)
                     val buf = ByteArray(length)
                     val buffer = java.nio.ByteBuffer.wrap(buf)
                     var bytesRead = 0
                     while (bytesRead < length) {
                         val read = channel.read(buffer)
-                        if (read == -1) break
+                        if (read <= 0) break
                         bytesRead += read
                     }
                     if (bytesRead == length) {
@@ -1158,14 +1161,13 @@ class MainActivity : ComponentActivity() {
                     var total = 0
                     while (total < length) {
                         val r = stream.read(buf, total, length - total)
-                        if (r == -1) break
+                        if (r <= 0) break
                         total += r
                     }
                     if (total == length) buf else if (total > 0) buf.copyOf(total) else ByteArray(0)
                 }
             } catch (inner: Throwable) {
                 Log.e("MainActivity", "readChunkBytes failed: ${inner.message}")
-                System.gc()
                 null
             }
         }
@@ -1189,7 +1191,7 @@ class MainActivity : ComponentActivity() {
         var conn: java.net.HttpURLConnection? = null
         var isSuccess = false
         try {
-            conn = url.openConnection() as java.net.HttpURLConnection
+            conn = openPeerConnection(url)
             conn.requestMethod = "POST"
             conn.doOutput = true
             conn.setFixedLengthStreamingMode(chunkBytes.size)
@@ -1209,12 +1211,7 @@ class MainActivity : ComponentActivity() {
             conn.setRequestProperty("X-Transport", endpoint.name)
             conn.setRequestProperty("X-Transport-Kind", if (endpoint.kind == TransportKind.USB) "USB" else "WIFI")
 
-            conn.outputStream.use { rawOs ->
-                java.io.BufferedOutputStream(rawOs, 256 * 1024).use { os ->
-                    os.write(chunkBytes)
-                    os.flush()
-                }
-            }
+            conn.outputStream.use { it.write(chunkBytes) }
 
             val code = conn.responseCode
             return when (code) {
@@ -1270,10 +1267,18 @@ class MainActivity : ComponentActivity() {
 
         activeSendJob?.cancel()
         httpServer?.resetCancellation()
-        activeSendJob = lifecycleScope.launch(Dispatchers.IO) {
+        val onSendError = kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+            Log.e("MainActivity", "Send failed", error)
+            lifecycleScope.launch(Dispatchers.Main) {
+                TransferForegroundService.stopService(this@MainActivity)
+                onUpdate(SchedulerTelemetry(transferId, firstFileName, "FAILED", 0.0, 0, 0, 0f, 0, emptyList(), emptyList()))
+            }
+        }
+        activeSendJob = lifecycleScope.launch(Dispatchers.IO + onSendError) {
             val endpoints = resolveMultipathEndpoints(target)
             if (endpoints.isEmpty()) {
                 withContext(Dispatchers.Main) {
+                    prepareWireless()
                     Toast.makeText(this@MainActivity, "Cannot reach peer. Ensure ShareDash is active on peer device.", Toast.LENGTH_LONG).show()
                     onUpdate(
                         SchedulerTelemetry(
@@ -1433,7 +1438,7 @@ class MainActivity : ComponentActivity() {
                 var smoothWifiMbps = 0.0
 
                 while (isActive && !transferFinished.get() && !transferFailed.get()) {
-                    delay(35)
+                    delay(150)
                     val now = System.currentTimeMillis()
                     val dt = (now - lastTime).coerceAtLeast(1) / 1000.0
                     val curUsb = usbBytesSent.get()
@@ -1481,30 +1486,28 @@ class MainActivity : ComponentActivity() {
             System.setProperty("http.maxConnections", "32")
 
             // Pre-open FileChannels once per file to eliminate 1,456 ContentResolver Binder round-trips!
-            val openFdMap = ConcurrentHashMap<Uri, Pair<ParcelFileDescriptor, java.nio.channels.FileChannel>>()
-            for (uri in uris) {
+            val openFdMap = ConcurrentHashMap<Uri, java.nio.channels.FileChannel>()
+            for (uri in uris.distinct().take(64)) {
                 try {
                     val pfd = contentResolver.openFileDescriptor(uri, "r")
                     if (pfd != null) {
-                        val channel = java.io.FileInputStream(pfd.fileDescriptor).channel
-                        openFdMap[uri] = Pair(pfd, channel)
+                        openFdMap[uri] = ParcelFileDescriptor.AutoCloseInputStream(pfd).channel
                     }
                 } catch (e: Throwable) {
                     Log.w("MainActivity", "Failed to pre-open channel for $uri: ${e.message}")
                 }
             }
 
-            val readChunkFromChannel: (ChunkTask) -> ByteArray? = { task ->
+            val readChunkFromChannel: (ChunkTask, ByteArray) -> ByteArray? = { task, buf ->
                 val cached = openFdMap[task.uri]
                 if (cached != null) {
                     try {
-                        val channel = cached.second
-                        val buf = ByteArray(task.chunkLength)
+                        val channel = cached
                         val buffer = java.nio.ByteBuffer.wrap(buf)
                         var bytesRead = 0
                         while (bytesRead < task.chunkLength) {
                             val r = channel.read(buffer, task.chunkOffset + bytesRead)
-                            if (r == -1) break
+                            if (r <= 0) break
                             bytesRead += r
                         }
                         if (bytesRead == task.chunkLength) buf else if (bytesRead > 0) buf.copyOf(bytesRead) else ByteArray(0)
@@ -1522,9 +1525,11 @@ class MainActivity : ComponentActivity() {
 
             suspend fun runWorker(primary: TransportEndpoint, alternate: TransportEndpoint?) {
                 val primaryActive = if (primary.kind == TransportKind.USB) usbActive else wifiActive
+                var buffer = ByteArray(0)
                 while (kotlinx.coroutines.currentCoroutineContext().isActive && !transferFailed.get() && !fallbackNeeded.get()) {
                     val task = queue.poll() ?: return
-                    val bytes = readChunkFromChannel(task)
+                    if (buffer.size != task.chunkLength) buffer = ByteArray(task.chunkLength)
+                    val bytes = readChunkFromChannel(task, buffer)
                     if (bytes == null || bytes.size != task.chunkLength) {
                         transferFailed.set(true)
                         return
@@ -1532,11 +1537,14 @@ class MainActivity : ComponentActivity() {
                     var endpoint = if (primaryActive.get() || alternate == null) primary else alternate
                     var result = sendChunk(endpoint, task, bytes)
                     if (result == PostResult.RETRY) {
-                        if (alternate != null && endpoint == primary) {
+                        result = sendChunk(endpoint, task, bytes)
+                    }
+                    if (result == PostResult.RETRY && alternate != null) {
+                        if (endpoint == primary) {
                             primaryActive.set(false)
                             endpoint = alternate
+                            result = sendChunk(endpoint, task, bytes)
                         }
-                        result = sendChunk(endpoint, task, bytes)
                     }
                     when (result) {
                         PostResult.SUCCESS -> {
@@ -1561,9 +1569,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             } finally {
-                openFdMap.values.forEach { (pfd, channel) ->
+                openFdMap.values.forEach { channel ->
                     try { channel.close() } catch (_: Throwable) {}
-                    try { pfd.close() } catch (_: Throwable) {}
                 }
                 openFdMap.clear()
             }
@@ -1651,7 +1658,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val boundary = "ShareDash-${System.currentTimeMillis()}-${transferId.toString().take(8)}"
                 val url = java.net.URL("http://$resolvedIp:$resolvedPort/api/v1/transfers/send")
-                val conn = url.openConnection() as java.net.HttpURLConnection
+                val conn = openPeerConnection(url)
                 conn.requestMethod = "POST"
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
@@ -1856,7 +1863,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Connect to a Wi-Fi network programmatically (triggered by PC via BLE command).
+     * Connect to a Wi-Fi network programmatically (triggered by PC over the control connection).
      * Uses WifiNetworkSuggestion API on Android 10+ since addNetwork() is deprecated.
      */
     @android.annotation.SuppressLint("MissingPermission")
@@ -1891,10 +1898,6 @@ class MainActivity : ComponentActivity() {
         try {
             @Suppress("DEPRECATION")
             wifiManager?.disconnect()
-            val connManager = getSystemService(CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                connManager?.bindProcessToNetwork(null)
-            }
             android.util.Log.i("MainActivity", "Disconnected existing Wi-Fi station connection to free radio band for $ssid")
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Could not disconnect previous Wi-Fi: ${e.message}")
@@ -1944,7 +1947,10 @@ class MainActivity : ComponentActivity() {
                     connManager.requestNetwork(request, object : android.net.ConnectivityManager.NetworkCallback() {
                         override fun onAvailable(network: android.net.Network) {
                             android.util.Log.i("MainActivity", "Connected to $ssid via WifiNetworkSpecifier")
-                            connManager.bindProcessToNetwork(network)
+                            fallbackWifi = network
+                        }
+                        override fun onLost(network: android.net.Network) {
+                            if (fallbackWifi == network) fallbackWifi = null
                         }
                         override fun onUnavailable() {
                             android.util.Log.w("MainActivity", "WifiNetworkSpecifier: $ssid unavailable")
@@ -1980,32 +1986,29 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Open USB tethering settings (triggered by PC via BLE command).
+     * Open USB tethering settings (triggered by PC over the control connection).
      * Android doesn't expose a public API to toggle tethering programmatically.
      */
     private fun openUsbTetheringSettings() {
-        lifecycleScope.launch(Dispatchers.Main) {
-            Toast.makeText(this@MainActivity, "Please enable USB Tethering", Toast.LENGTH_LONG).show()
-            try {
-                val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                startActivity(intent)
-            } catch (e: Exception) {
-                try {
-                    val intent = Intent()
-                    intent.setClassName("com.android.settings", "com.android.settings.TetherSettings")
-                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    startActivity(intent)
-                } catch (_: Exception) {
-                    android.util.Log.e("MainActivity", "Could not open tethering settings")
-                }
-            }
+        val targets = listOf(
+            Intent("android.settings.TETHER_SETTINGS"),
+            Intent().setClassName("com.android.settings", "com.android.settings.Settings\$TetherSettingsActivity"),
+            Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings")
+        )
+        for (intent in targets) {
+            try { startActivity(intent); return } catch (_: android.content.ActivityNotFoundException) {
+            } catch (_: SecurityException) {}
         }
+        Toast.makeText(this, "Open Settings and search for USB tethering.", Toast.LENGTH_LONG).show()
     }
 
     override fun onResume() {
         super.onResume()
         checkUsbState()
+        if (resumeWirelessSetup) {
+            resumeWirelessSetup = false
+            prepareWireless()
+        }
         if (_isUsbTetheringActive.value) {
             onUsbConnectedCallback?.invoke()
         }

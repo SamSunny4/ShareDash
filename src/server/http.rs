@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::discovery::{BleDiscovery, PairingManager, PeerDiscovery};
+use crate::discovery::{PairingManager, PeerDiscovery};
 use crate::scheduler::metrics::SchedulerTelemetry;
 use crate::server::api::{
     cancel_all_active_transfers, cancel_transfer, confirm_pair_session, connect_to_remote_peer, create_pair_session, detect_transports,
@@ -60,11 +60,7 @@ impl Server {
             tracing::warn!("Could not start UDP discovery: {}", e);
         }
 
-        // Start local BLE peer discovery scanner
-        let ble_discovery = Arc::new(BleDiscovery::new());
-        if let Err(e) = ble_discovery.start().await {
-            tracing::warn!("Could not start BLE discovery: {}", e);
-        }
+
 
         // Maintain ADB reverse port 54325 whenever an Android phone is plugged in via USB
         let adb_server_port = self.port;
@@ -94,7 +90,6 @@ impl Server {
             server_port: self.port,
             pairing_mgr,
             discovery,
-            ble_discovery,
             manifest_db,
             telemetry_tx: telemetry_tx.clone(),
             active_transfers: Arc::new(Mutex::new(HashMap::new())),

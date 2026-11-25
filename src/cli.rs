@@ -1,39 +1,18 @@
-//! Wifite-style 8-phase terminal wizard for ShareDash.
-//!
-//! Flow:
-//!   Phase 1 — BLE Scan → discover ShareDash phones
-//!   Phase 2 — Wi-Fi Capability Exchange via BLE GATT
-//!   Phase 3 — Create PC Hotspot (matched to phone caps)
-//!   Phase 4 — Send Wi-Fi credentials to phone via BLE GATT
-//!   Phase 5 — Wi-Fi 3-Way Handshake
-//!   Phase 6 — USB Cable Detection
-//!   Phase 7 — USB Tethering (via BLE command)
-//!   Phase 8 — USB 3-Way Handshake
-//!   → READY TO SEND → File selection → Transfer with live telemetry
+//! Terminal setup and transfer commands.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use btleplug::api::{Central, Peripheral};
 use crate::cli_widgets::*;
 use crate::discovery::WifiCapsInfo;
 use crate::hotspot;
-use crate::server::api::{AppState, IncomingPairRequest, OutgoingPairInfo};
+use crate::server::api::AppState;
 
 pub struct TerminalCli {
     state: AppState,
     is_local_sender: Arc<std::sync::atomic::AtomicBool>,
-}
-
-/// A BLE-discovered device for the scan table.
-#[derive(Clone, Debug)]
-struct BleDevice {
-    name: String,
-    address: String,
-    rssi: i16,
-    peripheral_id: String,
 }
 
 impl TerminalCli {
@@ -177,8 +156,8 @@ impl TerminalCli {
         loop {
             println!();
             println!("{BOLD_WHITE}Select Mode:{RESET}");
-            println!("  {YELLOW}[1]{RESET} 📱 Auto-Connect Wizard (PC ↔ Phone: USB → BLE → Wi-Fi)");
-            println!("  {YELLOW}[2]{RESET} 💻 PC-to-PC Wireless Mode (Bluetooth Discovery → Fast Wi-Fi Hotspot)");
+            println!("  {YELLOW}[1]{RESET} 📱 Auto-Connect Wizard (PC ↔ Phone: USB + Wi-Fi Direct)");
+            println!("  {YELLOW}[2]{RESET} 💻 PC-to-PC Wireless Mode (Wi-Fi discovery)");
             println!("  {YELLOW}[3]{RESET} 🔧 Network Info");
             println!("  {YELLOW}[q]{RESET} Quit");
 
@@ -369,94 +348,12 @@ impl TerminalCli {
         let mut wifi_ip: Option<String> = None;
 
         if pc_wifi_on {
-            // ── Phase 2: Select Best Hotspot Hardware ───────────────────
-            print_phase_header(3, "Optimal Hotspot Host Selection");
-            let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
-            let (best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, phone_caps_ref).await;
-
-            println!("  {}", host_reason);
-            match best_host {
-                hotspot::HotspotHostChoice::Pc => {
-                    print_ok("PC Wi-Fi hardware selected as Primary 5GHz Hotspot Host");
-                }
-                hotspot::HotspotHostChoice::Phone => {
-                    print_ok("Phone Wi-Fi hardware selected as Primary 5GHz Hotspot Host (Quick Share Direct)");
-                }
-            }
-
-            // ── Phase 3: Create 5GHz Hotspot & Share Credentials over USB ──
-            print_phase_header(4, "Creating 5GHz Hotspot & Sharing over USB");
             let (ssid, password) = hotspot::generate_hotspot_credentials();
-
-            if best_host == hotspot::HotspotHostChoice::Pc {
-                println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
-                let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
-                match hotspot_res {
-                    Ok(info) => {
-                        print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
-
-                        with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                            tokio::time::sleep(Duration::from_millis(1000)).await;
-                        }).await;
-
-                        println!("  Sending hotspot credentials to phone through USB...");
-                        let sent = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
-                        if sent {
-                            print_ok("Phone received credentials via USB and connecting to 5GHz Hotspot...");
-                            let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
-                                for _ in 0..30 {
-                                    if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
-                                        return Some(ip);
-                                    }
-                                    tokio::time::sleep(Duration::from_millis(300)).await;
-                                }
-                                None
-                            }).await;
-
-                            if let Some(ip) = client_ip {
-                                if self.http_probe(&ip, 54321).await {
-                                    let synack = self.pair_handshake_target(&ip, 54321).await;
-                                    if synack {
-                                        print_ok(&format!("Phone connected & paired on 5GHz Hotspot! IP: {}", ip));
-                                        wifi_ip = Some(ip);
-                                        wifi_ready = true;
-                                    }
-                                }
-                            } else {
-                                print_warn("Phone did not associate to 5GHz Wi-Fi. Continuing with Turbo USB...");
-                            }
-                        } else {
-                            print_warn("Could not send credentials to phone via USB.");
-                        }
-                    }
-                    Err(e) => {
-                        print_warn(&format!("PC Hotspot creation: {}. Trying phone hotspot...", e));
-                        if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
-                            print_ok(&format!("Phone Hotspot started via USB: {}", p_ssid));
-                            println!("  Connecting PC to phone hotspot...");
-                            let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                            let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot...", async {
-                                hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
-                            }).await;
-                            if let Some(target) = detected_ip {
-                                let verified = with_spinner("Verifying Wi-Fi link & pairing with phone...", async {
-                                    self.verify_and_pair_wifi_with_retries(&target, 54321, 15).await
-                                }).await;
-                                if verified {
-                                    print_ok(&format!("Direct 5GHz Wi-Fi link verified & paired: {}:54321", target));
-                                    wifi_ip = Some(target);
-                                    wifi_ready = true;
-                                } else {
-                                    print_warn(&format!("Could not reach phone via Wi-Fi ({}:54321). Wi-Fi disabled.", target));
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
+            {
                 // Phone is chosen as best host
                 println!("  Requesting Phone to start 5GHz Wi-Fi Direct / Hotspot over USB...");
-                if let Some((p_ssid, p_pass, p_gw)) = self.send_start_hotspot_over_usb(&usb_ip, usb_port).await {
+                let result = hotspot::request_phone_hotspot(&usb_ip, usb_port).await;
+                if let hotspot::PhoneHotspot::Ready(p_ssid, p_pass, p_gw) = result {
                     print_ok(&format!("Phone 5GHz AP Active: SSID='{}'", p_ssid));
                     println!("  Connecting PC to phone 5GHz hotspot...");
                     let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
@@ -477,7 +374,7 @@ impl TerminalCli {
                     } else {
                         print_warn("PC Wi-Fi did not associate to phone hotspot. Continuing in pure USB mode.");
                     }
-                } else {
+                } else if matches!(result, hotspot::PhoneHotspot::Unavailable) {
                     print_warn("Phone hotspot start failed over USB. Trying PC Hotspot fallback...");
                     if let Ok(info) = hotspot::create_hotspot(&ssid, &password, true).await {
                         let sent = self.send_wifi_connect_over_usb(&usb_ip, usb_port, &info.ssid, &info.password).await;
@@ -527,7 +424,7 @@ impl TerminalCli {
     }
 
     /// ═══════════════════════════════════════════════════════════════
-    ///  WIRELESS FALLBACK WIZARD (No USB: BLE Scan + Wi-Fi Direct / 5GHz Hotspot)
+    ///  WIRELESS FALLBACK WIZARD (Wi-Fi Direct discovery)
     /// ═══════════════════════════════════════════════════════════════
     async fn run_wireless_direct_wizard(&self) {
         // Ensure PC Wi-Fi is ON before wireless scan
@@ -552,245 +449,44 @@ impl TerminalCli {
             }
         }
 
-        print_phase_header(1, "Wireless Bluetooth & Wi-Fi Scan (No USB Connected)");
-        println!("  Scanning for nearby ShareDash devices via Bluetooth & Wi-Fi...");
-
-        let mut devices = self.phase1_ble_scan().await;
-
-        // If BLE returned no devices, also check for peers discovered via UDP / Wi-Fi
-        if devices.is_empty() {
-            let active_udp = self.state.discovery.get_active_peers();
-            for p in active_udp {
-                if !devices.iter().any(|d| d.name == p.friendly_name) {
-                    devices.push(BleDevice {
-                        name: p.friendly_name.clone(),
-                        address: p.remote_addr.ip().to_string(),
-                        rssi: -40,
-                        peripheral_id: p.device_id.clone(),
-                    });
-                }
-            }
-        }
-
-        if devices.is_empty() {
-            print_fail("No ShareDash devices found via Bluetooth or Wi-Fi.");
-            println!("  {YELLOW}Make sure Bluetooth & Wi-Fi are turned ON on both PC and Phone, and the ShareDash app is open.{RESET}");
+        println!("  Join the Wi-Fi Direct network shown on the phone, then press Enter.");
+        let mut line = String::new();
+        let _ = io::stdin().read_line(&mut line);
+        let phones: Vec<_> = self.state.discovery.get_active_peers().into_iter()
+            .filter(|peer| peer.os_name.to_lowercase().contains("android"))
+            .collect();
+        if phones.is_empty() {
+            print_fail("No phone found. Open ShareDash on the phone and check the Wi-Fi connection.");
             return;
         }
-
-        // Show device table
-        println!();
-        println!("  Found {} device(s):", devices.len());
-        let headers = &["#", "Device Name", "BLE Addr", "RSSI", "Status"];
-        let rows: Vec<Vec<String>> = devices
-            .iter()
-            .enumerate()
-            .map(|(i, d)| {
-                vec![
-                    format!("{}", i + 1),
-                    d.name.clone(),
-                    d.address.chars().take(8).collect(),
-                    format!("{}", d.rssi),
-                    format!("{GREEN}ShareDash ✔{RESET}"),
-                ]
-            })
-            .collect();
-        print_table(headers, &rows);
-
-        let selected_idx = if devices.len() == 1 {
-            println!("  Auto-selecting only device: {BOLD}{}{RESET}", devices[0].name);
-            0
-        } else {
-            let choice = prompt_choice(
-                &format!("Select device [1-{}]: ", devices.len()),
-                1,
-                devices.len(),
-            )
-            .await;
-            choice - 1
-        };
-
-        let selected_device = &devices[selected_idx];
-        print_ok(&format!("Selected: {}", selected_device.name));
-
-        // ── Phase 2: Hardware & Internet Connection Inspection ──────────
-        print_phase_header(2, "Hardware & Hotspot Readiness Check");
-        println!("  Inspecting PC network connection and querying phone capabilities...");
-
-        let pc_has_internet = hotspot::check_pc_internet_connection().await;
-        let pc_caps = hotspot::detect_pc_wifi_caps().await;
-        let phone_caps = self.phase2_wifi_caps(&selected_device.peripheral_id).await;
-
-        println!("  Connection & Hardware Status:");
-        print_tree_item(
-            "PC Internet",
-            if pc_has_internet { "Connected (Active Profile)" } else { "No Active Internet Connection" },
-            false,
-        );
-        print_tree_item("PC Wi-Fi", &format!("{} (PHY: {} Mbps)", pc_caps.wifi_standard, pc_caps.max_phy_rate_mbps), false);
-        if let Some(ref p_caps) = phone_caps {
-            print_tree_item("Phone Wi-Fi", &format!("{} (PHY: {} Mbps)", p_caps.wifi_standard, p_caps.max_phy_rate_mbps), true);
-        } else {
-            print_tree_item("Phone Wi-Fi", "Wi-Fi 6 (802.11ax) (PHY: 1200 Mbps)", true);
+        for (index, phone) in phones.iter().enumerate() {
+            println!("  [{}] {} ({})", index + 1, phone.friendly_name, phone.remote_addr.ip());
         }
-
-        let phone_caps_ref = phone_caps.as_ref().unwrap_or(&pc_caps);
-        let (best_host, host_reason) = hotspot::select_optimal_hotspot_host(&pc_caps, phone_caps_ref).await;
-
-        println!();
-        println!("  Decision: {BOLD}{}{RESET}", host_reason);
-
-        // ── Phase 3: 5GHz Hotspot Creation & Credential Sharing ───────
-        print_phase_header(3, "5GHz Hotspot Provisioning & Auto-Connect");
-        let mut wifi_ip: Option<String> = None;
-
-        if best_host == hotspot::HotspotHostChoice::Phone {
-            println!("  📡 Requesting phone to create maximum-config 5GHz Hotspot / Wi-Fi Direct...");
-
-            let creds = with_spinner("Waiting for phone 5GHz Hotspot initialization over Bluetooth...", async {
-                self.state.ble_discovery.request_phone_start_hotspot().await
-            }).await;
-
-            if let Some((p_ssid, p_pass, p_gw)) = creds {
-                print_ok(&format!("Phone 5GHz Hotspot Active! SSID='{}'", p_ssid));
-                println!("  ⚡ Auto-connecting PC Wi-Fi to phone hotspot: {BOLD}{}{RESET}...", p_ssid);
-
-                let connected = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await.unwrap_or(false);
-                if connected {
-                    print_ok("WLAN profile configured and association command sent.");
-                } else {
-                    print_warn("WLAN connect command sent. Waiting for DHCP network binding...");
-                }
-
-                let detected_ip = with_spinner("Waiting for PC to acquire IP on phone hotspot subnet...", async {
-                    hotspot::wait_for_phone_hotspot_interface(Duration::from_secs(35), &p_ssid, Some(&p_gw)).await
-                }).await;
-
-                if let Some(target_ip) = detected_ip {
-                    let verified = with_spinner("Verifying Wi-Fi link & pairing with phone...", async {
-                        self.verify_and_pair_wifi_with_retries(&target_ip, 54321, 15).await
-                    }).await;
-                    if verified {
-                        print_ok(&format!("Direct Wi-Fi link verified & paired: {}:54321", target_ip));
-                        wifi_ip = Some(target_ip);
-                    } else {
-                        print_fail(&format!("Could not reach phone at {}:54321 over Wi-Fi", target_ip));
-                        wifi_ip = None;
-                    }
-                } else {
-                    print_fail("PC Wi-Fi did not associate to phone hotspot.");
-                    wifi_ip = None;
-                }
-            } else {
-                print_warn("Phone did not return hotspot credentials over BLE. Checking existing network paths...");
-                let mut candidate_ips: Vec<String> = vec!["192.168.49.1".to_string(), "192.168.43.1".to_string()];
-                for peer in self.state.discovery.get_active_peers() {
-                    let ip = peer.remote_addr.ip().to_string();
-                    if ip != "127.0.0.1" && !candidate_ips.contains(&ip) {
-                        candidate_ips.push(ip);
-                    }
-                }
-                for ip in &candidate_ips {
-                    if self.http_probe(ip, 54321).await {
-                        wifi_ip = Some(ip.clone());
-                        break;
-                    }
-                }
-            }
-        } else {
-            // PC is chosen as best host
-            let (ssid, password) = hotspot::generate_hotspot_credentials();
-            println!("  Starting PC 5GHz Hotspot: {BOLD}{ssid}{RESET}...");
-            let hotspot_res = hotspot::create_hotspot(&ssid, &password, true).await;
-            match hotspot_res {
-                Ok(info) => {
-                    print_ok(&format!("PC Hotspot Active (SSID: {}, Band: {})", info.ssid, info.band));
-
-                    with_spinner("Initializing PC 5GHz Wi-Fi Radio & DHCP broadcast...", async {
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                    }).await;
-
-                    println!("  Sending hotspot credentials to phone via Bluetooth GATT...");
-                    let sent = self.phase4_connect_phone(&selected_device.peripheral_id, &info.ssid, &info.password).await;
-                    if sent {
-                        print_ok("Phone received credentials via BLE and connecting to 5GHz Hotspot...");
-                        let client_ip = with_spinner("Waiting for phone on 5GHz Wi-Fi...", async {
-                            for _ in 0..30 {
-                                if let Some(ip) = hotspot::fast_scan_hotspot_clients(54321).await {
-                                    return Some(ip);
-                                }
-                                tokio::time::sleep(Duration::from_millis(300)).await;
-                            }
-                            None
-                        }).await;
-
-                        if let Some(ip) = client_ip {
-                            print_ok(&format!("Phone connected to 5GHz Hotspot! IP: {}", ip));
-                            wifi_ip = Some(ip);
-                        } else {
-                            print_warn("Phone did not associate to 5GHz Wi-Fi within timeout.");
-                        }
-                    } else {
-                        print_warn("Could not send credentials over BLE.");
-                    }
-                }
-                Err(e) => {
-                    print_warn(&format!("PC Hotspot creation failed: {}. Requesting phone hotspot...", e));
-                    if let Some((p_ssid, p_pass, p_gw)) = self.state.ble_discovery.request_phone_start_hotspot().await {
-                        print_ok(&format!("Phone Hotspot Started: SSID='{}'", p_ssid));
-                        let _ = hotspot::connect_to_phone_hotspot(&p_ssid, &p_pass).await;
-                        wifi_ip = Some(p_gw);
-                    }
-                }
-            }
-        }
-
-        // ── Phase 4: 3-Way Handshake ─────────────────────────────────
-        print_phase_header(4, "Wi-Fi 3-Way Handshake (Direct Channel)");
-        let wifi_ready = if let Some(target_wifi_ip) = wifi_ip.as_ref() {
-            let syn_ok = self.http_probe(target_wifi_ip, 54321).await;
-            print_step_result(&format!("SYN  → {}:54321", target_wifi_ip), syn_ok);
-
-            if syn_ok {
-                let synack_ok = self.pair_handshake(target_wifi_ip).await;
-                print_step_result(&format!("SYN-ACK ← {}", selected_device.name), synack_ok);
-
-                if synack_ok {
-                    print_step_result("ACK  → Pair Confirmed", true);
-                    println!("  🔒 Wi-Fi Direct / Hotspot Channel {GREEN}READY{RESET} (AES-256-GCM)");
-                    true
-                } else {
-                    wifi_ip = None;
-                    false
-                }
-            } else {
-                print_fail(&format!("Could not reach phone at {}:54321", target_wifi_ip));
-                wifi_ip = None;
-                false
-            }
-        } else {
-            print_fail("Wi-Fi Direct channel not established.");
-            false
+        let index = if phones.len() == 1 { 0 } else {
+            prompt_choice("Select phone: ", 1, phones.len()).await - 1
         };
-
-        self.send_file_multipath_loop(wifi_ready, wifi_ip, false, String::new(), 54325, false).await;
+        let phone = &phones[index];
+        let ip = phone.remote_addr.ip().to_string();
+        if self.verify_and_pair_wifi_with_retries(&ip, phone.server_port, 3).await {
+            self.send_file_multipath_loop(true, Some(ip), false, String::new(), phone.server_port, false).await;
+        }
     }
 
     /// ═══════════════════════════════════════════════════════════════
     ///  PC-TO-PC PURE WIRELESS WIZARD
-    ///  (Bluetooth Discovery & Handshake ➔ Optimal Wi-Fi Hotspot)
+    ///  (Network Discovery & Handshake ➔ Optimal Wi-Fi Hotspot)
     /// ═══════════════════════════════════════════════════════════════
     async fn run_pc_to_pc_wizard(&self) {
         println!();
         println!("{BOLD_CYAN}╔════════════════════════════════════════════════════════════════╗{RESET}");
         println!("{BOLD_CYAN}║{RESET}  {BOLD_WHITE}💻 ShareDash PC-to-PC Wireless Mode{RESET}                           {BOLD_CYAN}║{RESET}");
-        println!("{BOLD_CYAN}║{RESET}  {GRAY}Bluetooth Discovery ➔ Dynamic Wi-Fi Hotspot (Pure Wireless){RESET}   {BOLD_CYAN}║{RESET}");
+        println!("{BOLD_CYAN}║{RESET}  {GRAY}Network Discovery ➔ Dynamic Wi-Fi Hotspot (Pure Wireless){RESET}   {BOLD_CYAN}║{RESET}");
         println!("{BOLD_CYAN}╚════════════════════════════════════════════════════════════════╝{RESET}");
 
         // ═══════════════════════════════════════════════════════════════
         //  STEP 1: LOCAL HARDWARE & WI-FI RADIO VERIFICATION
         // ═══════════════════════════════════════════════════════════════
-        print_phase_header(1, "Local Wi-Fi & Bluetooth Radio Verification");
+        print_phase_header(1, "Local Wi-Fi Radio");
 
         hotspot::ensure_pc_wifi_adapter_enabled().await;
         let pc_wifi_on = hotspot::check_pc_wifi_adapter_enabled().await;
@@ -808,37 +504,8 @@ impl TerminalCli {
             false,
         );
 
-        let bt_available = crate::discovery::bluetooth::BleDiscovery::check_available().await;
-        print_tree_item(
-            "Bluetooth Radio",
-            if bt_available { "Ready (BLE 4.0+ Active)" } else { "Unavailable / Limited" },
-            true,
-        );
-
-        // ═══════════════════════════════════════════════════════════════
-        //  STEP 2: BLUETOOTH LE ADVERTISING & NEARBY PC DISCOVERY
-        // ═══════════════════════════════════════════════════════════════
-        print_phase_header(2, "Bluetooth LE Discovery & Radar Scan");
-
-        // Start broadcasting our presence over Bluetooth LE
-        let advertiser = crate::discovery::BleAdvertiser::new();
-        let adv_started = advertiser.start_advertising(
-            &self.state.device_name,
-            self.state.server_port,
-            Some(&pc_caps),
-        ).unwrap_or(false);
-
-        if adv_started {
-            print_ok(&format!(
-                "Broadcasting Bluetooth LE beacon: {BOLD}{}{RESET} (Port: {})",
-                self.state.device_name, self.state.server_port
-            ));
-        } else {
-            tracing::warn!("BLE Advertiser could not start; continuing with scan and network discovery.");
-        }
-
-        println!("  {CYAN}Scanning for nearby ShareDash PCs over Bluetooth & Wi-Fi...{RESET}");
-        println!("  {GRAY}(Press [Enter] to refresh scan, or enter IP:port to connect directly){RESET}");
+        print_phase_header(2, "Discover nearby PCs");
+        println!("  Enter a peer IP and port to connect manually, or wait for discovery.");
 
         let stdin_handle = tokio::spawn(async {
             let mut line = String::new();
@@ -850,31 +517,10 @@ impl TerminalCli {
         let mut target_ip = String::new();
         let mut target_port: u16 = 54321;
         let mut remote_caps: Option<WifiCapsInfo> = None;
-        let mut discovery_method = "Bluetooth LE";
+        let mut discovery_method = "Wi-Fi";
 
         let mut ticker = 0;
         loop {
-            // 1. Check BLE-discovered devices
-            let ble_peers = self.state.ble_discovery.get_ble_peers();
-            if let Some(peer) = ble_peers.into_iter().find(|p| {
-                p.os_name == "Windows"
-                    || p.friendly_name.contains("PC")
-                    || p.friendly_name.contains("ShareDash")
-                    || p.friendly_name.starts_with("SD-")
-            }) {
-                discovered_pc_name = peer.friendly_name;
-                target_port = peer.server_port;
-                remote_caps = peer.wifi_caps;
-                if peer.remote_addr.ip() != std::net::Ipv4Addr::new(0, 0, 0, 0)
-                    && peer.remote_addr.ip() != std::net::Ipv4Addr::new(127, 0, 0, 1)
-                {
-                    target_ip = peer.remote_addr.ip().to_string();
-                }
-                discovery_method = "Bluetooth LE Beacon";
-                stdin_handle.abort();
-                break;
-            }
-
             // 2. Check mDNS / UDP network peers
             let net_peers = self.state.discovery.get_active_peers();
             if let Some(peer) = net_peers.into_iter().find(|p| {
@@ -917,17 +563,15 @@ impl TerminalCli {
 
             ticker += 1;
             if ticker % 2 == 0 {
-                draw_spinner_frame("Listening for nearby ShareDash PCs (Bluetooth LE)...", ticker / 2);
+                draw_spinner_frame("Listening for nearby ShareDash PCs (Wi-Fi)...", ticker / 2);
             }
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         print!("\r{}\r", " ".repeat(80));
 
-        // Stop advertising now that discovery is progressing
-        advertiser.stop_advertising();
 
         if discovered_pc_name.is_empty() && target_ip.is_empty() {
-            print_warn("No nearby PC discovered over Bluetooth. Please ensure ShareDash is open on the other PC in Option [2].");
+            print_warn("No nearby PC discovered over Wi-Fi. Please ensure ShareDash is open on the other PC in Option [2].");
             return;
         }
 
@@ -941,7 +585,7 @@ impl TerminalCli {
         // ═══════════════════════════════════════════════════════════════
         print_phase_header(3, "Wi-Fi Compatibility & Optimal Band Selection");
 
-        // If remote caps were not in BLE payload, query via HTTP if IP is already available
+        // If remote caps were not in the discovery beacon, query via HTTP if IP is already available
         if remote_caps.is_none() && !target_ip.is_empty() {
             remote_caps = self.query_phone_wifi_caps_http(&target_ip, target_port).await;
         }
@@ -1202,27 +846,6 @@ impl TerminalCli {
         false
     }
 
-    async fn send_start_hotspot_over_usb(&self, ip: &str, port: u16) -> Option<(String, String, String)> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .ok()?;
-        let url = format!("http://{}:{}/api/v1/hotspot/start", ip, port);
-        for _ in 0..3 {
-            if let Ok(resp) = client.post(&url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
-                        let ssid = json.get("ssid")?.as_str()?.to_string();
-                        let password = json.get("password")?.as_str()?.to_string();
-                        let gw = json.get("gateway").and_then(|g| g.as_str()).unwrap_or("192.168.43.1").to_string();
-                        return Some((ssid, password, gw));
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(600)).await;
-        }
-        None
-    }
 
     async fn pair_handshake_target(&self, ip: &str, port: u16) -> bool {
         let client = match reqwest::Client::builder()
@@ -1481,105 +1104,6 @@ impl TerminalCli {
     //  PHASE IMPLEMENTATIONS
     // ═══════════════════════════════════════════════════════════════
 
-    /// Phase 1: BLE scan using btleplug.
-    async fn phase1_ble_scan(&self) -> Vec<BleDevice> {
-        let mut devices = Vec::new();
-
-        // Animated scan progress bar
-        animated_scan_progress(Duration::from_secs(4)).await;
-
-        // Collect from running BLE discovery
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            if !devices.iter().any(|d: &BleDevice| d.name == peer.friendly_name) {
-                devices.push(BleDevice {
-                    name: peer.friendly_name.clone(),
-                    address: peer.device_id.clone(),
-                    rssi: -50,
-                    peripheral_id: peer.device_id.clone(),
-                });
-            }
-        }
-
-        // Direct adapter peripherals fallback check
-        if devices.is_empty() {
-            if let Some(adapter) = self.state.ble_discovery.get_adapter() {
-                let sd_uuid = uuid::Uuid::parse_str(crate::discovery::bluetooth::SHAREDASH_BLE_SERVICE_UUID).unwrap();
-                if let Ok(peripherals) = adapter.peripherals().await {
-                    for p in &peripherals {
-                        if let Ok(Some(props)) = p.properties().await {
-                            let matches = props.services.iter().any(|s| *s == sd_uuid)
-                                || props.service_data.contains_key(&sd_uuid)
-                                || props.local_name.as_ref().map(|n: &String| n.contains("ShareDash") || n.contains("A56") || n.contains("Pixel") || n.contains("Galaxy") || n.contains("Android") || n.contains("Sam")).unwrap_or(false);
-                            if matches {
-                                let name = props.local_name.unwrap_or_else(|| "Android Device".to_string());
-                                let id = format!("{:?}", p.id());
-                                if !devices.iter().any(|d: &BleDevice| d.name == name) {
-                                    devices.push(BleDevice {
-                                        name,
-                                        address: id.clone(),
-                                        rssi: props.rssi.unwrap_or(-50),
-                                        peripheral_id: id,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        devices
-    }
-
-    /// Phase 2: Read Wi-Fi capabilities from phone via BLE advertisement or GATT.
-    async fn phase2_wifi_caps(&self, peripheral_id: &str) -> Option<WifiCapsInfo> {
-        // 1. Check if the device has decoded Wi-Fi capabilities from its BLE advertisement beacon
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            if (peer.device_id == peripheral_id || peer.friendly_name == peripheral_id) && peer.wifi_caps.is_some() {
-                return peer.wifi_caps;
-            }
-        }
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            if let Some(ref caps) = peer.wifi_caps {
-                return Some(caps.clone());
-            }
-        }
-
-        // 2. Try GATT read via the active adapter
-        self.state.ble_discovery.read_wifi_capabilities().await
-    }
-
-    /// Phase 4: Send Wi-Fi connect command to phone via BLE GATT.
-    async fn phase4_connect_phone(
-        &self,
-        _peripheral_id: &str,
-        ssid: &str,
-        password: &str,
-    ) -> bool {
-        let cmd = serde_json::json!({
-            "cmd": "wifi_connect",
-            "ssid": ssid,
-            "password": password
-        });
-
-        self.send_ble_command(&cmd.to_string()).await
-    }
-
-    /// Phase 7: Send USB tether command via BLE GATT.
-    #[allow(dead_code)]
-    async fn phase7_usb_tether(&self, _peripheral_id: &str) -> bool {
-        let cmd = serde_json::json!({
-            "cmd": "usb_tether_on"
-        });
-
-        self.send_ble_command(&cmd.to_string()).await
-    }
-
-    /// Generic: Send a command string to the ShareDash BLE peripheral.
-    async fn send_ble_command(&self, cmd_json: &str) -> bool {
-        self.state.ble_discovery.send_gatt_command(cmd_json).await
-    }
-
     // ═══════════════════════════════════════════════════════════════
     //  STREAMING DYNAMIC MULTIPATH PIPELINE (39+ MB/s)
     // ═══════════════════════════════════════════════════════════════
@@ -1774,44 +1298,6 @@ impl TerminalCli {
     }
 
     /// Execute the 3-way handshake pairing sequence.
-    async fn pair_handshake(&self, target_ip: &str) -> bool {
-        let pin = format!("{:06}", rand::random::<u32>() % 1000000);
-
-        let body = IncomingPairRequest {
-            initiator_device_id: self.state.device_id.clone(),
-            initiator_name: self.state.device_name.clone(),
-            initiator_ip: local_ip_address::local_ip()
-                .map(|i| i.to_string())
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
-            initiator_port: self.state.server_port,
-            pin_code: pin.clone(),
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            status: "PENDING".to_string(),
-            timestamp_ms: chrono::Utc::now().timestamp_millis(),
-        };
-
-        *self.state.outgoing_pair.lock() = Some(OutgoingPairInfo {
-            target_device_id: "".to_string(),
-            target_ip: target_ip.to_string(),
-            target_port: 54321,
-            pin: pin.clone(),
-            initiated_at: chrono::Utc::now().timestamp_millis(),
-        });
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap_or_default();
-
-        let url = format!("http://{}:54321/api/v1/pair/request", target_ip);
-        match client.post(&url).json(&body).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                *self.state.active_paired_peer.lock() = Some(target_ip.to_string());
-                true
-            }
-            _ => false,
-        }
-    }
 
     /// Setup ADB port forwarding for USB channel.
     async fn setup_adb_forward(&self) -> bool {
@@ -1959,21 +1445,6 @@ impl TerminalCli {
                     os: peer.os_name,
                     transport: transport.to_string(),
                     status: "Discovered".to_string(),
-                });
-            }
-        }
-
-        // BLE
-        for peer in self.state.ble_discovery.get_ble_peers() {
-            let ip_str = peer.remote_addr.ip().to_string();
-            if ip_str != "127.0.0.1" && !discovered.iter().any(|d| d.ip == ip_str) {
-                discovered.push(DiscoveredItem {
-                    name: peer.friendly_name,
-                    ip: ip_str,
-                    port: peer.server_port,
-                    os: peer.os_name,
-                    transport: "📶 BLE + Wi-Fi".to_string(),
-                    status: "BLE".to_string(),
                 });
             }
         }
